@@ -16,8 +16,32 @@ const Side = z.object({
     if (participant.value === undefined) ctx.addIssue({
       code: "custom", path: ["participants", index, "value"], message: "Enter a value for each selected person",
     });
+    if ((side.method === "percentage" || side.method === "shares") &&
+      participant.value !== undefined && groupWeightUnits(participant.value) === null) ctx.addIssue({
+      code: "custom", path: ["participants", index, "value"], message: "Use at most 7 decimal places",
+    });
   });
 });
+
+export const GROUP_BALANCE_WEIGHT_SCALE = 10_000_000;
+
+function groupWeightUnits(value: number): number | null {
+  if (!Number.isFinite(value) || value < 0 ||
+    !Number.isSafeInteger(Math.round(value * GROUP_BALANCE_WEIGHT_SCALE)) ||
+    Number(value.toFixed(7)) !== value) return null;
+  return Math.round(value * GROUP_BALANCE_WEIGHT_SCALE);
+}
+
+export function parseGroupWeight(input: string): number | null {
+  const normalized = input.trim().replace(",", ".");
+  if (!/^\d+(?:\.\d{1,7})?$/.test(normalized)) return null;
+  const value = Number(normalized);
+  return groupWeightUnits(value) === null ? null : value;
+}
+
+export function formatGroupWeight(value: number): string {
+  return groupWeightUnits(value) === null ? String(value) : value.toFixed(7).replace(/\.?0+$/, "");
+}
 
 export const GROUP_BALANCE_RECORD_CONFLICT = "This group balance changed. Close and reopen it before editing";
 
@@ -56,6 +80,18 @@ export function computeGroupObligation(input: GroupObligationInput, memberIds: S
     const ids = participants.map((p) => p.userId);
     if (new Set(ids).size !== ids.length) invalidInput("Duplicate participants");
     if (ids.some((id) => !memberIds.has(id))) invalidInput("All participants must be group members");
+    if (method === "percentage" || method === "shares") {
+      let totalUnits = 0;
+      for (const participant of participants) {
+        const units = groupWeightUnits(participant.value ?? NaN);
+        if (units === null) invalidInput("Use at most 7 decimal places");
+        totalUnits += units;
+        if (!Number.isSafeInteger(totalUnits)) invalidInput("Total weight is too large");
+      }
+      if (method === "percentage" && totalUnits !== 100 * GROUP_BALANCE_WEIGHT_SCALE) {
+        invalidInput("Percentages must add up to 100");
+      }
+    }
     const prior = saved?.[which];
     const unchanged = saved?.amountCents === input.amountCents && prior?.method === method &&
       prior.participants.length === participants.length && prior.participants.every((p) =>

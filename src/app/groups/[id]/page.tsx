@@ -60,9 +60,10 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
   const [loadingGroupBalances, setLoadingGroupBalances] = useState(false);
   const { data: groupBalancesData, reloadFresh: reloadGroupBalancesFresh } = useApiData<GroupBalancePage>(
     `/api/groups/${groupId}/group-balances?limit=50`, 0, { sync: false });
-  useSync((current, previous) => {
-    if (current.activityCursor !== previous.activityCursor) reloadGroupBalancesFresh();
-  });
+  useSync((_current, _previous, initial) => {
+    reloadGroupBalancesFresh();
+    if (initial) refreshBalancePreview();
+  }, true);
   const observedBalanceChange = useRef<{ groupId: number; cursor: number } | null>(null);
   useEffect(() => {
     if (!groupBalancesData) return;

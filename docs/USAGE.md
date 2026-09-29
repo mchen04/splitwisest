@@ -41,10 +41,12 @@
 - Open a group’s **Balances** tab and choose **Add group balance** to record shared obligations.
 - Enter a description and total in the group currency. Choose who owes and who should receive.
 - Split each side by Equal, Exact amounts, Percentages, or Shares. Enter a value for every selected person with a weighted method. Zero is allowed. Both sides must match the total.
+- Percentages and Shares allow up to seven decimal places. Percentages must add up to exactly 100% at that precision.
 - The preview shows each person’s net change and the resulting group debts before you save. On edit, it includes people removed from the new split.
 - If another member changes the group before you save, the form stays open and refreshes the group balance preview. Review it before retrying. If the entry you are editing changed, the preview and Save action stop until you close and reopen it.
 - One person can appear on both sides. Only the difference changes their balance.
 - Edit or delete a group balance from the same tab. This does not record a payment.
+- A group balance form stays open while its save is in progress.
 - Before removing a member, edit or delete every group balance that includes them. This also applies to zero shares and net-zero entries.
 - The **group balance strip** shows each member's net. **Suggested settle-up** shows the fewest payments that clear the group.
 - The **Balances page** shows every friend relationship across all groups and what should happen next.

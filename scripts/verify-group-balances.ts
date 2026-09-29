@@ -79,6 +79,12 @@ async function main() {
     { ...body, receives: { method: "equal", participants: [{ userId: outsider.id }] } },
     { ...body, receives: { method: "equal", participants: [{ userId: matthew.id }, { userId: matthew.id }] } },
     { ...body, receives: { method: "percentage", participants: [{ userId: matthew.id, value: 99 }] } },
+    { ...body, amountCents: 100_000_000_000, receives: { method: "percentage", participants: [
+      { userId: matthew.id, value: 50 }, { userId: michael.id, value: 50.0009 },
+    ] } },
+    { ...body, receives: { method: "shares", participants: [
+      { userId: matthew.id, value: 0.00000001 }, { userId: michael.id, value: 1 },
+    ] } },
     ...(["exact", "percentage", "shares"] as const).map((method) => ({ ...body,
       receives: { method, participants: [
         { userId: matthew.id, value: method === "exact" ? 12000 : method === "percentage" ? 100 : 1 },

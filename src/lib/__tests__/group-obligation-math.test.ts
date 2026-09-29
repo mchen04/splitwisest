@@ -85,6 +85,31 @@ describe("group obligations", () => {
     ]);
   });
 
+  it("rejects percentage drift and excess weighted precision at the API boundary", () => {
+    const base = { title: "Precise", amountCents: 100_000_000_000, owes: equal(1),
+      receives: { method: "percentage", participants: [
+        { userId: 2, value: 50 }, { userId: 3, value: 50.0009 },
+      ] },
+    };
+    expect(() => computeGroupObligation(GroupObligationBody.parse(base), members, "USD")).toThrow(/100/);
+    expect(() => computeGroupObligation(GroupObligationBody.parse({ ...base,
+      owes: base.receives, receives: equal(1),
+    }), members, "USD")).toThrow(/100/);
+    expect(GroupObligationBody.safeParse({ ...base, receives: { method: "percentage", participants: [
+      { userId: 2, value: 50.00000001 }, { userId: 3, value: 49.99999999 },
+    ] } }).success).toBe(false);
+    expect(GroupObligationBody.safeParse({ ...base, receives: { method: "shares", participants: [
+      { userId: 2, value: 0.00000001 }, { userId: 3, value: 1 },
+    ] } }).success).toBe(false);
+    const valid = computeGroupObligation(GroupObligationBody.parse({ ...base, receives: {
+      method: "percentage", participants: [{ userId: 2, value: 50.0000001 }, { userId: 3, value: 49.9999999 }],
+    } }), members, "USD");
+    expect([...valid.receives.values()].reduce((sum, cents) => sum + cents, 0)).toBe(base.amountCents);
+    expect(GroupObligationBody.safeParse({ ...base, receives: { method: "shares", participants: [
+      { userId: 2, value: 0.0000001 }, { userId: 3, value: 1 },
+    ] } }).success).toBe(true);
+  });
+
   it("rejects missing creditors, duplicates, outsiders, negative values, and mismatches", () => {
     const base = { title: "Bad", amountCents: 100, owes: equal(1), receives: equal(2) };
     expect(() => GroupObligationBody.parse({ ...base, receives: equal() })).toThrow();

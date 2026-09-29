@@ -291,9 +291,10 @@ export function useUnread(): Unread {
   return unread;
 }
 
-// Invokes onChange whenever a sync cursor advances. This is the realtime
-// backbone: cheap, serverless-friendly, no websockets to break.
-export function useSync(onChange: ((c: SyncCursors, prev: SyncCursors) => void) | undefined) {
+// Invokes onChange when a sync cursor advances. Scoped data can opt into every
+// response so a lower global activity ID cannot hide a later commit.
+export function useSync(onChange: ((c: SyncCursors, prev: SyncCursors, initial: boolean) => void) | undefined,
+  everyResponse = false) {
   const enabled = !!onChange;
   const last = useRef<SyncCursors | null>(null);
   const cb = useRef(onChange);
@@ -305,16 +306,16 @@ export function useSync(onChange: ((c: SyncCursors, prev: SyncCursors) => void) 
     return subscribeSync((c) => {
       const prev = last.current;
       last.current = c;
-      if (prev && (
+      if (everyResponse || prev && (
         c.activityCursor !== prev.activityCursor ||
         c.messageCursor !== prev.messageCursor ||
         c.nudgeCursor !== prev.nudgeCursor ||
         c.requestCursor !== prev.requestCursor
       )) {
-        cb.current?.(c, prev);
+        cb.current?.(c, prev ?? c, !prev);
       }
     });
-  }, [enabled]);
+  }, [enabled, everyResponse]);
 }
 
 // Fetches `path`, refreshes on every sync tick, and exposes a manual reload.

@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, Check, Users } from "lucide-react";
 import { api, ApiClientError, fmtMoney } from "@/lib/client";
 import { simplifyDebts } from "@/lib/money";
-import { computeGroupObligation, groupObligationDelta, parseGroupMoney, GROUP_BALANCE_RECORD_CONFLICT, type SavedGroupObligation } from "@/lib/group-obligation-math";
+import { computeGroupObligation, formatGroupWeight, groupObligationDelta, parseGroupMoney, parseGroupWeight, GROUP_BALANCE_RECORD_CONFLICT, type SavedGroupObligation } from "@/lib/group-obligation-math";
 import { currencyStep } from "@/lib/currencies";
 import { Button, ErrorNote, Field, Input, Modal } from "./ui";
 import { METHOD_LABELS, ParticipantSplit } from "./expense-splits";
@@ -34,7 +34,7 @@ function savedSide(saved: ExistingGroupBalance["owes"]): Side {
     method: saved.method,
     selected: new Set(saved.participants.map((p) => p.userId)),
     values: Object.fromEntries(saved.participants.map((p) => [p.userId,
-      saved.method === "exact" ? (p.shareCents / 100).toFixed(2) : String(p.value ?? ""),
+      saved.method === "exact" ? (p.shareCents / 100).toFixed(2) : p.value === null ? "" : formatGroupWeight(p.value),
     ])),
   };
 }
@@ -44,9 +44,10 @@ function sideInput(side: Side, members: Member[]) {
     if (side.method === "equal") return { userId: m.id };
     const raw = side.values[m.id]?.trim() ?? "";
     if (!raw) throw new Error(`Enter a value for ${m.displayName}`);
-    const value = side.method === "exact" ? parseGroupMoney(raw) : Number(raw.replace(",", "."));
-    if (value === null || !Number.isFinite(value) || value < 0 ||
-      (side.method !== "exact" && !/^\d+(?:[.,]\d+)?$/.test(raw))) throw new Error(`Enter a valid value for ${m.displayName}`);
+    const value = side.method === "exact" ? parseGroupMoney(raw) : parseGroupWeight(raw);
+    if (value === null && side.method !== "exact" && /^\d+[.,]\d+$/.test(raw) &&
+      raw.split(/[.,]/)[1].length > 7) throw new Error(`Use at most 7 decimal places for ${m.displayName}`);
+    if (value === null) throw new Error(`Enter a valid value for ${m.displayName}`);
     return { userId: m.id, value };
   });
   if (!participants.length) throw new Error("Select at least one person on each side");
@@ -72,6 +73,7 @@ export function GroupBalanceForm({ groupId, groupName, currency, members, meId, 
   const [receives, setReceives] = useState<Side>(() => initialSide([meId]));
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const saving = useRef(false);
   const [recordConflict, setRecordConflict] = useState(false);
 
   useEffect(() => {
@@ -84,6 +86,7 @@ export function GroupBalanceForm({ groupId, groupName, currency, members, meId, 
     setError(null);
     setRecordConflict(false);
     setBusy(false);
+    saving.current = false;
     // Membership sync must not clear a live draft.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, existing?.id]);
@@ -150,10 +153,12 @@ export function GroupBalanceForm({ groupId, groupName, currency, members, meId, 
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (saving.current) return;
     if (recordConflict) return setError(GROUP_BALANCE_RECORD_CONFLICT);
     setError(null);
     if (!title.trim()) return setError("Enter a description");
     if (!preview.body) return setError(preview.error ?? "Check the allocations");
+    saving.current = true;
     setBusy(true);
     try {
       if (existing) await api(`/api/group-balances/${existing.id}`, { method: "PATCH", body: preview.body });
@@ -164,12 +169,17 @@ export function GroupBalanceForm({ groupId, groupName, currency, members, meId, 
       setError(e instanceof ApiClientError ? e.message : "Could not save group balance");
       if (e instanceof ApiClientError && e.message === GROUP_BALANCE_RECORD_CONFLICT) setRecordConflict(true);
       else if (e instanceof ApiClientError && e.message.includes("Group balances changed")) onRefresh();
+      saving.current = false;
       setBusy(false);
     }
   }
 
+  function dismiss() {
+    if (!saving.current) onClose();
+  }
+
   return (
-    <Modal open={open} onClose={onClose} title={existing ? "Edit group balance" : "Add group balance"} wide>
+    <Modal open={open} onClose={dismiss} title={existing ? "Edit group balance" : "Add group balance"} closeDisabled={busy} wide>
       <form onSubmit={submit} className="space-y-4">
         <div className={`group-choice group-hue-${groupId % 6} flex items-center gap-2 rounded-xl bg-[var(--group-soft)] px-3 py-2 text-[var(--group-ink)]`}>
           <Users className="h-4 w-4" /> <span className="text-sm font-semibold">{groupName} · {currency}</span>
@@ -213,7 +223,7 @@ export function GroupBalanceForm({ groupId, groupName, currency, members, meId, 
         </p>}
         {!recordConflict && <ErrorNote message={error} />}
         <div className="sticky -bottom-4 -mx-4 -mb-4 flex justify-end gap-2 rounded-b-2xl border-t border-line bg-card px-4 py-2.5">
-          <Button type="button" variant="secondary" onClick={onClose}>Cancel</Button>
+          <Button type="button" variant="secondary" onClick={dismiss} disabled={busy}>Cancel</Button>
           <Button type="submit" busy={busy} disabled={!preview.body || !title.trim()}>
             {existing ? "Save group balance" : "Create group balance"}
           </Button>
