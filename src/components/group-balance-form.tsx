@@ -164,7 +164,7 @@ export function GroupBalanceForm({ groupId, groupName, currency, members, meId, 
       });
   }, [open, existing]);
 
-  useSync(() => { if (open && existing) checkEditedRecord(); }, true);
+  useSync(checkEditedRecord, true);
   useEffect(() => {
     if (listPending) checkEditedRecord();
   }, [listPending, balanceListCursor, checkEditedRecord]);

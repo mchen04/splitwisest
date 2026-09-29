@@ -44,7 +44,7 @@
 - Percentages and Shares allow up to seven decimal places. Percentages must add up to exactly 100% at that precision.
 - The preview shows each person’s net change and the resulting group debts before you save. On edit, it includes people removed from the new split.
 - The resulting debts update after another member adds an expense or changes a group balance.
-- If another member changes the group before you save, the form stays open and refreshes the group balance preview. Review it before retrying. If the entry you are editing changed or was deleted, the preview and Save action stop before submission until you close and reopen it.
+- If the group changes while you edit, the preview refreshes. Review the new debts before saving. If someone changes or deletes that group balance, close and reopen it before editing again.
 - While an open edit checks for changes, its preview and Save action pause. A failed check shows Try again.
 - One person can appear on both sides. Only the difference changes their balance.
 - Edit or delete a group balance from the same tab. This does not record a payment.
