@@ -2,7 +2,14 @@
 
 ## Layers
 
-- `src/lib/` — pure logic and data access: `money.ts` (split math, debt simplification), `balances.ts` (balance queries), `settlements.ts` (settlement validation, visibility, authorization), `expenses.ts` (expense write paths + recurring materialization), `auth.ts` (passwords, sessions), `attachments.ts` (safe upload/download filenames), `fx.ts` (currency rates), `api.ts` (route error handling), `activity.ts` (log writes), `db.ts` (Neon client), `client.ts` (browser fetch + polling hooks).
+- `src/lib/` — pure logic and data access: `money.ts` (split math, debt
+  simplification), `balances.ts` (balance queries), `group-obligation-math.ts`
+  and `group-obligations.ts` (group balance allocations and writes),
+  `settlements.ts` (settlement validation, visibility, authorization),
+  `expenses.ts` (expense write paths + recurring materialization), `auth.ts`
+  (passwords, sessions), `attachments.ts` (safe upload/download filenames),
+  `fx.ts` (currency rates), `api.ts` (route error handling), `activity.ts`
+  (log writes), `db.ts` (Neon client), `client.ts` (browser fetch + polling hooks).
 - `src/app/api/` — REST route handlers. Every handler authenticates via session cookie and authorizes via group membership / friendship checks before touching data.
 - `src/app/` + `src/components/` — client-rendered UI. Pages fetch JSON from the API; no server components touch the DB directly.
 
