@@ -183,7 +183,7 @@ describe("group obligations", () => {
     }), members, "USD")).toThrow(/100/);
   });
 
-  it("requires an explicit value for every selected weighted participant", () => {
+  it("requires an explicit value for every selected non-equal participant", () => {
     const base = { title: "Weights", amountCents: 100, owes: equal(1), receives: equal(2) };
     for (const method of ["exact", "percentage", "shares"]) {
       expect(GroupObligationBody.safeParse({ ...base, receives: {

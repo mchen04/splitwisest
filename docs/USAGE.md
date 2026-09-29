@@ -40,7 +40,7 @@
 
 - Open a group’s **Balances** tab and choose **Add group balance** to record shared obligations.
 - Enter a description and total in the group currency. Choose who owes and who should receive.
-- Split each side by Equal, Exact amounts, Percentages, or Shares. Enter a value for every selected person with a weighted method. Zero is allowed. Both sides must match the total.
+- Split each side by Equal, Exact amounts, Percentages, or Shares. Enter a value for every selected person when using Exact amounts, Percentages, or Shares. Zero is allowed. Both sides must match the total.
 - Percentages and Shares allow up to seven decimal places. Percentages must add up to exactly 100% at that precision.
 - The preview shows each person’s net change and the resulting group debts before you save. On edit, it includes people removed from the new split.
 - The resulting debts update after another member adds an expense or changes a group balance.
