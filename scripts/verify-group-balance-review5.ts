@@ -157,6 +157,106 @@ async function main() {
       console.log("WebKit: preview matches API exact remainders");
       await context.close();
 
+      const preSaveId = await add("Remote edit before Save", 100, owesOther, receivesMatthew);
+      const preSaveRecord = await read(preSaveId);
+      const liveContext = await browser.newContext({ viewport: { width: 1280, height: 850 },
+        ignoreHTTPSErrors: true, serviceWorkers: "block" });
+      const livePage = await openGroup(liveContext, matthew.cookie, groupId);
+      await livePage.getByRole("button", { name: "Remote edit before Save", exact: true }).click();
+      const liveEdit = livePage.getByRole("dialog", { name: "Edit group balance" });
+      await liveEdit.getByLabel("Total to settle").fill("1.50");
+      await liveEdit.getByText(`${other.displayName} owes ${matthew.displayName} $1.50`).waitFor();
+      let releaseStale = () => {};
+      let firstRead = () => {};
+      let captured = false;
+      const pending = new Promise<void>((resolve) => { releaseStale = resolve; });
+      const started = new Promise<void>((resolve) => { firstRead = resolve; });
+      const recordPath = `**/api/group-balances/${preSaveId}`;
+      await livePage.route(recordPath, async (route) => {
+        if (route.request().method() !== "GET" || captured) return route.continue();
+        captured = true;
+        const stale = await route.fetch();
+        firstRead();
+        await pending;
+        await route.fulfill({ response: stale });
+      });
+      await Promise.race([started, new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("edit record poll did not start")), 10000))]);
+      const changedBeforeSave = await request(`/api/group-balances/${preSaveId}`, { cookie: michael.cookie,
+        method: "PATCH", body: { title: "Remote edit before Save", amountCents: 200,
+          owes: owesOther, receives: receivesMatthew, expectedUpdatedAt: preSaveRecord.updatedAt,
+          expectedBalances: await snapshot() } });
+      assert(changedBeforeSave.res.ok, `remote edit before Save: ${changedBeforeSave.text}`);
+      await livePage.waitForResponse((response) => new URL(response.url()).pathname === "/api/sync" && response.ok());
+      assert(await liveEdit.locator('[aria-label="Balance preview"]').count() === 0 &&
+        await liveEdit.getByRole("button", { name: "Save group balance" }).isDisabled(),
+        "a held old record read left preview or Save active");
+      releaseStale();
+      try {
+        await liveEdit.getByText("This group balance changed. Close and reopen it before editing").waitFor({ timeout: 12000 });
+      } catch {
+        await liveEdit.screenshot({ path: `${evidenceDir}/pre-save-remote-edit-red.png` });
+        const wrong = await liveEdit.getByText(`${other.displayName} owes ${matthew.displayName} $2.50`).count();
+        throw new Error(`remote edit kept stale preview before Save; $2.50 shown=${wrong}; Save enabled=${await liveEdit.getByRole("button", { name: "Save group balance" }).isEnabled()}`);
+      }
+      await liveEdit.getByText("Checking group balance changes…").waitFor({ state: "hidden" });
+      assert(await liveEdit.locator('[aria-label="Balance preview"]').count() === 0 &&
+        await liveEdit.getByRole("button", { name: "Save group balance" }).isDisabled(),
+      "remote edit retained preview or Save before submission");
+      await liveEdit.screenshot({ path: `${evidenceDir}/pre-save-remote-edit.png` });
+      await liveEdit.getByRole("button", { name: "Cancel" }).click();
+      await livePage.unroute(recordPath);
+      const currentPreSave = await read(preSaveId);
+      await remove(preSaveId, currentPreSave.updatedAt);
+
+      const baseId = await add("Draft with another record", 100, owesOther, receivesMatthew);
+      await livePage.getByRole("button", { name: "Draft with another record", exact: true }).click();
+      const otherEdit = livePage.getByRole("dialog", { name: "Edit group balance" });
+      await otherEdit.getByLabel("Total to settle").fill("1.50");
+      await otherEdit.getByText(`${other.displayName} owes ${matthew.displayName} $1.50`).waitFor();
+      const otherRecordId = await add("Other record changed", 100, owesOther, receivesMatthew);
+      await otherEdit.getByText(`${other.displayName} owes ${matthew.displayName} $2.50`).waitFor({ timeout: 12000 });
+      assert(await otherEdit.getByRole("button", { name: "Save group balance" }).isEnabled(),
+        "another record's change falsely locked the draft");
+      await otherEdit.screenshot({ path: `${evidenceDir}/other-record-preview.png` });
+      let releaseSave = () => {};
+      let saveStarted = () => {};
+      const saveGate = new Promise<void>((resolve) => { releaseSave = resolve; });
+      const saveStart = new Promise<void>((resolve) => { saveStarted = resolve; });
+      const savePath = `**/api/group-balances/${baseId}`;
+      await livePage.route(savePath, async (route) => {
+        if (route.request().method() !== "PATCH") return route.continue();
+        saveStarted();
+        await saveGate;
+        await route.continue();
+      });
+      await otherEdit.getByRole("button", { name: "Save group balance" }).click();
+      await saveStart;
+      await livePage.waitForResponse((response) => new URL(response.url()).pathname === "/api/sync" && response.ok());
+      releaseSave();
+      await otherEdit.waitFor({ state: "hidden" });
+      await livePage.unroute(savePath);
+      const savedDuringSync = await request(`/api/group-balances/${baseId}`, { cookie: matthew.cookie });
+      assert(savedDuringSync.res.ok && (savedDuringSync.json.balance as { amountCents: number }).amountCents === 150,
+        "own Save was falsely invalidated during sync");
+      await livePage.getByRole("button", { name: "Draft with another record", exact: true }).click();
+      const deletedDraft = livePage.getByRole("dialog", { name: "Edit group balance" });
+      await deletedDraft.getByLabel("Total to settle").fill("1.75");
+      await deletedDraft.locator('[aria-label="Balance preview"]').waitFor();
+      const currentBase = await read(baseId);
+      await remove(baseId, currentBase.updatedAt);
+      await deletedDraft.getByText("This group balance changed. Close and reopen it before editing").waitFor({ timeout: 12000 });
+      await deletedDraft.getByText("Checking group balance changes…").waitFor({ state: "hidden" });
+      assert(await deletedDraft.locator('[aria-label="Balance preview"]').count() === 0 &&
+        await deletedDraft.getByRole("button", { name: "Save group balance" }).isDisabled(),
+        "remote deletion retained preview or Save before submission");
+      await deletedDraft.screenshot({ path: `${evidenceDir}/pre-save-remote-delete.png` });
+      await deletedDraft.getByRole("button", { name: "Cancel" }).click();
+      const otherRecord = await read(otherRecordId);
+      await remove(otherRecordId, otherRecord.updatedAt);
+      await liveContext.close();
+      console.log("WebKit: remote edit/delete lock before Save; other-record change keeps correct preview");
+
       const editId = await add("Deleted while editing", 100, owesOther, receivesMatthew);
       const editRecord = await read(editId);
       const errorContext = await browser.newContext({ viewport: { width: 1280, height: 850 },

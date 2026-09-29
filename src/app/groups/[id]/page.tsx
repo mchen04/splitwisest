@@ -863,6 +863,7 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
           <GroupBalanceForm
             groupId={groupId} groupName={detail.group.name} currency={detail.group.currency}
             members={detail.members} meId={me.id} balances={detail.balances}
+            balanceListCursor={groupBalancesData?.changeCursor ?? null}
             existing={editingGroupBalance} open={groupBalanceOpen}
             onClose={() => setGroupBalanceOpen(false)}
             onSaved={afterGroupBalanceMutation}

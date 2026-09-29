@@ -154,7 +154,13 @@ async function main() {
     await page.locator('[data-group-tab="balances"]:visible').click();
     await page.getByRole("button", { name: "Shared obligations", exact: true }).click();
     const reopened = page.getByRole("dialog", { name: "Edit group balance" });
-    assert(await reopened.getByLabel("Total to settle").inputValue() === "0.01", "edited total lost after reload");
+    let reopenedAmount = "";
+    for (let attempt = 0; attempt < 20; attempt++) {
+      reopenedAmount = await reopened.getByLabel("Total to settle").inputValue();
+      if (reopenedAmount === "0.01") break;
+      await page.waitForTimeout(100);
+    }
+    assert(reopenedAmount === "0.01", `edited total lost after reload: ${reopenedAmount}`);
     assert(await reopened.locator('section[aria-label="Who owes"]').getByRole("radio", { name: "Shares", exact: true }).getAttribute("aria-checked") === "true", "edited method lost");
     await reopened.getByLabel("Total to settle").fill("0.15");
     assert(await reopened.locator('[aria-label="Balance preview"]').isVisible(), "draft preview was missing before record conflict");
@@ -277,6 +283,11 @@ async function main() {
     const olderDetail = await request(`/api/group-balances/${olderRow.id}`, { cookie: michael.cookie });
     assert(olderDetail.res.ok, `older balance detail: ${olderDetail.text}`);
     const oldVersion = String((olderDetail.json.balance as { updatedAt: string }).updatedAt);
+    await page.getByRole("button", { name: "Page 0", exact: true }).click();
+    const olderDraft = page.getByRole("dialog", { name: "Edit group balance" });
+    await olderDraft.getByLabel("Total to settle").fill("1.50");
+    assert(await olderDraft.locator('[aria-label="Balance preview"]').isVisible(),
+      "older record draft had no preview before remote change");
     const olderRefresh = page.waitForResponse((response) =>
       response.url().endsWith(`/api/groups/${groupId}/group-balances?limit=50`));
     const changedOlder = await request(`/api/group-balances/${olderRow.id}`, { cookie: michael.cookie, method: "PATCH", body: {
@@ -287,6 +298,13 @@ async function main() {
     } });
     assert(changedOlder.res.ok, `older balance edit: ${changedOlder.text}`);
     await olderRefresh;
+    await olderDraft.getByText("This group balance changed. Close and reopen it before editing").waitFor({ timeout: 12000 });
+    await olderDraft.getByText("Checking group balance changes…").waitFor({ state: "hidden" });
+    assert(await olderDraft.locator('[aria-label="Balance preview"]').count() === 0 &&
+      await olderDraft.getByRole("button", { name: "Save group balance" }).isDisabled(),
+      "remote change to an older paged record retained preview or Save");
+    await olderDraft.screenshot({ path: `${evidenceDir}/review-8-older-edit-conflict.png` });
+    await olderDraft.getByRole("button", { name: "Cancel" }).click();
     const firstPageAfterOlderEdit = await request(`/api/groups/${groupId}/group-balances?limit=50`,
       { cookie: matthew.cookie });
     assert(JSON.stringify(firstPageAfterOtherActivity.json.balances) ===
@@ -299,6 +317,22 @@ async function main() {
     await page.getByRole("button", { name: "Load more" }).click();
     await page.getByRole("button", { name: "Page 0 edited", exact: true }).waitFor();
     await page.screenshot({ path: `${evidenceDir}/review-3-older-page-refresh.png`, fullPage: true });
+    const olderCurrent = await request(`/api/group-balances/${olderRow.id}`, { cookie: michael.cookie });
+    assert(olderCurrent.res.ok, `older current record: ${olderCurrent.text}`);
+    await page.getByRole("button", { name: "Page 0 edited", exact: true }).click();
+    const olderDeleteDraft = page.getByRole("dialog", { name: "Edit group balance" });
+    await olderDeleteDraft.getByLabel("Total to settle").fill("1.50");
+    const deletedOlder = await request(`/api/group-balances/${olderRow.id}?expectedUpdatedAt=${encodeURIComponent(
+      String((olderCurrent.json.balance as { updatedAt: string }).updatedAt))}`,
+    { cookie: michael.cookie, method: "DELETE" });
+    assert(deletedOlder.res.ok, `older remote deletion: ${deletedOlder.text}`);
+    await olderDeleteDraft.getByText("This group balance changed. Close and reopen it before editing").waitFor({ timeout: 12000 });
+    await olderDeleteDraft.getByText("Checking group balance changes…").waitFor({ state: "hidden" });
+    assert(await olderDeleteDraft.locator('[aria-label="Balance preview"]').count() === 0 &&
+      await olderDeleteDraft.getByRole("button", { name: "Save group balance" }).isDisabled(),
+      "remote deletion of older paged record retained preview or Save");
+    await olderDeleteDraft.screenshot({ path: `${evidenceDir}/review-8-older-delete-conflict.png` });
+    await olderDeleteDraft.getByRole("button", { name: "Cancel" }).click();
 
     const cacheContext = await browser.newContext({ viewport: { width: 1280, height: 850 }, ignoreHTTPSErrors: true, serviceWorkers: "block" });
     await cacheContext.addInitScript(() => {

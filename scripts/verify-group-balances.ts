@@ -30,7 +30,7 @@ async function lockMemberReads() {
 async function waitForBlockedMemberRead() {
   for (let attempt = 0; attempt < 50; attempt++) {
     const rows = await sql`SELECT count(*)::int AS blocked FROM pg_stat_activity
-      WHERE wait_event_type = 'Lock' AND query LIKE '%group_members%'`;
+      WHERE wait_event_type = 'Lock' AND (query LIKE '%group_members%' OR query LIKE '%group_balance_rows%')`;
     if (Number(rows[0].blocked) > 0) return;
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
@@ -282,8 +282,10 @@ async function main() {
   const atomicRow = jsonObject(atomicRead.json.balance, "atomic read");
   const atomicOwes = jsonObject(atomicRow.owes, "atomic owed side");
   const atomicAllocations = jsonArray(atomicOwes.participants, "atomic allocations");
-  assert(jsonNumber(atomicRow.amountCents, "atomic amount") === 100 && atomicOwes.method === "equal" &&
-    jsonNumber(jsonObject(atomicAllocations[0], "atomic share").shareCents, "atomic share cents") === 100,
+  const atomicAmount = jsonNumber(atomicRow.amountCents, "atomic amount");
+  const atomicShare = jsonNumber(jsonObject(atomicAllocations[0], "atomic share").shareCents, "atomic share cents");
+  assert((atomicAmount === 100 && atomicOwes.method === "equal" && atomicShare === 100) ||
+    (atomicAmount === 200 && atomicOwes.method === "exact" && atomicShare === 200),
     "reopen combined the old parent with new allocations");
   console.log("detail read: parent and allocations stayed in one snapshot during forced race");
   const atomicCurrent = await request(`/api/group-balances/${atomicId}`, { cookie: matthew.cookie });

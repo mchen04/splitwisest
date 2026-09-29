@@ -167,7 +167,11 @@ export async function loadGroupObligation(id: number, userId: number) {
           'side', a.side, 'user_id', a.user_id, 'share_cents', a.share_cents, 'raw_input', a.raw_input
         ) ORDER BY a.user_id)
         FROM group_obligation_allocations a WHERE a.obligation_id = go.id
-      ), '[]'::jsonb) AS allocations
+      ), '[]'::jsonb) AS allocations,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object('userId', b.user_id, 'netCents', b.net_cents)
+        ORDER BY b.user_id) FROM group_balance_rows(go.group_id) b), '[]'::jsonb) AS balance_snapshot,
+      (SELECT COALESCE(MAX(a.id), 0) FROM activity a WHERE a.group_id = go.group_id
+        AND a.type IN ('group_balance.added', 'group_balance.edited', 'group_balance.deleted')) AS change_cursor
     FROM group_obligations go JOIN groups g ON g.id = go.group_id WHERE go.id = ${id}`;
   if (!rows[0]) notFound("Group balance not found");
   const row = rows[0];
@@ -183,6 +187,10 @@ export async function loadGroupObligation(id: number, userId: number) {
   return {
     id, groupId: Number(row.group_id), title: row.title as string, amountCents: Number(row.amount_cents),
     currency: row.currency as string, updatedAt: row.updated_at_token as string,
+    balances: (row.balance_snapshot as { userId: number; netCents: number }[]).map((b) => ({
+      userId: Number(b.userId), netCents: Number(b.netCents),
+    })),
+    changeCursor: Number(row.change_cursor),
     owes: side("owes"), receives: side("receives"),
   };
 }

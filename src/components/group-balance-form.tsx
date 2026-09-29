@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, Check, Users } from "lucide-react";
-import { api, ApiClientError, fmtMoney } from "@/lib/client";
+import { api, ApiClientError, fmtMoney, useSync } from "@/lib/client";
 import { simplifyDebts } from "@/lib/money";
 import { computeGroupObligation, formatGroupWeight, groupObligationCreatePayload, groupObligationDelta, parseGroupMoney, parseGroupWeight, GROUP_BALANCE_RECORD_CONFLICT, type SavedGroupObligation } from "@/lib/group-obligation-math";
 import { currencyStep } from "@/lib/currencies";
@@ -21,6 +21,8 @@ export interface ExistingGroupBalance extends SavedGroupObligation {
   id: number;
   title: string;
   updatedAt: string;
+  changeCursor: number;
+  balances: { userId: number; netCents: number }[];
 }
 
 const methods: Method[] = ["equal", "exact", "percentage", "shares"];
@@ -54,13 +56,14 @@ function sideInput(side: Side, members: Member[]) {
   return { method: side.method, participants };
 }
 
-export function GroupBalanceForm({ groupId, groupName, currency, members, meId, balances, existing, open, onClose, onSaved, onRefresh }: {
+export function GroupBalanceForm({ groupId, groupName, currency, members, meId, balances, balanceListCursor, existing, open, onClose, onSaved, onRefresh }: {
   groupId: number;
   groupName: string;
   currency: string;
   members: Member[];
   meId: number;
   balances: { userId: number; netCents: number }[];
+  balanceListCursor: number | null;
   existing: ExistingGroupBalance | null;
   open: boolean;
   onClose: () => void;
@@ -76,16 +79,30 @@ export function GroupBalanceForm({ groupId, groupName, currency, members, meId, 
   const saving = useRef(false);
   const createRequest = useRef({ id: "", payload: "" });
   const [recordConflict, setRecordConflict] = useState(false);
+  const recordConflictRef = useRef(false);
+  const [verified, setVerified] = useState<{ recordId: number; version: string; changeCursor: number;
+    balances: { userId: number; netCents: number }[] } | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [checkError, setCheckError] = useState(false);
+  const activeCheck = useRef<{ recordId: number; queued: boolean } | null>(null);
+  const checkSeq = useRef(0);
+  const onRefreshRef = useRef(onRefresh);
+  useEffect(() => { onRefreshRef.current = onRefresh; }, [onRefresh]);
 
   useEffect(() => {
     if (!open) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setTitle(existing?.title ?? "");
     setAmount(existing ? (existing.amountCents / 100).toFixed(2) : "");
     setOwes(existing ? savedSide(existing.owes) : initialSide(members.map((m) => m.id)));
     setReceives(existing ? savedSide(existing.receives) : initialSide([meId]));
     setError(null);
     setRecordConflict(false);
+    recordConflictRef.current = false;
+    setVerified(null);
+    setChecking(false);
+    setCheckError(false);
+    activeCheck.current = null;
+    checkSeq.current++;
     setBusy(false);
     saving.current = false;
     createRequest.current = { id: crypto.randomUUID(), payload: "" };
@@ -93,8 +110,67 @@ export function GroupBalanceForm({ groupId, groupName, currency, members, meId, 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, existing?.id]);
 
+  useEffect(() => () => {
+    activeCheck.current = null;
+    checkSeq.current++;
+  }, [open, existing?.id]);
+
+  const checkedSnapshot = existing && verified?.recordId === existing.id &&
+    verified.version === existing.updatedAt && verified.changeCursor >= existing.changeCursor
+    ? verified : existing;
+  const listPending = checkedSnapshot !== null && open && balanceListCursor !== null &&
+    balanceListCursor > checkedSnapshot.changeCursor;
+  const unverified = !!existing && (checking || checkError || listPending);
+  const previewBalances = checkedSnapshot?.balances ?? balances;
+
+  const checkEditedRecord = useCallback(function checkEditedRecord() {
+    if (!open || !existing || saving.current || recordConflictRef.current) return;
+    if (activeCheck.current?.recordId === existing.id) {
+      activeCheck.current.queued = true;
+      return;
+    }
+    const request = { recordId: existing.id, queued: false };
+    activeCheck.current = request;
+    const seq = ++checkSeq.current;
+    setChecking(true);
+    api<{ balance: ExistingGroupBalance }>(`/api/group-balances/${existing.id}`)
+      .then(({ balance }) => {
+        if (seq !== checkSeq.current || saving.current) return;
+        if (balance.updatedAt !== existing.updatedAt) {
+          recordConflictRef.current = true;
+          setRecordConflict(true);
+          setError(GROUP_BALANCE_RECORD_CONFLICT);
+          onRefreshRef.current();
+          return;
+        }
+        setVerified({ recordId: existing.id, version: existing.updatedAt,
+          changeCursor: balance.changeCursor, balances: balance.balances });
+        setCheckError(false);
+      })
+      .catch((error) => {
+        if (seq !== checkSeq.current || saving.current) return;
+        if (error instanceof ApiClientError && error.status === 404) {
+          recordConflictRef.current = true;
+          setRecordConflict(true);
+          setError(GROUP_BALANCE_RECORD_CONFLICT);
+          onRefreshRef.current();
+        } else setCheckError(true);
+      })
+      .finally(() => {
+        if (activeCheck.current !== request) return;
+        activeCheck.current = null;
+        if (request.queued && !recordConflictRef.current && !saving.current) checkEditedRecord();
+        else if (seq === checkSeq.current && !recordConflictRef.current) setChecking(false);
+      });
+  }, [open, existing]);
+
+  useSync(() => { if (open && existing) checkEditedRecord(); }, true);
+  useEffect(() => {
+    if (listPending) checkEditedRecord();
+  }, [listPending, balanceListCursor, checkEditedRecord]);
+
   const preview = useMemo(() => {
-    if (recordConflict) return { error: GROUP_BALANCE_RECORD_CONFLICT };
+    if (recordConflict || unverified) return { error: GROUP_BALANCE_RECORD_CONFLICT };
     const amountCents = parseGroupMoney(amount);
     if (amountCents === null || amountCents <= 0) return { error: "Enter a positive total" };
     const step = currencyStep(currency);
@@ -104,11 +180,11 @@ export function GroupBalanceForm({ groupId, groupName, currency, members, meId, 
       const receivedInput = sideInput(receives, members);
       const body = { title: title.trim(), amountCents, owes: owedInput, receives: receivedInput,
         expectedUpdatedAt: existing?.updatedAt,
-        expectedBalances: balances.map((b) => [b.userId, b.netCents] as [number, number]).sort((a, b) => a[0] - b[0]),
+        expectedBalances: previewBalances.map((b) => [b.userId, b.netCents] as [number, number]).sort((a, b) => a[0] - b[0]),
       };
       const recordNet = computeGroupObligation(body, new Set(members.map((m) => m.id)), currency, existing ?? undefined).net;
       const delta = groupObligationDelta(recordNet, existing ?? undefined);
-      const currentNet = new Map(balances.map((b) => [b.userId, b.netCents]));
+      const currentNet = new Map(previewBalances.map((b) => [b.userId, b.netCents]));
       const after = new Map(members.map((m) => [m.id,
         (currentNet.get(m.id) ?? 0) + (delta.get(m.id) ?? 0),
       ]));
@@ -124,7 +200,7 @@ export function GroupBalanceForm({ groupId, groupName, currency, members, meId, 
     } catch (e) {
       return { error: e instanceof Error ? e.message : "Check the allocations" };
     }
-  }, [amount, owes, receives, title, members, existing, balances, currency, recordConflict]);
+  }, [amount, owes, receives, title, members, existing, previewBalances, currency, recordConflict, unverified]);
 
   function renderSide(name: "owes" | "receives", side: Side, setSide: React.Dispatch<React.SetStateAction<Side>>) {
     return (
@@ -157,6 +233,7 @@ export function GroupBalanceForm({ groupId, groupName, currency, members, meId, 
     e.preventDefault();
     if (saving.current) return;
     if (recordConflict) return setError(GROUP_BALANCE_RECORD_CONFLICT);
+    if (unverified) return;
     setError(null);
     if (!title.trim()) return setError("Enter a description");
     if (!preview.body) return setError(preview.error ?? "Check the allocations");
@@ -182,11 +259,13 @@ export function GroupBalanceForm({ groupId, groupName, currency, members, meId, 
       setError(missingEdit || changedEdit ? GROUP_BALANCE_RECORD_CONFLICT :
         e instanceof ApiClientError ? e.message : "Could not save group balance");
       if (missingEdit || changedEdit) {
+        recordConflictRef.current = true;
         setRecordConflict(true);
         onRefresh();
       } else if (e instanceof ApiClientError && e.message.includes("Group balances changed")) onRefresh();
       saving.current = false;
       setBusy(false);
+      setChecking(false);
     }
   }
 
@@ -201,6 +280,11 @@ export function GroupBalanceForm({ groupId, groupName, currency, members, meId, 
           <Users className="h-4 w-4" /> <span className="text-sm font-semibold">{groupName} · {currency}</span>
         </div>
         {recordConflict && <ErrorNote message={error} />}
+        {!recordConflict && checkError && <div className="flex items-center gap-2">
+          <ErrorNote message="Could not verify this group balance" />
+          <Button type="button" variant="secondary" onClick={checkEditedRecord}>Try again</Button>
+        </div>}
+        {!recordConflict && unverified && !checkError && <p role="status" className="text-sm text-ink-soft">Checking group balance changes…</p>}
         <Field label="Total to settle">
           <Input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" required
             className="!min-h-14 !text-3xl !font-semibold tracking-tight tnum" />
