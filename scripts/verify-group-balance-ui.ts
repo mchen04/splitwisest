@@ -249,6 +249,57 @@ async function main() {
       "paging sync omitted or duplicated a balance");
     await page.screenshot({ path: `${evidenceDir}/review-pagination-after-sync.png`, fullPage: true });
 
+    const firstPageBeforeOtherActivity = await request(`/api/groups/${groupId}/group-balances?limit=50`,
+      { cookie: matthew.cookie });
+    const unrelatedRefresh = page.waitForResponse((response) =>
+      response.url().endsWith(`/api/groups/${groupId}/group-balances?limit=50`));
+    const otherGroup = await request("/api/groups", { cookie: matthew.cookie,
+      body: { name: `QA Other activity ${suffix}`, currency: "USD" } });
+    assert(otherGroup.res.ok, `other group activity: ${otherGroup.text}`);
+    await unrelatedRefresh;
+    const firstPageAfterOtherActivity = await request(`/api/groups/${groupId}/group-balances?limit=50`,
+      { cookie: matthew.cookie });
+    assert(JSON.stringify(firstPageBeforeOtherActivity.json.balances) ===
+      JSON.stringify(firstPageAfterOtherActivity.json.balances), "other group activity changed this group's first page");
+    assert(firstPageBeforeOtherActivity.json.changeCursor === firstPageAfterOtherActivity.json.changeCursor,
+      "unrelated activity changed the group-balance cursor");
+    await page.waitForTimeout(300);
+    await page.screenshot({ path: `${evidenceDir}/review-3-unrelated-pages.png`, fullPage: true });
+    assert(await page.getByRole("button", { name: "Page 0", exact: true }).count() === 1,
+      "unrelated activity discarded an unchanged appended page");
+
+    const firstPageRows = firstPageAfterOtherActivity.json.balances as { id: number }[];
+    const olderPage = await request(`/api/groups/${groupId}/group-balances?limit=50&before=${firstPageRows.at(-1)?.id}`,
+      { cookie: michael.cookie });
+    assert(olderPage.res.ok, `older page: ${olderPage.text}`);
+    const olderRow = (olderPage.json.balances as { id: number; title: string }[]).find((row) => row.title === "Page 0");
+    assert(olderRow, "older balance missing");
+    const olderDetail = await request(`/api/group-balances/${olderRow.id}`, { cookie: michael.cookie });
+    assert(olderDetail.res.ok, `older balance detail: ${olderDetail.text}`);
+    const oldVersion = String((olderDetail.json.balance as { updatedAt: string }).updatedAt);
+    const olderRefresh = page.waitForResponse((response) =>
+      response.url().endsWith(`/api/groups/${groupId}/group-balances?limit=50`));
+    const changedOlder = await request(`/api/group-balances/${olderRow.id}`, { cookie: michael.cookie, method: "PATCH", body: {
+      title: "Page 0 edited", amountCents: 1,
+      owes: { method: "equal", participants: [{ userId: jet.id }] },
+      receives: { method: "equal", participants: [{ userId: matthew.id }] },
+      expectedUpdatedAt: oldVersion, expectedBalances: await currentSnapshot(),
+    } });
+    assert(changedOlder.res.ok, `older balance edit: ${changedOlder.text}`);
+    await olderRefresh;
+    const firstPageAfterOlderEdit = await request(`/api/groups/${groupId}/group-balances?limit=50`,
+      { cookie: matthew.cookie });
+    assert(JSON.stringify(firstPageAfterOtherActivity.json.balances) ===
+      JSON.stringify(firstPageAfterOlderEdit.json.balances), "older edit changed first-page content");
+    assert(firstPageAfterOtherActivity.json.changeCursor !== firstPageAfterOlderEdit.json.changeCursor,
+      "older edit did not advance the group-balance cursor");
+    await page.waitForTimeout(300);
+    assert(await page.getByRole("button", { name: "Page 0", exact: true }).count() === 0,
+      "editing an older balance retained stale appended rows");
+    await page.getByRole("button", { name: "Load more" }).click();
+    await page.getByRole("button", { name: "Page 0 edited", exact: true }).waitFor();
+    await page.screenshot({ path: `${evidenceDir}/review-3-older-page-refresh.png`, fullPage: true });
+
     const cacheContext = await browser.newContext({ viewport: { width: 1280, height: 850 }, ignoreHTTPSErrors: true, serviceWorkers: "block" });
     await cacheContext.addInitScript(() => {
       const frozen = Date.now();
@@ -275,6 +326,9 @@ async function main() {
     assert(rapid.res.ok, `fresh-cache fixture: ${rapid.text}`);
     await cachePage.getByRole("button", { name: "Within fresh cache", exact: true }).waitFor({ timeout: 15000 });
     assert(listReads > readsBeforeSync, "sync did not force a first-page network request inside cache TTL");
+    const matthewNet = (await currentSnapshot()).find(([id]) => id === matthew.id)?.[1];
+    assert(matthewNet !== undefined && matthewNet > 0, "fresh-cache expected net missing");
+    await cachePage.getByText(`Owed $${(matthewNet / 100).toFixed(2)}`).waitFor({ timeout: 8000 });
     await cachePage.screenshot({ path: `${evidenceDir}/review-2-fresh-cache-sync.png`, fullPage: true });
     await cacheContext.close();
     await desktop.close();

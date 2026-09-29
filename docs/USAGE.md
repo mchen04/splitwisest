@@ -45,6 +45,7 @@
 - If another member changes the group before you save, the form stays open and refreshes the group balance preview. Review it before retrying. If the entry you are editing changed, the preview and Save action stop until you close and reopen it.
 - One person can appear on both sides. Only the difference changes their balance.
 - Edit or delete a group balance from the same tab. This does not record a payment.
+- Before removing a member, edit or delete every group balance that includes them. This also applies to zero shares and net-zero entries.
 - The **group balance strip** shows each member's net. **Suggested settle-up** shows the fewest payments that clear the group.
 - The **Balances page** shows every friend relationship across all groups and what should happen next.
 - **Settle up** records an offline payment (cash, bank transfer — whatever you used). SplitWisest never moves money.

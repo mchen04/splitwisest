@@ -24,7 +24,7 @@ import { Expense, Settlement, useGroupPageData } from "./use-group-page-data";
 
 type Tab = "expenses" | "balances" | "insights" | "chat" | "activity";
 type GroupBalanceSummary = { id: number; title: string; amountCents: number; updatedAt: string };
-type GroupBalancePage = { balances: GroupBalanceSummary[]; hasMore: boolean };
+type GroupBalancePage = { balances: GroupBalanceSummary[]; hasMore: boolean; changeCursor: number };
 
 export default function GroupPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -47,6 +47,7 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
   const {
     detail, expenses, insightExpenses, insightError, hasMoreExpenses, recurring, settlements, hasMoreSettlements,
     activity, refreshKey, loadError, loadDetail, reloadInsights, refreshAll, refreshBalancePreview,
+    refreshGroupBalanceMutation,
   } = useGroupPageData({ groupId, filters, expenseLimit, settlementLimit, insightsEnabled: tab === "insights" });
 
   // modals
@@ -54,16 +55,25 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
   const [groupBalanceOpen, setGroupBalanceOpen] = useState(false);
   const [editingGroupBalance, setEditingGroupBalance] = useState<ExistingGroupBalance | null>(null);
   const [extraGroupBalancePage, setExtraGroupBalancePage] = useState<{
-    groupId: number; firstPage: GroupBalancePage; balances: GroupBalanceSummary[]; hasMore: boolean;
+    groupId: number; changeCursor: number; balances: GroupBalanceSummary[]; hasMore: boolean;
   } | null>(null);
   const [loadingGroupBalances, setLoadingGroupBalances] = useState(false);
-  const { data: groupBalancesData, reload: reloadGroupBalances, reloadFresh: reloadGroupBalancesFresh } = useApiData<GroupBalancePage>(
+  const { data: groupBalancesData, reloadFresh: reloadGroupBalancesFresh } = useApiData<GroupBalancePage>(
     `/api/groups/${groupId}/group-balances?limit=50`, 0, { sync: false });
   useSync((current, previous) => {
     if (current.activityCursor !== previous.activityCursor) reloadGroupBalancesFresh();
   });
+  const observedBalanceChange = useRef<{ groupId: number; cursor: number } | null>(null);
+  useEffect(() => {
+    if (!groupBalancesData) return;
+    const previous = observedBalanceChange.current;
+    observedBalanceChange.current = { groupId, cursor: groupBalancesData.changeCursor };
+    if (previous?.groupId === groupId && previous.cursor !== groupBalancesData.changeCursor) {
+      refreshBalancePreview();
+    }
+  }, [groupId, groupBalancesData, refreshBalancePreview]);
   const activeExtraGroupBalancePage = extraGroupBalancePage?.groupId === groupId &&
-    extraGroupBalancePage.firstPage === groupBalancesData ? extraGroupBalancePage : null;
+    extraGroupBalancePage.changeCursor === groupBalancesData?.changeCursor ? extraGroupBalancePage : null;
   const [editing, setEditing] = useState<Parameters<typeof ExpenseForm>[0]["existing"]>(null);
   const [settleOpen, setSettleOpen] = useState(false);
   const [settlePrefill, setSettlePrefill] = useState<{ payerId: number; recipientId: number; amountCents: number } | null>(null);
@@ -143,7 +153,12 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
     try {
       const next = await api<GroupBalancePage>(
         `/api/groups/${groupId}/group-balances?limit=50&before=${last.id}`);
-      setExtraGroupBalancePage({ groupId, firstPage,
+      if (next.changeCursor !== firstPage.changeCursor) {
+        setExtraGroupBalancePage(null);
+        reloadGroupBalancesFresh();
+        return;
+      }
+      setExtraGroupBalancePage({ groupId, changeCursor: firstPage.changeCursor,
         balances: [...(activeExtraGroupBalancePage?.balances ?? []), ...next.balances], hasMore: next.hasMore });
     } catch (e) {
       window.alert(e instanceof ApiClientError ? e.message : "Could not load group balances");
@@ -154,15 +169,19 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
 
   function reloadGroupBalanceList() {
     setExtraGroupBalancePage(null);
-    reloadGroupBalances();
+    reloadGroupBalancesFresh();
+  }
+
+  function afterGroupBalanceMutation() {
+    reloadGroupBalanceList();
+    refreshGroupBalanceMutation();
   }
 
   async function removeGroupBalance(row: GroupBalanceSummary) {
     if (!window.confirm(`Delete group balance "${row.title}"? Group debts will update.`)) return;
     try {
       await api(`/api/group-balances/${row.id}?expectedUpdatedAt=${encodeURIComponent(row.updatedAt)}`, { method: "DELETE" });
-      reloadGroupBalanceList();
-      refreshAll();
+      afterGroupBalanceMutation();
     } catch (e) {
       window.alert(e instanceof ApiClientError ? e.message : "Could not delete group balance");
     }
@@ -835,7 +854,7 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
             members={detail.members} meId={me.id} balances={detail.balances}
             existing={editingGroupBalance} open={groupBalanceOpen}
             onClose={() => setGroupBalanceOpen(false)}
-            onSaved={() => { reloadGroupBalanceList(); refreshAll(); }}
+            onSaved={afterGroupBalanceMutation}
             onRefresh={refreshBalancePreview}
           />
           <SettleModal

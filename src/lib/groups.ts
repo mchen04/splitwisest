@@ -190,11 +190,13 @@ export async function removeGroupMemberWithActivity({
     SELECT
       (SELECT net_cents FROM member_balance) AS net_cents,
       (SELECT ref_count FROM active_recurring_refs) AS active_recurring_refs,
+      (SELECT ref_count FROM group_balance_refs) AS group_balance_refs,
       (SELECT count(*) FROM del)::int AS removed`,
   ]);
   return {
     removed: Number(rows[0]?.removed ?? 0) > 0,
     netCents: Number(rows[0]?.net_cents ?? 0),
     activeRecurringRefs: Number(rows[0]?.active_recurring_refs ?? 0),
+    groupBalanceRefs: Number(rows[0]?.group_balance_refs ?? 0),
   };
 }

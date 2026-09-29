@@ -143,15 +143,16 @@ export function useGroupPageData({
     ? detailState.error
     : recurringState.error || activityState.error ? "Some group data could not be refreshed" : null;
 
-  const reloadOverview = useCallback(() => {
-    detailState.reload();
+  const reloadOverview = useCallback((freshDetail = false) => {
+    if (freshDetail) detailState.reloadFresh();
+    else detailState.reload();
     recurringState.reload();
     activityState.reload();
     reloadSettlements();
   }, [detailState, recurringState, activityState, reloadSettlements]);
 
-  const refreshAll = useCallback(() => {
-    reloadOverview();
+  const refreshAll = useCallback((freshDetail = false) => {
+    reloadOverview(freshDetail);
     reloadExpenses();
     reloadInsightExpenses();
   }, [reloadOverview, reloadExpenses, reloadInsightExpenses]);
@@ -175,6 +176,7 @@ export function useGroupPageData({
     loadError,
     loadDetail: reloadOverview,
     refreshBalancePreview: detailState.reloadFresh,
+    refreshGroupBalanceMutation: () => refreshAll(true),
     reloadInsights: reloadInsightExpenses,
     refreshAll,
   };

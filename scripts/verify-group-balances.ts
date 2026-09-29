@@ -300,6 +300,45 @@ async function main() {
   console.log("pagination: 51 records loaded through the cursor");
   const badCursor = await request(`${path}?before=bad`, { cookie: matthew.cookie });
   assert(badCursor.res.status === 400, "invalid cursor was accepted");
+
+  const zeroRef = await request(path, { cookie: matthew.cookie, body: {
+    title: "Zero-share member guard", amountCents: 100,
+    owes: { method: "exact", participants: [
+      { userId: matthew.id, value: 100 }, { userId: other.id, value: 0 },
+    ] },
+    receives: { method: "equal", participants: [{ userId: matthew.id }] },
+    expectedBalances: await snapshot(),
+  } });
+  assert(zeroRef.res.ok, `zero-share guard fixture: ${zeroRef.text}`);
+  const zeroRefId = jsonNumber(zeroRef.json.id, "zero-ref id");
+  const blockedLeave = await request(`/api/groups/${groupId}/members/${other.id}`,
+    { cookie: other.cookie, method: "DELETE" });
+  assert(blockedLeave.res.status === 400 && String(blockedLeave.json.error).includes("group balance") &&
+    String(blockedLeave.json.error).includes("before leaving"),
+    `zero-share member got a false or unactionable leave result: ${blockedLeave.text}`);
+  const blockedRemoval = await request(`/api/groups/${groupId}/members/${other.id}`,
+    { cookie: matthew.cookie, method: "DELETE" });
+  assert(blockedRemoval.res.status === 400 && String(blockedRemoval.json.error).includes("group balance") &&
+    String(blockedRemoval.json.error).includes("before removing"),
+    `zero-share member got a false or unactionable removal result: ${blockedRemoval.text}`);
+  const guarded = await request(`/api/group-balances/${zeroRefId}`, { cookie: matthew.cookie });
+  assert(guarded.res.ok, `zero-share guard detail: ${guarded.text}`);
+  const guardedVersion = String(jsonObject(guarded.json.balance, "guarded balance").updatedAt);
+  const noOther = await request(`/api/group-balances/${zeroRefId}`, { cookie: matthew.cookie, method: "PATCH", body: {
+    title: "Zero-share member removed", amountCents: 100,
+    owes: { method: "equal", participants: [{ userId: matthew.id }] },
+    receives: { method: "equal", participants: [{ userId: matthew.id }] },
+    expectedUpdatedAt: guardedVersion, expectedBalances: await snapshot(),
+  } });
+  assert(noOther.res.ok, `remove zero-share reference: ${noOther.text}`);
+  const safeRemoval = await request(`/api/groups/${groupId}/members/${other.id}`,
+    { cookie: matthew.cookie, method: "DELETE" });
+  assert(safeRemoval.res.ok, `safe removal after allocation edit: ${safeRemoval.text}`);
+  const afterRemoval = await request(`/api/groups/${groupId}`, { cookie: matthew.cookie });
+  assert(afterRemoval.res.ok && !jsonArray(afterRemoval.json.members, "members after removal")
+    .some((member) => jsonObject(member, "remaining member").id === other.id),
+    "removed member still appears in the group");
+  console.log("member guard: zero-share reference explained; editing it allowed safe removal");
   console.log("group balances API: validation, stale previews, stable cents after rename, edit, delete, reimbursement isolation, and cursor pagination passed");
 }
 
