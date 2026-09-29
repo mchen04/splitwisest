@@ -14,9 +14,13 @@ scale); on an already-large table, build the money-table indexes with
 DATABASE_URL=... pnpm tsx scripts/migrate.ts
 ```
 
-For an existing database, `scripts/migrations/20260929_group_balances.sql` is the
-scoped group-balance migration. Confirm the database target first. Apply it in
-one transaction before the app update. It creates two tables, replaces the
+`scripts/migrate.ts` also installs the group-balance tables, balance function,
+and allocation guards. If an existing database needs only the group-balance
+change, use the three scoped SQL files below in order instead of running the
+full migration script. Confirm the database target first.
+
+Apply `scripts/migrations/20260929_group_balances.sql` in one transaction before
+the app update. It creates two tables, replaces the
 group-balance function, adds a deferred sum check, and records its version in
 `schema_migrations`. On failure, PostgreSQL rolls back the whole transaction.
 Keep the prior `group_balance_rows(bigint)` definition for recovery. Restore it
