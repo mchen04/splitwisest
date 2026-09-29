@@ -18,9 +18,15 @@ export const GroupObligationBody = z.object({
   owes: Side,
   receives: Side,
   expectedUpdatedAt: VersionToken.optional(),
+  expectedBalances: z.array(z.tuple([z.number().int().positive(), z.number().int()])).optional(),
 });
 
 export type GroupObligationInput = z.infer<typeof GroupObligationBody>;
+export type SavedGroupObligation = {
+  amountCents: number;
+  owes: { method: GroupObligationInput["owes"]["method"]; participants: { userId: number; shareCents: number; value: number | null }[] };
+  receives: { method: GroupObligationInput["receives"]["method"]; participants: { userId: number; shareCents: number; value: number | null }[] };
+};
 
 export function parseGroupMoney(input: string): number | null {
   const value = input.trim();
@@ -33,7 +39,7 @@ export function parseGroupMoney(input: string): number | null {
   return Number.isSafeInteger(cents) && cents <= 100_000_000_000 ? cents : null;
 }
 
-export function computeGroupObligation(input: GroupObligationInput, memberIds: Set<number>, currency: string) {
+export function computeGroupObligation(input: GroupObligationInput, memberIds: Set<number>, currency: string, saved?: SavedGroupObligation) {
   const step = currencyStep(currency);
   if (input.amountCents % step) invalidInput("Total must be whole units for this currency");
   function side(which: "owes" | "receives") {
@@ -41,7 +47,16 @@ export function computeGroupObligation(input: GroupObligationInput, memberIds: S
     const ids = participants.map((p) => p.userId);
     if (new Set(ids).size !== ids.length) invalidInput("Duplicate participants");
     if (ids.some((id) => !memberIds.has(id))) invalidInput("All participants must be group members");
-    const shares = computeShares(method, input.amountCents, participants, step);
+    const prior = saved?.[which];
+    const unchanged = saved?.amountCents === input.amountCents && prior?.method === method &&
+      prior.participants.length === participants.length && prior.participants.every((p) =>
+        participants.some((next) => next.userId === p.userId &&
+          (method === "equal" || next.value === p.value)));
+    // Existing entries did not store input order. Keep their awarded cents when
+    // the allocation did not change; new splits use user ID for stable ties.
+    const shares = unchanged && prior
+      ? new Map(prior.participants.map((p) => [p.userId, p.shareCents]))
+      : computeShares(method, input.amountCents, [...participants].sort((a, b) => a.userId - b.userId), step);
     if ([...shares.values()].reduce((sum, cents) => sum + cents, 0) !== input.amountCents) {
       invalidInput("Allocations must match the total");
     }
@@ -52,4 +67,13 @@ export function computeGroupObligation(input: GroupObligationInput, memberIds: S
   const net = new Map<number, number>();
   for (const id of memberIds) net.set(id, (receives.get(id) ?? 0) - (owes.get(id) ?? 0));
   return { owes, receives, net };
+}
+
+export function groupObligationDelta(nextNet: Map<number, number>, saved?: SavedGroupObligation) {
+  const delta = new Map(nextNet);
+  if (saved) {
+    for (const p of saved.receives.participants) delta.set(p.userId, (delta.get(p.userId) ?? 0) - p.shareCents);
+    for (const p of saved.owes.participants) delta.set(p.userId, (delta.get(p.userId) ?? 0) + p.shareCents);
+  }
+  return delta;
 }

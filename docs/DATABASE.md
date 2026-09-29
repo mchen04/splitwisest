@@ -23,6 +23,11 @@ Keep the prior `group_balance_rows(bigint)` definition for recovery. Restore it
 only if no group-balance entries exist; once entries exist, preserve the new
 tables and their balance effects until the entries are migrated or resolved.
 
+Apply `scripts/migrations/20260929_group_balances_parent_check.sql` after that
+migration on existing databases. It checks existing allocations, then adds a
+deferred parent trigger. A parent-only insert or total update now fails if
+either side does not match the total. The transaction rolls back on failure.
+
 **Run the migration before deploying the code** — `getSessionUser` references
 `users.deleted_at`, which the migration adds.
 
@@ -94,6 +99,6 @@ Pass these on the command line for the `tsx` scripts (they read `.env.local`
 
 - Secondary indexes back the hot read paths: `expenses(group_id)` and `settlements(group_id/payer_id/recipient_id)` feed `group_balance_rows()`; `group_obligations(group_id, id DESC)` pages group balances, while `group_obligation_allocations(user_id)` supports user-reference lookups; `group_members(user_id)` and `friendships(user_b)` serve reverse lookups; `attachments(expense_id)` and partial `expenses(recurring_id)` cover the remaining FK joins.
 - `group_balance_rows(group_id)` returns each member's net (expense payments − expense shares + group balance receives − group balance owes + settlements paid − received). The expense share side allocates every expense's `converted_cents` with a **per-expense largest-remainder** pass using exact integer `div`/`mod`, so converted shares sum exactly to the expense total and no cross-currency rounding residual is misattributed to one member. A whole-group residual-absorption step remains as a defensive backstop (now a no-op in the common case).
-- Group balances add received shares to the credit side and owed shares to the debit side. They use the group currency and never enter spending charts or recorded payments. A deferred trigger checks that both sides equal the stored total.
+- Group balances add received shares to the credit side and owed shares to the debit side. They use the group currency and never enter spending charts or recorded payments. Deferred triggers check both allocation changes and parent inserts or total updates against the stored total.
 - `expenses.recurring_id` has an FK to `recurring_expenses(id)` (`ON DELETE SET NULL`) so already-materialized expenses survive a rule deletion.
 - Zero-decimal currencies (JPY/KRW) are stored as whole units (multiples of 100 cents) and split in whole units, so a share is never an unpayable fraction of a yen/won.

@@ -24,7 +24,7 @@ export const PATCH = handler(async (req: NextRequest, { params }: Ctx) => {
   const id = balanceId((await params).id);
   const current = await loadGroupObligation(id, user.id);
   const input = GroupObligationBody.parse(await req.json());
-  await updateGroupObligation(id, current.groupId, current.currency, user, input);
+  await updateGroupObligation(id, current.groupId, current.currency, user, input, current);
   return NextResponse.json({ ok: true });
 });
 

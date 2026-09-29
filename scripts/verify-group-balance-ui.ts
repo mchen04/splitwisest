@@ -44,7 +44,7 @@ async function main() {
   }
   const browser = await webkit.launch({ headless: true });
   try {
-    const desktop = await browser.newContext({ viewport: { width: 1280, height: 850 }, ignoreHTTPSErrors: true });
+    const desktop = await browser.newContext({ viewport: { width: 1280, height: 850 }, ignoreHTTPSErrors: true, serviceWorkers: "block" });
     const page = await desktop.newPage();
     await login(page, matthew.username);
     await page.goto(`${browserBase}/groups/${groupId}`);
@@ -95,6 +95,20 @@ async function main() {
     const edit = page.getByRole("dialog", { name: "Edit group balance" });
     assert(await edit.getByLabel("Total to settle").inputValue() === "120.00", "total did not reopen");
     assert(await edit.locator('section[aria-label="Who should receive"]').getByRole("radio", { name: "Exact amounts" }).getAttribute("aria-checked") === "true", "method did not reopen");
+    const editOwes = edit.locator('section[aria-label="Who owes"]');
+    await editOwes.getByRole("checkbox", { name: jet.displayName }).uncheck();
+    await editOwes.getByRole("checkbox", { name: other.displayName }).check();
+    const deltaPreview = edit.locator('[aria-label="Balance preview"]');
+    assert(await deltaPreview.locator("li").filter({ hasText: jet.displayName }).getByText("receives $40.00").count() === 1,
+      "removed debtor is missing the edit delta");
+    assert(await deltaPreview.locator("li").filter({ hasText: other.displayName }).getByText("owes $40.00").count() === 1,
+      "new debtor has the wrong edit delta");
+    assert(await deltaPreview.locator("li").filter({ hasText: matthew.displayName }).getByText("no net change").count() === 1,
+      "unchanged recipient appears to gain balance again");
+    await deltaPreview.scrollIntoViewIfNeeded();
+    await edit.screenshot({ path: `${evidenceDir}/review-edit-delta.png` });
+    await editOwes.getByRole("checkbox", { name: other.displayName }).uncheck();
+    await editOwes.getByRole("checkbox", { name: jet.displayName }).check();
     await edit.getByLabel("Total to settle").fill("0.01");
     await edit.locator('section[aria-label="Who owes"]').getByRole("radio", { name: "Shares", exact: true }).click();
     for (const member of [matthew, michael, jet]) {
@@ -105,6 +119,35 @@ async function main() {
       await edit.locator('section[aria-label="Who should receive"]').getByRole("textbox", { name: `Percentages for ${member.displayName}` }).fill("50");
     }
     await edit.screenshot({ path: `${evidenceDir}/desktop-edit.png` });
+    let injected = false;
+    const editRoute = /\/api\/group-balances\/\d+$/;
+    await page.route(editRoute, async (route) => {
+      if (!injected && route.request().method() === "PATCH") {
+        injected = true;
+        const current = await request(`/api/groups/${groupId}`, { cookie: michael.cookie });
+        assert(current.res.ok, `concurrent browser overview: ${current.text}`);
+        const expectedBalances = (current.json.balances as { userId: number; netCents: number }[])
+          .map((b) => [b.userId, b.netCents] as [number, number]).sort((a, b) => a[0] - b[0]);
+        const changed = await request(`/api/groups/${groupId}/group-balances`, { cookie: michael.cookie,
+          body: { title: "Concurrent browser change", amountCents: 100,
+            owes: { method: "equal", participants: [{ userId: jet.id }] },
+            receives: { method: "equal", participants: [{ userId: matthew.id }] }, expectedBalances,
+          } });
+        assert(changed.res.ok, `concurrent browser change: ${changed.text}`);
+      }
+      await route.continue();
+    });
+    assert(await edit.getByRole("button", { name: "Save group balance" }).isEnabled(), "edited split was invalid before stale-save test");
+    const staleResponse = page.waitForResponse((res) => res.url().includes("/api/group-balances/") && res.request().method() === "PATCH");
+    await edit.getByRole("button", { name: "Save group balance" }).click();
+    const staleSave = await staleResponse;
+    assert(injected && staleSave.status() === 400, "concurrent change did not reject the stale browser save");
+    await edit.getByText("Group balances changed. Refresh and try again").waitFor();
+    assert(await edit.isVisible(), "stale preview closed the edit form");
+    await page.unroute(editRoute);
+    await edit.getByText(`${jet.displayName} owes ${matthew.displayName} $1.00`).waitFor();
+    await edit.locator('[aria-label="Balance preview"]').scrollIntoViewIfNeeded();
+    await edit.screenshot({ path: `${evidenceDir}/review-refreshed-preview.png` });
     await edit.getByRole("button", { name: "Save group balance" }).click();
     await edit.waitFor({ state: "hidden" });
     await page.reload();
@@ -114,7 +157,6 @@ async function main() {
     assert(await reopened.getByLabel("Total to settle").inputValue() === "0.01", "edited total lost after reload");
     assert(await reopened.locator('section[aria-label="Who owes"]').getByRole("radio", { name: "Shares", exact: true }).getAttribute("aria-checked") === "true", "edited method lost");
     await reopened.getByRole("button", { name: "Cancel" }).click();
-    await desktop.close();
 
     for (const width of [320, 390, 393]) {
       const mobile = await browser.newContext({ viewport: { width, height: 844 }, isMobile: true, deviceScaleFactor: 3, ignoreHTTPSErrors: true,
@@ -138,7 +180,46 @@ async function main() {
       await phone.screenshot({ path: `${evidenceDir}/mobile-balances${suffix}.png`, fullPage: true });
       await mobile.close();
     }
-    console.log("WebKit desktop/mobile: navigation, validation, preview, create, balance, reopen, edit, reload, and screenshots passed");
+
+    async function currentSnapshot(): Promise<[number, number][]> {
+      const current = await request(`/api/groups/${groupId}`, { cookie: matthew.cookie });
+      assert(current.res.ok, `paging overview: ${current.text}`);
+      return (current.json.balances as { userId: number; netCents: number }[])
+        .map((b) => [b.userId, b.netCents] as [number, number]).sort((a, b) => a[0] - b[0]);
+    }
+    for (let n = 0; n < 51; n++) {
+      const added = await request(`/api/groups/${groupId}/group-balances`, { cookie: matthew.cookie,
+        body: { title: `Page ${n}`, amountCents: 1,
+          owes: { method: "equal", participants: [{ userId: jet.id }] },
+          receives: { method: "equal", participants: [{ userId: matthew.id }] },
+          expectedBalances: await currentSnapshot(),
+        } });
+      assert(added.res.ok, `paging fixture ${n}: ${added.text}`);
+    }
+    await page.reload();
+    await page.locator('[data-group-tab="balances"]:visible').click();
+    await page.getByRole("button", { name: "Load more" }).click();
+    await page.getByRole("button", { name: "Page 0", exact: true }).waitFor();
+    const shifted = await request(`/api/groups/${groupId}/group-balances`, { cookie: michael.cookie,
+      body: { title: "Page 51", amountCents: 1,
+        owes: { method: "equal", participants: [{ userId: jet.id }] },
+        receives: { method: "equal", participants: [{ userId: matthew.id }] },
+        expectedBalances: await currentSnapshot(),
+      } });
+    assert(shifted.res.ok, `shifted first page: ${shifted.text}`);
+    await page.getByRole("button", { name: "Page 51", exact: true }).waitFor({ timeout: 15000 });
+    assert(await page.getByRole("button", { name: "Page 1", exact: true }).count() === 0,
+      "old appended page stayed visible after the first page shifted");
+    await page.getByRole("button", { name: "Page 51", exact: true }).scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `${evidenceDir}/review-pagination-reset.png` });
+    await page.getByRole("button", { name: "Load more" }).click();
+    await page.getByRole("button", { name: "Page 1", exact: true }).waitFor();
+    assert(await page.getByRole("button", { name: "Page 0", exact: true }).count() === 1 &&
+      await page.getByRole("button", { name: "Page 1", exact: true }).count() === 1,
+      "paging sync omitted or duplicated a balance");
+    await page.screenshot({ path: `${evidenceDir}/review-pagination-after-sync.png`, fullPage: true });
+    await desktop.close();
+    console.log("WebKit desktop/mobile: edit delta, stale-preview refresh, saved balances, and synced cursor pagination passed");
   } finally {
     await browser.close();
   }

@@ -674,12 +674,26 @@ async function main() {
       END IF;
     END $$`;
 
+  const invalidGroupObligations = await sql`
+    SELECT go.id FROM group_obligations go
+    LEFT JOIN group_obligation_allocations a ON a.obligation_id = go.id
+    GROUP BY go.id
+    HAVING COALESCE(SUM(a.share_cents) FILTER (WHERE a.side = 'owes'), 0) <> MAX(go.amount_cents)
+        OR COALESCE(SUM(a.share_cents) FILTER (WHERE a.side = 'receives'), 0) <> MAX(go.amount_cents)
+    LIMIT 1`;
+  if (invalidGroupObligations.length) throw new Error("Existing group balance allocations do not match their totals");
   await sql`
     CREATE OR REPLACE FUNCTION check_group_obligation_allocations()
     RETURNS trigger LANGUAGE plpgsql AS $$
     DECLARE target_id bigint; expected bigint; owed bigint; received bigint;
     BEGIN
-      target_id := COALESCE(NEW.obligation_id, OLD.obligation_id);
+      IF TG_TABLE_NAME = 'group_obligations' THEN
+        target_id := NEW.id;
+      ELSIF TG_OP = 'DELETE' THEN
+        target_id := OLD.obligation_id;
+      ELSE
+        target_id := NEW.obligation_id;
+      END IF;
       SELECT amount_cents INTO expected FROM group_obligations WHERE id = target_id;
       IF NOT FOUND THEN RETURN NULL; END IF;
       SELECT COALESCE(SUM(share_cents) FILTER (WHERE side = 'owes'), 0),
@@ -701,7 +715,17 @@ async function main() {
         EXECUTE FUNCTION check_group_obligation_allocations();
       END IF;
     END $$`;
+  await sql`
+    DO $$ BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'group_obligations_sum_check') THEN
+        CREATE CONSTRAINT TRIGGER group_obligations_sum_check
+        AFTER INSERT OR UPDATE OF amount_cents ON group_obligations
+        DEFERRABLE INITIALLY DEFERRED FOR EACH ROW
+        EXECUTE FUNCTION check_group_obligation_allocations();
+      END IF;
+    END $$`;
   await markMigration("20260929_group_balances");
+  await markMigration("20260929_group_balances_parent_check");
 
   console.log("migration complete");
 }

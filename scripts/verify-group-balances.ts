@@ -1,4 +1,5 @@
-import { assert, cleanupQaUsers, jsonArray, jsonNumber, jsonObject, request, signup } from "./qa-support";
+import { spawn } from "node:child_process";
+import { assert, cleanupQaUsers, jsonArray, jsonNumber, jsonObject, request, signup, sql } from "./qa-support";
 
 if (process.env.NEON_LOCAL_PROXY !== "http://127.0.0.1:4445/sql" ||
   !process.env.DATABASE_URL?.includes("@db.localtest.me:5432/splitwisest") ||
@@ -9,6 +10,32 @@ if (process.env.NEON_LOCAL_PROXY !== "http://127.0.0.1:4445/sql" ||
 const suffix = `gb${Date.now().toString(36)}`;
 const password = crypto.randomUUID();
 const date = new Date().toISOString().slice(0, 10);
+
+async function lockMemberReads() {
+  const child = spawn("docker", ["exec", "-i", "sw-group-balances-pg", "psql", "-X", "-qAt", "-U", "localtest", "-d", "splitwisest"]);
+  const ready = new Promise<void>((resolve, reject) => {
+    let text = "";
+    const timer = setTimeout(() => reject(new Error("Could not lock local member reads")), 5000);
+    child.stdout.on("data", (chunk) => {
+      text += String(chunk);
+      if (text.includes("locked")) { clearTimeout(timer); resolve(); }
+    });
+    child.on("exit", (code) => { clearTimeout(timer); reject(new Error(`Local lock session exited: ${code}`)); });
+  });
+  child.stdin.write("BEGIN; LOCK TABLE group_members IN ACCESS EXCLUSIVE MODE; SELECT 'locked';\n");
+  await ready;
+  return child;
+}
+
+async function waitForBlockedMemberRead() {
+  for (let attempt = 0; attempt < 50; attempt++) {
+    const rows = await sql`SELECT count(*)::int AS blocked FROM pg_stat_activity
+      WHERE wait_event_type = 'Lock' AND query LIKE '%group_members%'`;
+    if (Number(rows[0].blocked) > 0) return;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error("Detail read did not reach the blocked member check");
+}
 
 async function main() {
   const [matthew, michael, jet, other, outsider] = await Promise.all([
@@ -28,11 +55,21 @@ async function main() {
       payerId: matthew.id, categoryId: null, notes: "", splitMethod: "equal", participants: [{ userId: jet.id }] } });
   assert(expense.res.ok, `ordinary reimbursement: ${expense.text}`);
 
+  async function snapshot(): Promise<[number, number][]> {
+    const result = await request(`/api/groups/${groupId}`, { cookie: matthew.cookie });
+    assert(result.res.ok, `group overview: ${result.text}`);
+    return jsonArray(result.json.balances, "balances").map((item) => {
+      const row = jsonObject(item, "balance");
+      return [jsonNumber(row.userId, "user id"), jsonNumber(row.netCents, "net")] as [number, number];
+    }).sort((a, b) => a[0] - b[0]);
+  }
+  async function nets() { return new Map(await snapshot()); }
+
   const body = { title: "Shared obligations", amountCents: 12000,
     owes: { method: "equal", participants: [matthew, michael, jet].map((m) => ({ userId: m.id })) },
     receives: { method: "exact", participants: [
       { userId: matthew.id, value: 8000 }, { userId: michael.id, value: 4000 },
-    ] },
+    ] }, expectedBalances: await snapshot(),
   };
   const path = `/api/groups/${groupId}/group-balances`;
   for (const invalid of [
@@ -52,14 +89,10 @@ async function main() {
   const created = await request(path, { cookie: matthew.cookie, body });
   assert(created.res.ok, `create group balance: ${created.text}`);
   const id = jsonNumber(created.json.id, "group balance id");
-  async function nets() {
-    const result = await request(`/api/groups/${groupId}`, { cookie: matthew.cookie });
-    assert(result.res.ok, `group overview: ${result.text}`);
-    return new Map(jsonArray(result.json.balances, "balances").map((item) => {
-      const row = jsonObject(item, "balance");
-      return [jsonNumber(row.userId, "user id"), jsonNumber(row.netCents, "net")] as const;
-    }));
-  }
+  const staleCreate = await request(path, { cookie: michael.cookie, body: { ...body, title: "Stale preview" } });
+  assert(staleCreate.res.status === 400 && String(staleCreate.json.error).includes("Refresh"),
+    "a second balance changed the preview but stale create was accepted");
+  console.log("snapshot gate: stale create rejected");
   let current = await nets();
   assert(current.get(matthew.id) === 5000 && current.get(michael.id) === 0 &&
     current.get(jet.id) === -5000 && current.get(other.id) === 0, "created nets did not match");
@@ -78,9 +111,26 @@ async function main() {
     receives: { method: "percentage", participants: [
       { userId: matthew.id, value: 50 }, { userId: michael.id, value: 50 },
     ] },
-    expectedUpdatedAt: saved.updatedAt,
+    expectedUpdatedAt: saved.updatedAt, expectedBalances: await snapshot(),
   };
-  const edited = await request(`/api/group-balances/${id}`, { cookie: matthew.cookie, method: "PATCH", body: edit });
+  const concurrent = await request(path, { cookie: michael.cookie, body: {
+    title: "Concurrent change", amountCents: 100,
+    owes: { method: "equal", participants: [{ userId: jet.id }] },
+    receives: { method: "equal", participants: [{ userId: matthew.id }] },
+    expectedBalances: await snapshot(),
+  } });
+  assert(concurrent.res.ok, `concurrent balance: ${concurrent.text}`);
+  const staleGroupEdit = await request(`/api/group-balances/${id}`, { cookie: matthew.cookie, method: "PATCH", body: edit });
+  assert(staleGroupEdit.res.status === 400, "group changed after preview but edit was accepted");
+  console.log("snapshot gate: concurrent group edit rejected");
+  const concurrentId = jsonNumber(concurrent.json.id, "concurrent id");
+  const concurrentDetail = await request(`/api/group-balances/${concurrentId}`, { cookie: michael.cookie });
+  const concurrentVersion = String(jsonObject(concurrentDetail.json.balance, "concurrent detail").updatedAt);
+  const removedConcurrent = await request(`/api/group-balances/${concurrentId}?expectedUpdatedAt=${encodeURIComponent(concurrentVersion)}`,
+    { cookie: michael.cookie, method: "DELETE" });
+  assert(removedConcurrent.res.ok, `remove concurrent change: ${removedConcurrent.text}`);
+  const edited = await request(`/api/group-balances/${id}`, { cookie: matthew.cookie, method: "PATCH",
+    body: { ...edit, expectedBalances: await snapshot() } });
   assert(edited.res.ok, `edit: ${edited.text}`);
   current = await nets();
   assert(current.get(matthew.id) === 1026 && current.get(michael.id) === -1 &&
@@ -91,7 +141,8 @@ async function main() {
     jsonObject(reopenedRow.receives, "received side").method === "percentage", "edited methods lost");
   assert(jsonArray(jsonObject(reopenedRow.owes, "owed side").participants, "owed people").length === 3,
     "edited selection lost");
-  const stale = await request(`/api/group-balances/${id}`, { cookie: matthew.cookie, method: "PATCH", body: edit });
+  const stale = await request(`/api/group-balances/${id}`, { cookie: matthew.cookie, method: "PATCH",
+    body: { ...edit, expectedBalances: await snapshot() } });
   assert(stale.res.status === 400, "stale edit did not fail");
   const afterList = await request(path, { cookie: matthew.cookie });
   assert(jsonArray(afterList.json.balances, "group balance list").length === 1, "edit added a duplicate record");
@@ -101,8 +152,93 @@ async function main() {
   current = await nets();
   assert(current.get(matthew.id) === 1000 && current.get(jet.id) === -1000 &&
     current.get(michael.id) === 0 && current.get(other.id) === 0, "delete did not restore reimbursement balances");
+
+  const legacy = await request(path, { cookie: matthew.cookie, body: { title: "Legacy tie", amountCents: 1,
+    owes: { method: "equal", participants: [{ userId: matthew.id }, { userId: michael.id }] },
+    receives: { method: "equal", participants: [{ userId: jet.id }] },
+    expectedBalances: await snapshot(),
+  } });
+  assert(legacy.res.ok, `legacy tie: ${legacy.text}`);
+  const legacyId = jsonNumber(legacy.json.id, "legacy id");
+  let parentInsertRejected = false;
+  try {
+    await sql`INSERT INTO group_obligations (group_id, title, amount_cents, owed_method, receive_method, created_by)
+      VALUES (${groupId}, 'Invalid parent only', 100, 'equal', 'equal', ${matthew.id})`;
+  } catch { parentInsertRejected = true; }
+  assert(parentInsertRejected, "parent-only insert committed without both allocation sides");
+  let parentUpdateRejected = false;
+  try {
+    await sql`UPDATE group_obligations SET amount_cents = 2 WHERE id = ${legacyId}`;
+  } catch { parentUpdateRejected = true; }
+  assert(parentUpdateRejected, "parent-only total update committed with mismatched sides");
+  console.log("deferred invariant: parent-only insert and total update rejected");
+  const oldWinner = Math.max(matthew.id, michael.id);
+  const oldLoser = Math.min(matthew.id, michael.id);
+  await sql.transaction((tx) => [
+    tx`UPDATE group_obligation_allocations SET share_cents = CASE WHEN user_id = ${oldWinner} THEN 1 ELSE 0 END
+      WHERE obligation_id = ${legacyId} AND side = 'owes'`,
+    tx`UPDATE users SET display_name = CASE WHEN id = ${oldWinner} THEN 'A legacy winner' ELSE 'Z legacy loser' END
+      WHERE id IN (${oldWinner}, ${oldLoser})`,
+  ]);
+  const legacyBefore = await request(`/api/group-balances/${legacyId}`, { cookie: matthew.cookie });
+  const legacyRow = jsonObject(legacyBefore.json.balance, "legacy balance");
+  const renamed = await request(`/api/group-balances/${legacyId}`, { cookie: matthew.cookie, method: "PATCH",
+    body: { title: "Legacy tie renamed", amountCents: 1,
+      owes: { method: "equal", participants: [{ userId: oldLoser }, { userId: oldWinner }] },
+      receives: { method: "equal", participants: [{ userId: jet.id }] },
+      expectedUpdatedAt: legacyRow.updatedAt, expectedBalances: await snapshot(),
+    } });
+  assert(renamed.res.ok, `title edit after display-name reorder: ${renamed.text}`);
+  const legacyAfter = await request(`/api/group-balances/${legacyId}`, { cookie: matthew.cookie });
+  const owedRows = jsonArray(jsonObject(jsonObject(legacyAfter.json.balance, "legacy after").owes, "owed side").participants, "owed rows");
+  assert(jsonNumber(jsonObject(owedRows.find((p) => jsonObject(p, "owed row").userId === oldWinner), "winner").shareCents, "share") === 1,
+    "title-only edit moved a rounding cent after display-name reorder");
+  console.log("rounding: title edit retained legacy awarded cent after display-name reorder");
+
+  const legacyUpdated = jsonObject(legacyAfter.json.balance, "legacy updated");
+  const removedLegacy = await request(`/api/group-balances/${legacyId}?expectedUpdatedAt=${encodeURIComponent(String(legacyUpdated.updatedAt))}`,
+    { cookie: matthew.cookie, method: "DELETE" });
+  assert(removedLegacy.res.ok, `remove legacy tie: ${removedLegacy.text}`);
+
+  const atomic = await request(path, { cookie: matthew.cookie, body: {
+    title: "Atomic detail", amountCents: 100,
+    owes: { method: "equal", participants: [{ userId: jet.id }] },
+    receives: { method: "equal", participants: [{ userId: matthew.id }] },
+    expectedBalances: await snapshot(),
+  } });
+  assert(atomic.res.ok, `atomic fixture: ${atomic.text}`);
+  const atomicId = jsonNumber(atomic.json.id, "atomic id");
+  const memberLock = await lockMemberReads();
+  let blockedRead: ReturnType<typeof request> | null = null;
+  try {
+    blockedRead = request(`/api/group-balances/${atomicId}`, { cookie: matthew.cookie });
+    await waitForBlockedMemberRead();
+    await sql.transaction((tx) => [
+      tx`UPDATE group_obligations SET amount_cents = 200, owed_method = 'exact', receive_method = 'exact',
+        updated_at = now() WHERE id = ${atomicId}`,
+      tx`UPDATE group_obligation_allocations SET share_cents = 200, raw_input = 200 WHERE obligation_id = ${atomicId}`,
+    ]);
+  } finally {
+    memberLock.stdin.end("ROLLBACK;\n");
+  }
+  assert(blockedRead, "detail request did not start");
+  const atomicRead = await blockedRead;
+  assert(atomicRead.res.ok, `atomic read: ${atomicRead.text}`);
+  const atomicRow = jsonObject(atomicRead.json.balance, "atomic read");
+  const atomicOwes = jsonObject(atomicRow.owes, "atomic owed side");
+  const atomicAllocations = jsonArray(atomicOwes.participants, "atomic allocations");
+  assert(jsonNumber(atomicRow.amountCents, "atomic amount") === 100 && atomicOwes.method === "equal" &&
+    jsonNumber(jsonObject(atomicAllocations[0], "atomic share").shareCents, "atomic share cents") === 100,
+    "reopen combined the old parent with new allocations");
+  console.log("detail read: parent and allocations stayed in one snapshot during forced race");
+  const atomicCurrent = await request(`/api/group-balances/${atomicId}`, { cookie: matthew.cookie });
+  const atomicVersion = String(jsonObject(atomicCurrent.json.balance, "atomic current").updatedAt);
+  const removedAtomic = await request(`/api/group-balances/${atomicId}?expectedUpdatedAt=${encodeURIComponent(atomicVersion)}`,
+    { cookie: matthew.cookie, method: "DELETE" });
+  assert(removedAtomic.res.ok, `remove atomic fixture: ${removedAtomic.text}`);
+
   for (let n = 0; n < 51; n++) {
-    const added = await request(path, { cookie: matthew.cookie, body: { ...body, title: `Page ${n}` } });
+    const added = await request(path, { cookie: matthew.cookie, body: { ...body, title: `Page ${n}`, expectedBalances: await snapshot() } });
     assert(added.res.ok, `page fixture ${n}: ${added.text}`);
   }
   const firstPage = await request(`${path}?limit=50`, { cookie: matthew.cookie });
@@ -112,9 +248,10 @@ async function main() {
   const secondPage = await request(`${path}?limit=50&before=${cursor}`, { cookie: matthew.cookie });
   const secondRows = jsonArray(secondPage.json.balances, "second page");
   assert(secondRows.length === 1 && secondPage.json.hasMore === false, "cursor page wrong");
+  console.log("pagination: 51 records loaded through the cursor");
   const badCursor = await request(`${path}?before=bad`, { cookie: matthew.cookie });
   assert(badCursor.res.status === 400, "invalid cursor was accepted");
-  console.log("group balances API: validation, create, reopen, edit, stale version, rounding, delete, reimbursement isolation, and cursor pagination passed");
+  console.log("group balances API: validation, stale previews, stable cents after rename, edit, delete, reimbursement isolation, and cursor pagination passed");
 }
 
 main().finally(() => cleanupQaUsers(suffix)).catch((error) => {

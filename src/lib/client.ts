@@ -48,6 +48,8 @@ const dataCache = new Map<string, unknown>();
 const cacheTimes = new Map<string, number>();
 const cacheStoredAt = new Map<string, number>();
 const inflight = new Map<string, Promise<unknown>>();
+const requestGeneration = new Map<string, number>();
+let cacheEpoch = 0;
 const READ_CACHE_KEY = "splitwisest.read-cache.v1";
 const CACHE_OWNER_COOKIE = "sw_cache_owner";
 const MAX_CACHE_AGE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -69,9 +71,11 @@ function cacheOwner(): string | null {
 }
 
 function clearReadCache(clearOwnerCookie = false) {
+  cacheEpoch++;
   dataCache.clear();
   cacheTimes.clear();
   cacheStoredAt.clear();
+  requestGeneration.clear();
   cacheHydrated = true;
   if (typeof window !== "undefined") {
     try { localStorage.removeItem(READ_CACHE_KEY); } catch {}
@@ -146,24 +150,29 @@ export function cacheGet<T>(path: string): T | null {
   return (dataCache.get(path) as T | undefined) ?? null;
 }
 
-export function apiCached<T>(path: string): Promise<T> {
+export function apiCached<T>(path: string, force = false): Promise<T> {
+  const pending = inflight.get(path);
+  if (!force && pending) return pending as Promise<T>;
   const cached = dataCache.get(path);
   const cachedAt = cacheTimes.get(path) ?? 0;
-  if (cached !== undefined && Date.now() - cachedAt < FRESH_DEDUPE_MS) {
+  if (!force && cached !== undefined && Date.now() - cachedAt < FRESH_DEDUPE_MS) {
     return Promise.resolve(cached as T);
   }
-  const pending = inflight.get(path);
-  if (pending) return pending as Promise<T>;
+  const generation = (requestGeneration.get(path) ?? 0) + 1;
+  requestGeneration.set(path, generation);
+  const epoch = cacheEpoch;
   const p = api<T>(path)
     .then((json) => {
-      dataCache.set(path, json);
-      const now = Date.now();
-      cacheTimes.set(path, now);
-      cacheStoredAt.set(path, now);
-      scheduleCachePersist();
+      if (cacheEpoch === epoch && requestGeneration.get(path) === generation) {
+        dataCache.set(path, json);
+        const now = Date.now();
+        cacheTimes.set(path, now);
+        cacheStoredAt.set(path, now);
+        scheduleCachePersist();
+      }
       return json;
     })
-    .finally(() => inflight.delete(path));
+    .finally(() => { if (inflight.get(path) === p) inflight.delete(path); });
   inflight.set(path, p);
   return p as Promise<T>;
 }
@@ -316,7 +325,7 @@ export function useApiData<T>(
   path: string,
   debounceMs = 0,
   opts: { sync?: false | keyof SyncCursors | (keyof SyncCursors)[]; enabled?: boolean } = {}
-): { data: T | null; error: string | null; status: number | null; reload: () => void } {
+): { data: T | null; error: string | null; status: number | null; reload: () => void; reloadFresh: () => void } {
   const enabled = opts.enabled !== false;
   const [state, setState] = useState<{ path: string; data: T | null; error: string | null; status: number | null }>({
     path,
@@ -324,13 +333,17 @@ export function useApiData<T>(
     error: null,
     status: null,
   });
-  const reload = useCallback(() => {
+  const requestSeq = useRef(0);
+  const fetchData = useCallback((force: boolean) => {
     const requestedPath = path;
-    apiCached<T>(path)
+    const seq = ++requestSeq.current;
+    apiCached<T>(path, force)
       .then((next) => {
+        if (seq !== requestSeq.current) return;
         setState({ path: requestedPath, data: next, error: null, status: 200 });
       })
       .catch((err) => {
+        if (seq !== requestSeq.current) return;
         const stale = cacheGet<T>(requestedPath);
         setState({
           path: requestedPath,
@@ -340,6 +353,8 @@ export function useApiData<T>(
         });
       });
   }, [path]);
+  const reload = useCallback(() => fetchData(false), [fetchData]);
+  const reloadFresh = useCallback(() => fetchData(true), [fetchData]);
   useLayoutEffect(() => {
     if (!enabled) return;
     hydrateReadCache();
@@ -375,6 +390,7 @@ export function useApiData<T>(
     error: enabled && state.path === path ? state.error : null,
     status: enabled && state.path === path ? state.status : null,
     reload,
+    reloadFresh,
   };
 }
 

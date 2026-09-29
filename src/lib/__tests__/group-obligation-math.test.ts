@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeGroupObligation, GroupObligationBody, parseGroupMoney } from "../group-obligation-math";
+import { computeGroupObligation, groupObligationDelta, GroupObligationBody, parseGroupMoney } from "../group-obligation-math";
 
 const members = new Set([1, 2, 3, 4]);
 const equal = (...ids: number[]) => ({ method: "equal" as const, participants: ids.map((userId) => ({ userId })) });
@@ -30,7 +30,7 @@ describe("group obligations", () => {
         { userId: 2, value: 33.33 }, { userId: 3, value: 66.67 },
       ] } });
     const result = computeGroupObligation(input, members, "USD");
-    expect([...result.owes]).toEqual([[3, 51], [1, 50]]);
+    expect([...result.owes]).toEqual([[1, 51], [3, 50]]);
     expect([...result.receives]).toEqual([[2, 34], [3, 67]]);
     const shares = computeGroupObligation(GroupObligationBody.parse({ ...input,
       receives: { method: "shares", participants: [
@@ -38,6 +38,31 @@ describe("group obligations", () => {
       ] },
     }), members, "USD");
     expect([...shares.receives]).toEqual([[1, 34], [2, 34], [3, 33]]);
+  });
+
+  it("keeps awarded cents on a title edit and orders new ties by user ID", () => {
+    const old = { amountCents: 1,
+      owes: { method: "equal" as const, participants: [
+        { userId: 2, shareCents: 1, value: null }, { userId: 1, shareCents: 0, value: null },
+      ] },
+      receives: { method: "equal" as const, participants: [{ userId: 3, shareCents: 1, value: null }] },
+    };
+    const input = GroupObligationBody.parse({ title: "Renamed", amountCents: 1,
+      owes: equal(1, 2), receives: equal(3) });
+    expect([...computeGroupObligation(input, members, "USD", old).owes]).toEqual([[2, 1], [1, 0]]);
+    expect([...computeGroupObligation(input, members, "USD").owes]).toEqual([[1, 1], [2, 0]]);
+    expect([...computeGroupObligation({ ...input, owes: equal(2, 1) }, members, "USD").owes])
+      .toEqual([[1, 1], [2, 0]]);
+  });
+
+  it("shows the true edit delta for old and new participants", () => {
+    const old = { amountCents: 100,
+      owes: { method: "equal" as const, participants: [{ userId: 1, shareCents: 100, value: null }] },
+      receives: { method: "equal" as const, participants: [{ userId: 2, shareCents: 100, value: null }] },
+    };
+    const next = computeGroupObligation(GroupObligationBody.parse({ title: "Changed debtor", amountCents: 100,
+      owes: equal(3), receives: equal(2) }), members, "USD", old);
+    expect([...groupObligationDelta(next.net, old)]).toEqual([[1, 100], [2, 0], [3, -100], [4, 0]]);
   });
 
   it("supports exact owes with share based receives", () => {

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { AlertCircle, Check, Users } from "lucide-react";
 import { api, ApiClientError, fmtMoney } from "@/lib/client";
 import { simplifyDebts } from "@/lib/money";
-import { computeGroupObligation, parseGroupMoney } from "@/lib/group-obligation-math";
+import { computeGroupObligation, groupObligationDelta, parseGroupMoney, type SavedGroupObligation } from "@/lib/group-obligation-math";
 import { currencyStep } from "@/lib/currencies";
 import { Button, ErrorNote, Field, Input, Modal } from "./ui";
 import { METHOD_LABELS, ParticipantSplit } from "./expense-splits";
@@ -17,13 +17,10 @@ type Side = {
   values: Record<number, string>;
 };
 
-export interface ExistingGroupBalance {
+export interface ExistingGroupBalance extends SavedGroupObligation {
   id: number;
   title: string;
-  amountCents: number;
   updatedAt: string;
-  owes: { method: Method; participants: { userId: number; shareCents: number; value: number | null }[] };
-  receives: { method: Method; participants: { userId: number; shareCents: number; value: number | null }[] };
 }
 
 const methods: Method[] = ["equal", "exact", "percentage", "shares"];
@@ -56,7 +53,7 @@ function sideInput(side: Side, members: Member[]) {
   return { method: side.method, participants };
 }
 
-export function GroupBalanceForm({ groupId, groupName, currency, members, meId, balances, existing, open, onClose, onSaved }: {
+export function GroupBalanceForm({ groupId, groupName, currency, members, meId, balances, existing, open, onClose, onSaved, onRefresh }: {
   groupId: number;
   groupName: string;
   currency: string;
@@ -67,6 +64,7 @@ export function GroupBalanceForm({ groupId, groupName, currency, members, meId, 
   open: boolean;
   onClose: () => void;
   onSaved: () => void;
+  onRefresh: () => void;
 }) {
   const [title, setTitle] = useState("");
   const [amount, setAmount] = useState("");
@@ -96,19 +94,23 @@ export function GroupBalanceForm({ groupId, groupName, currency, members, meId, 
     try {
       const owedInput = sideInput(owes, members);
       const receivedInput = sideInput(receives, members);
-      const body = { title: title.trim(), amountCents, owes: owedInput, receives: receivedInput, expectedUpdatedAt: existing?.updatedAt };
-      const recordNet = computeGroupObligation(body, new Set(members.map((m) => m.id)), currency).net;
-      const previous = new Map(members.map((m) => [m.id, 0]));
-      if (existing) {
-        for (const p of existing.receives.participants) previous.set(p.userId, (previous.get(p.userId) ?? 0) + p.shareCents);
-        for (const p of existing.owes.participants) previous.set(p.userId, (previous.get(p.userId) ?? 0) - p.shareCents);
-      }
+      const body = { title: title.trim(), amountCents, owes: owedInput, receives: receivedInput,
+        expectedUpdatedAt: existing?.updatedAt,
+        expectedBalances: balances.map((b) => [b.userId, b.netCents] as [number, number]).sort((a, b) => a[0] - b[0]),
+      };
+      const recordNet = computeGroupObligation(body, new Set(members.map((m) => m.id)), currency, existing ?? undefined).net;
+      const delta = groupObligationDelta(recordNet, existing ?? undefined);
       const after = new Map(members.map((m) => [m.id,
-        (balances.find((b) => b.userId === m.id)?.netCents ?? 0) - (previous.get(m.id) ?? 0) + (recordNet.get(m.id) ?? 0),
+        (balances.find((b) => b.userId === m.id)?.netCents ?? 0) + (delta.get(m.id) ?? 0),
       ]));
+      const affected = new Set([
+        ...owes.selected, ...receives.selected,
+        ...(existing?.owes.participants.map((p) => p.userId) ?? []),
+        ...(existing?.receives.participants.map((p) => p.userId) ?? []),
+      ]);
       return {
         body,
-        recordNet, suggestions: simplifyDebts(after),
+        delta, affected, suggestions: simplifyDebts(after),
       };
     } catch (e) {
       return { error: e instanceof Error ? e.message : "Check the allocations" };
@@ -155,6 +157,7 @@ export function GroupBalanceForm({ groupId, groupName, currency, members, meId, 
       onClose();
     } catch (e) {
       setError(e instanceof ApiClientError ? e.message : "Could not save group balance");
+      if (e instanceof ApiClientError && e.message.includes("Group balances changed")) onRefresh();
       setBusy(false);
     }
   }
@@ -175,13 +178,13 @@ export function GroupBalanceForm({ groupId, groupName, currency, members, meId, 
         </Field>
         {renderSide("owes", owes, setOwes)}
         {renderSide("receives", receives, setReceives)}
-        {preview.body && preview.recordNet ? (
+        {preview.body && preview.delta ? (
           <div className="space-y-3 rounded-xl border border-line p-3" aria-label="Balance preview">
             <h3 className="text-sm font-semibold">Preview</h3>
-            <p className="text-xs text-ink-faint">This adds obligations. It does not record a payment.</p>
+            <p className="text-xs text-ink-faint">{existing ? "This replaces obligations." : "This adds obligations."} It does not record a payment.</p>
             <ul className="divide-y divide-line rounded-lg border border-line">
-              {members.filter((m) => owes.selected.has(m.id) || receives.selected.has(m.id)).map((m) => {
-                const net = preview.recordNet?.get(m.id) ?? 0;
+              {members.filter((m) => preview.affected?.has(m.id)).map((m) => {
+                const net = preview.delta?.get(m.id) ?? 0;
                 return <li key={m.id} className="flex justify-between gap-3 px-3 py-2 text-sm">
                   <span className="truncate">{m.displayName}</span>
                   <span className="tnum font-medium">{net > 0 ? `receives ${fmtMoney(net, currency)}` : net < 0 ? `owes ${fmtMoney(-net, currency)}` : "no net change"}</span>

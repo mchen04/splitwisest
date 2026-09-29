@@ -174,6 +174,7 @@ export function useGroupPageData({
     refreshKey,
     loadError,
     loadDetail: reloadOverview,
+    refreshBalancePreview: detailState.reloadFresh,
     reloadInsights: reloadInsightExpenses,
     refreshAll,
   };

@@ -2,7 +2,7 @@ import { sql } from "./db";
 import { badRequest, notFound, forbidden } from "./api";
 import { loadGroupMemberIds } from "./balances";
 import { activityData } from "./activity";
-import { computeGroupObligation, GroupObligationInput } from "./group-obligation-math";
+import { computeGroupObligation, GroupObligationInput, SavedGroupObligation } from "./group-obligation-math";
 
 function allocationsJson(input: GroupObligationInput, computed: ReturnType<typeof computeGroupObligation>) {
   return JSON.stringify((["owes", "receives"] as const).flatMap((side) => {
@@ -14,8 +14,10 @@ function allocationsJson(input: GroupObligationInput, computed: ReturnType<typeo
 }
 
 export async function createGroupObligation(groupId: number, currency: string, user: { id: number; displayName: string }, input: GroupObligationInput) {
+  if (!input.expectedBalances) badRequest("Group balances changed. Refresh and try again");
   const memberIds = await loadGroupMemberIds(groupId);
   const computed = computeGroupObligation(input, memberIds, currency);
+  const expectedBalances = JSON.stringify(input.expectedBalances);
   const actionText = `added group balance "${input.title}"`;
   const [, rows] = await sql.transaction((tx) => [
     tx`SELECT pg_advisory_xact_lock(${groupId}::int)`,
@@ -24,8 +26,13 @@ export async function createGroupObligation(groupId: number, currency: string, u
         SELECT x.side, x.user_id, x.share_cents, x.raw_input
         FROM jsonb_to_recordset(${allocationsJson(input, computed)}::jsonb)
           AS x(side text, user_id bigint, share_cents bigint, raw_input numeric)
+      ), balance_unchanged AS (
+        SELECT ${expectedBalances}::jsonb = COALESCE(
+          (SELECT jsonb_agg(jsonb_build_array(b.user_id, b.net_cents) ORDER BY b.user_id)
+           FROM group_balance_rows(${groupId}) b), '[]'::jsonb
+        ) AS ok
       ), members_ok AS (
-        SELECT 1 WHERE EXISTS (
+        SELECT 1 WHERE (SELECT ok FROM balance_unchanged) AND EXISTS (
           SELECT 1 FROM group_members WHERE group_id = ${groupId} AND user_id = ${user.id}
         ) AND NOT EXISTS (
           SELECT 1 FROM allocations a WHERE NOT EXISTS (
@@ -47,16 +54,18 @@ export async function createGroupObligation(groupId: number, currency: string, u
         FROM inserted RETURNING 1
       ) SELECT id FROM inserted`,
   ]);
-  if (!rows[0]) badRequest("All participants must be group members");
+  if (!rows[0]) badRequest("Group balances changed. Refresh and try again");
   return Number(rows[0].id);
 }
 
 export async function updateGroupObligation(
   id: number, groupId: number, currency: string, user: { id: number; displayName: string }, input: GroupObligationInput,
+  saved: SavedGroupObligation,
 ) {
-  if (!input.expectedUpdatedAt) badRequest("Group balance changed, refresh and try again");
+  if (!input.expectedUpdatedAt || !input.expectedBalances) badRequest("Group balances changed. Refresh and try again");
   const memberIds = await loadGroupMemberIds(groupId);
-  const computed = computeGroupObligation(input, memberIds, currency);
+  const computed = computeGroupObligation(input, memberIds, currency, saved);
+  const expectedBalances = JSON.stringify(input.expectedBalances);
   const actionText = `edited group balance "${input.title}"`;
   const [, rows] = await sql.transaction((tx) => [
     tx`SELECT pg_advisory_xact_lock(${groupId}::int)`,
@@ -65,8 +74,13 @@ export async function updateGroupObligation(
         SELECT x.side, x.user_id, x.share_cents, x.raw_input
         FROM jsonb_to_recordset(${allocationsJson(input, computed)}::jsonb)
           AS x(side text, user_id bigint, share_cents bigint, raw_input numeric)
+      ), balance_unchanged AS (
+        SELECT ${expectedBalances}::jsonb = COALESCE(
+          (SELECT jsonb_agg(jsonb_build_array(b.user_id, b.net_cents) ORDER BY b.user_id)
+           FROM group_balance_rows(${groupId}) b), '[]'::jsonb
+        ) AS ok
       ), members_ok AS (
-        SELECT 1 WHERE EXISTS (
+        SELECT 1 WHERE (SELECT ok FROM balance_unchanged) AND EXISTS (
           SELECT 1 FROM group_members WHERE group_id = ${groupId} AND user_id = ${user.id}
         ) AND NOT EXISTS (
           SELECT 1 FROM allocations a WHERE NOT EXISTS (
@@ -93,7 +107,7 @@ export async function updateGroupObligation(
         FROM updated RETURNING 1
       ) SELECT id FROM updated`,
   ]);
-  if (!rows[0]) badRequest("Group balance changed, refresh and try again");
+  if (!rows[0]) badRequest("Group balances changed. Refresh and try again");
 }
 
 export async function deleteGroupObligation(id: number, groupId: number, user: { id: number; displayName: string }, expectedUpdatedAt: string) {
@@ -119,14 +133,18 @@ export async function deleteGroupObligation(id: number, groupId: number, user: {
 export async function loadGroupObligation(id: number, userId: number) {
   const rows = await sql`
     SELECT go.*, g.currency,
-      to_char(go.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS updated_at_token
+      to_char(go.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS updated_at_token,
+      COALESCE((
+        SELECT jsonb_agg(jsonb_build_object(
+          'side', a.side, 'user_id', a.user_id, 'share_cents', a.share_cents, 'raw_input', a.raw_input
+        ) ORDER BY a.user_id)
+        FROM group_obligation_allocations a WHERE a.obligation_id = go.id
+      ), '[]'::jsonb) AS allocations
     FROM group_obligations go JOIN groups g ON g.id = go.group_id WHERE go.id = ${id}`;
   if (!rows[0]) notFound("Group balance not found");
   const row = rows[0];
   if (!(await loadGroupMemberIds(Number(row.group_id))).has(userId)) forbidden();
-  const allocations = await sql`
-    SELECT side, user_id, share_cents, raw_input FROM group_obligation_allocations
-    WHERE obligation_id = ${id} ORDER BY user_id`;
+  const allocations = row.allocations as { side: string; user_id: number; share_cents: number; raw_input: number | null }[];
   const side = (name: "owes" | "receives") => ({
     method: row[name === "owes" ? "owed_method" : "receive_method"],
     participants: allocations.filter((a) => a.side === name).map((a) => ({

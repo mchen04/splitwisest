@@ -24,6 +24,7 @@ import { Expense, Settlement, useGroupPageData } from "./use-group-page-data";
 
 type Tab = "expenses" | "balances" | "insights" | "chat" | "activity";
 type GroupBalanceSummary = { id: number; title: string; amountCents: number; updatedAt: string };
+type GroupBalancePage = { balances: GroupBalanceSummary[]; hasMore: boolean };
 
 export default function GroupPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -45,19 +46,21 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
   const categories = categoriesData?.categories ?? [];
   const {
     detail, expenses, insightExpenses, insightError, hasMoreExpenses, recurring, settlements, hasMoreSettlements,
-    activity, refreshKey, loadError, loadDetail, reloadInsights, refreshAll,
+    activity, refreshKey, loadError, loadDetail, reloadInsights, refreshAll, refreshBalancePreview,
   } = useGroupPageData({ groupId, filters, expenseLimit, settlementLimit, insightsEnabled: tab === "insights" });
 
   // modals
   const [expenseOpen, setExpenseOpen] = useState(false);
   const [groupBalanceOpen, setGroupBalanceOpen] = useState(false);
   const [editingGroupBalance, setEditingGroupBalance] = useState<ExistingGroupBalance | null>(null);
-  const [moreGroupBalances, setMoreGroupBalances] = useState<GroupBalanceSummary[]>([]);
-  const [moreGroupBalancesAvailable, setMoreGroupBalancesAvailable] = useState<boolean | null>(null);
+  const [extraGroupBalancePage, setExtraGroupBalancePage] = useState<{
+    groupId: number; firstPage: GroupBalancePage; balances: GroupBalanceSummary[]; hasMore: boolean;
+  } | null>(null);
   const [loadingGroupBalances, setLoadingGroupBalances] = useState(false);
-  const { data: groupBalancesData, reload: reloadGroupBalances } = useApiData<{
-    balances: GroupBalanceSummary[]; hasMore: boolean;
-  }>(`/api/groups/${groupId}/group-balances?limit=50`);
+  const { data: groupBalancesData, reload: reloadGroupBalances } = useApiData<GroupBalancePage>(
+    `/api/groups/${groupId}/group-balances?limit=50`);
+  const activeExtraGroupBalancePage = extraGroupBalancePage?.groupId === groupId &&
+    extraGroupBalancePage.firstPage === groupBalancesData ? extraGroupBalancePage : null;
   const [editing, setEditing] = useState<Parameters<typeof ExpenseForm>[0]["existing"]>(null);
   const [settleOpen, setSettleOpen] = useState(false);
   const [settlePrefill, setSettlePrefill] = useState<{ payerId: number; recipientId: number; amountCents: number } | null>(null);
@@ -81,12 +84,6 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setExpenseLimit(50);
   }, [filters]);
-
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setMoreGroupBalances([]);
-    setMoreGroupBalancesAvailable(null);
-  }, [groupId]);
 
   useEffect(() => {
     if (searchParams.get("add") === "1") {
@@ -136,14 +133,15 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
   }
 
   async function loadMoreGroupBalances() {
-    const last = moreGroupBalances.at(-1) ?? groupBalancesData?.balances.at(-1);
-    if (!last || loadingGroupBalances) return;
+    const firstPage = groupBalancesData;
+    const last = activeExtraGroupBalancePage?.balances.at(-1) ?? firstPage?.balances.at(-1);
+    if (!firstPage || !last || loadingGroupBalances) return;
     setLoadingGroupBalances(true);
     try {
-      const next = await api<{ balances: GroupBalanceSummary[]; hasMore: boolean }>(
+      const next = await api<GroupBalancePage>(
         `/api/groups/${groupId}/group-balances?limit=50&before=${last.id}`);
-      setMoreGroupBalances((rows) => [...rows, ...next.balances]);
-      setMoreGroupBalancesAvailable(next.hasMore);
+      setExtraGroupBalancePage({ groupId, firstPage,
+        balances: [...(activeExtraGroupBalancePage?.balances ?? []), ...next.balances], hasMore: next.hasMore });
     } catch (e) {
       window.alert(e instanceof ApiClientError ? e.message : "Could not load group balances");
     } finally {
@@ -152,8 +150,7 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
   }
 
   function reloadGroupBalanceList() {
-    setMoreGroupBalances([]);
-    setMoreGroupBalancesAvailable(null);
+    setExtraGroupBalancePage(null);
     reloadGroupBalances();
   }
 
@@ -671,7 +668,7 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
             <p className="px-3.5 py-3 text-sm text-ink-faint">No group balances yet. Add obligations without recording a payment.</p>
           ) : <>
             <ul className="divide-y divide-line">
-              {[...groupBalancesData.balances, ...moreGroupBalances].map((row) => <li key={row.id} className="flex min-h-[var(--row-h)] items-center gap-2.5 px-3.5 py-1.5">
+              {[...groupBalancesData.balances, ...(activeExtraGroupBalancePage?.balances ?? [])].map((row) => <li key={row.id} className="flex min-h-[var(--row-h)] items-center gap-2.5 px-3.5 py-1.5">
                 <button type="button" onClick={() => openGroupBalance(row.id)} className="min-w-0 flex-1 truncate text-left text-sm font-medium hover:text-accent-dark">
                   {row.title}
                 </button>
@@ -680,7 +677,7 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
                 <button type="button" onClick={() => removeGroupBalance(row)} aria-label={`Delete ${row.title}`} className="rounded-lg p-2.5 text-ink-faint hover:bg-danger-soft hover:text-danger"><Trash2 className="h-4 w-4" /></button>
               </li>)}
             </ul>
-            {(moreGroupBalancesAvailable ?? groupBalancesData.hasMore) && <div className="border-t border-line p-3 text-center"><Button variant="secondary" busy={loadingGroupBalances} onClick={loadMoreGroupBalances}>Load more</Button></div>}
+            {(activeExtraGroupBalancePage?.hasMore ?? groupBalancesData.hasMore) && <div className="border-t border-line p-3 text-center"><Button variant="secondary" busy={loadingGroupBalances} onClick={loadMoreGroupBalances}>Load more</Button></div>}
           </>}
         </Card>
         <Card>
@@ -836,6 +833,7 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
             existing={editingGroupBalance} open={groupBalanceOpen}
             onClose={() => setGroupBalanceOpen(false)}
             onSaved={() => { reloadGroupBalanceList(); refreshAll(); }}
+            onRefresh={refreshBalancePreview}
           />
           <SettleModal
             open={settleOpen}
