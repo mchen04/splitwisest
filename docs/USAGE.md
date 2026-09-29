@@ -42,7 +42,7 @@
 - Enter a description and total in the group currency. Choose who owes and who should receive.
 - Split each side by Equal, Exact amounts, Percentages, or Shares. Both sides must match the total.
 - The preview shows each person’s net change and the resulting group debts before you save. On edit, it includes people removed from the new split.
-- If another member changes the group before you save, the form stays open and refreshes its preview. Review it, then save again.
+- If another member changes the group before you save, the form stays open and refreshes the group balance preview. Review it before retrying. If the entry you are editing changed, reopen it to load its latest version.
 - One person can appear on both sides. Only the difference changes their balance.
 - Edit or delete a group balance from the same tab. This does not record a payment.
 - The **group balance strip** shows each member's net. **Suggested settle-up** shows the fewest payments that clear the group.

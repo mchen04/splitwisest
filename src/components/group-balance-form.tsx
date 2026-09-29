@@ -100,8 +100,9 @@ export function GroupBalanceForm({ groupId, groupName, currency, members, meId, 
       };
       const recordNet = computeGroupObligation(body, new Set(members.map((m) => m.id)), currency, existing ?? undefined).net;
       const delta = groupObligationDelta(recordNet, existing ?? undefined);
+      const currentNet = new Map(balances.map((b) => [b.userId, b.netCents]));
       const after = new Map(members.map((m) => [m.id,
-        (balances.find((b) => b.userId === m.id)?.netCents ?? 0) + (delta.get(m.id) ?? 0),
+        (currentNet.get(m.id) ?? 0) + (delta.get(m.id) ?? 0),
       ]));
       const affected = new Set([
         ...owes.selected, ...receives.selected,
