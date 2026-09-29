@@ -156,7 +156,37 @@ async function main() {
     const reopened = page.getByRole("dialog", { name: "Edit group balance" });
     assert(await reopened.getByLabel("Total to settle").inputValue() === "0.01", "edited total lost after reload");
     assert(await reopened.locator('section[aria-label="Who owes"]').getByRole("radio", { name: "Shares", exact: true }).getAttribute("aria-checked") === "true", "edited method lost");
+    await reopened.getByLabel("Total to settle").fill("0.15");
+    assert(await reopened.locator('[aria-label="Balance preview"]').isVisible(), "draft preview was missing before record conflict");
+    const sameRecordList = await request(`/api/groups/${groupId}/group-balances`, { cookie: matthew.cookie });
+    assert(sameRecordList.res.ok, `same record list: ${sameRecordList.text}`);
+    const sameRecordId = Number((sameRecordList.json.balances as { id: number; title: string }[])
+      .find((row) => row.title === "Shared obligations")?.id);
+    assert(Number.isSafeInteger(sameRecordId), "edited record missing from list");
+    const sameRecord = await request(`/api/group-balances/${sameRecordId}`, { cookie: michael.cookie });
+    assert(sameRecord.res.ok, `same record detail: ${sameRecord.text}`);
+    const sameRecordRow = sameRecord.json.balance as { id: number; updatedAt: string };
+    const changedRecord = await request(`/api/group-balances/${sameRecordRow.id}`, { cookie: michael.cookie, method: "PATCH", body: {
+      title: "Changed by another member", amountCents: 200,
+      owes: { method: "equal", participants: [{ userId: jet.id }] },
+      receives: { method: "equal", participants: [{ userId: matthew.id }] },
+      expectedUpdatedAt: sameRecordRow.updatedAt, expectedBalances: await currentSnapshot(),
+    } });
+    assert(changedRecord.res.ok, `same record change: ${changedRecord.text}`);
+    const sameRecordSave = page.waitForResponse((res) => res.url().includes(`/api/group-balances/${sameRecordRow.id}`) && res.request().method() === "PATCH");
+    await reopened.getByRole("button", { name: "Save group balance" }).click();
+    assert((await sameRecordSave).status() === 400, "same record conflict was accepted");
+    await reopened.getByText("This group balance changed. Close and reopen it before editing").waitFor();
+    assert(await reopened.locator('[aria-label="Balance preview"]').count() === 0, "stale record preview remained visible");
+    assert(await reopened.getByRole("button", { name: "Save group balance" }).isDisabled(), "stale record could be retried");
+    await reopened.screenshot({ path: `${evidenceDir}/review-2-record-conflict.png` });
     await reopened.getByRole("button", { name: "Cancel" }).click();
+    await page.getByRole("button", { name: "Changed by another member", exact: true }).click();
+    const freshRecord = page.getByRole("dialog", { name: "Edit group balance" });
+    assert(await freshRecord.getByLabel("Total to settle").inputValue() === "2.00", "reopen did not load the changed record");
+    assert(await freshRecord.locator('[aria-label="Balance preview"]').isVisible(), "reopen did not restore preview");
+    assert(await freshRecord.getByRole("button", { name: "Save group balance" }).isEnabled(), "reopen did not restore save");
+    await freshRecord.getByRole("button", { name: "Cancel" }).click();
 
     for (const width of [320, 390, 393]) {
       const mobile = await browser.newContext({ viewport: { width, height: 844 }, isMobile: true, deviceScaleFactor: 3, ignoreHTTPSErrors: true,
@@ -218,8 +248,37 @@ async function main() {
       await page.getByRole("button", { name: "Page 1", exact: true }).count() === 1,
       "paging sync omitted or duplicated a balance");
     await page.screenshot({ path: `${evidenceDir}/review-pagination-after-sync.png`, fullPage: true });
+
+    const cacheContext = await browser.newContext({ viewport: { width: 1280, height: 850 }, ignoreHTTPSErrors: true, serviceWorkers: "block" });
+    await cacheContext.addInitScript(() => {
+      const frozen = Date.now();
+      Date.now = () => frozen;
+    });
+    const cachePage = await cacheContext.newPage();
+    await login(cachePage, matthew.username);
+    let listReads = 0;
+    cachePage.on("response", (response) => {
+      if (response.url().endsWith(`/api/groups/${groupId}/group-balances?limit=50`)) listReads++;
+    });
+    await cachePage.goto(`${browserBase}/groups/${groupId}`);
+    await cachePage.locator('[data-group-tab="balances"]:visible').click();
+    await cachePage.getByRole("button", { name: "Page 51", exact: true }).waitFor();
+    await cachePage.waitForResponse((response) => response.url().endsWith("/api/sync"));
+    await cachePage.waitForResponse((response) => response.url().endsWith("/api/sync"));
+    const readsBeforeSync = listReads;
+    const rapid = await request(`/api/groups/${groupId}/group-balances`, { cookie: michael.cookie,
+      body: { title: "Within fresh cache", amountCents: 1,
+        owes: { method: "equal", participants: [{ userId: jet.id }] },
+        receives: { method: "equal", participants: [{ userId: matthew.id }] },
+        expectedBalances: await currentSnapshot(),
+      } });
+    assert(rapid.res.ok, `fresh-cache fixture: ${rapid.text}`);
+    await cachePage.getByRole("button", { name: "Within fresh cache", exact: true }).waitFor({ timeout: 15000 });
+    assert(listReads > readsBeforeSync, "sync did not force a first-page network request inside cache TTL");
+    await cachePage.screenshot({ path: `${evidenceDir}/review-2-fresh-cache-sync.png`, fullPage: true });
+    await cacheContext.close();
     await desktop.close();
-    console.log("WebKit desktop/mobile: edit delta, stale-preview refresh, saved balances, and synced cursor pagination passed");
+    console.log("WebKit desktop/mobile: edit delta, record conflict lockout/reopen, saved balances, synced cursor pagination, and forced network inside frozen cache TTL passed");
   } finally {
     await browser.close();
   }

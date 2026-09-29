@@ -724,8 +724,27 @@ async function main() {
         EXECUTE FUNCTION check_group_obligation_allocations();
       END IF;
     END $$`;
+  await sql`
+    CREATE OR REPLACE FUNCTION forbid_group_obligation_allocation_reparent()
+    RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+      IF NEW.obligation_id IS DISTINCT FROM OLD.obligation_id THEN
+        RAISE EXCEPTION 'group balance allocation parent cannot change';
+      END IF;
+      RETURN NEW;
+    END;
+    $$`;
+  await sql`
+    DO $$ BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'group_obligation_allocations_immutable_parent') THEN
+        CREATE TRIGGER group_obligation_allocations_immutable_parent
+        BEFORE UPDATE OF obligation_id ON group_obligation_allocations
+        FOR EACH ROW EXECUTE FUNCTION forbid_group_obligation_allocation_reparent();
+      END IF;
+    END $$`;
   await markMigration("20260929_group_balances");
   await markMigration("20260929_group_balances_parent_check");
+  await markMigration("20260929_group_balances_immutable_allocations");
 
   console.log("migration complete");
 }

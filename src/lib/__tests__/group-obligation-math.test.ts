@@ -97,6 +97,25 @@ describe("group obligations", () => {
     }), members, "USD")).toThrow(/100/);
   });
 
+  it("requires an explicit value for every selected weighted participant", () => {
+    const base = { title: "Weights", amountCents: 100, owes: equal(1), receives: equal(2) };
+    for (const method of ["exact", "percentage", "shares"]) {
+      expect(GroupObligationBody.safeParse({ ...base, receives: {
+        method, participants: [{ userId: 2, value: method === "exact" ? 100 : method === "percentage" ? 100 : 1 },
+          { userId: 3 }],
+      } }).success).toBe(false);
+    }
+    for (const method of ["exact", "percentage", "shares"] as const) {
+      const input = GroupObligationBody.parse({ ...base, receives: {
+        method, participants: [
+          { userId: 2, value: method === "shares" ? 1 : 100 }, { userId: 3, value: 0 },
+        ],
+      } });
+      expect([...computeGroupObligation(input, members, "USD").receives]).toEqual([[2, 100], [3, 0]]);
+    }
+    expect(GroupObligationBody.safeParse(base).success).toBe(true);
+  });
+
   it("keeps zero-decimal currencies in whole units", () => {
     const input = GroupObligationBody.parse({ title: "Yen", amountCents: 500,
       owes: equal(1, 2), receives: equal(3) });

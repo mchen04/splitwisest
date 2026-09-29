@@ -10,7 +10,16 @@ const Side = z.object({
     userId: z.number().int().positive(),
     value: z.number().finite().min(0).optional(),
   })).min(1, "Select at least one person"),
+}).superRefine((side, ctx) => {
+  if (side.method === "equal") return;
+  side.participants.forEach((participant, index) => {
+    if (participant.value === undefined) ctx.addIssue({
+      code: "custom", path: ["participants", index, "value"], message: "Enter a value for each selected person",
+    });
+  });
 });
+
+export const GROUP_BALANCE_RECORD_CONFLICT = "This group balance changed. Close and reopen it before editing";
 
 export const GroupObligationBody = z.object({
   title: z.string().trim().min(1, "Description is required").max(120),

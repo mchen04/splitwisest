@@ -8,7 +8,7 @@ import {
   RefreshCcw, MessageSquare, ScrollText, Scale, Search, X, PieChart, Settings, Copy, ChevronDown, Users,
   SlidersHorizontal, MoreHorizontal,
 } from "lucide-react";
-import { api, ApiClientError, fmtMoney, fmtDate, fmtTime, useMe, useFilters, useApiData } from "@/lib/client";
+import { api, ApiClientError, fmtMoney, fmtDate, fmtTime, useMe, useFilters, useApiData, useSync } from "@/lib/client";
 import { AppShell } from "@/components/shell";
 import { Card, CardHeader, Money, EmptyState, Button, Avatar, Input, Select, Modal, Menu, MenuItem, DateField } from "@/components/ui";
 import { ExpenseForm } from "@/components/expense-form";
@@ -57,8 +57,11 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
     groupId: number; firstPage: GroupBalancePage; balances: GroupBalanceSummary[]; hasMore: boolean;
   } | null>(null);
   const [loadingGroupBalances, setLoadingGroupBalances] = useState(false);
-  const { data: groupBalancesData, reload: reloadGroupBalances } = useApiData<GroupBalancePage>(
-    `/api/groups/${groupId}/group-balances?limit=50`);
+  const { data: groupBalancesData, reload: reloadGroupBalances, reloadFresh: reloadGroupBalancesFresh } = useApiData<GroupBalancePage>(
+    `/api/groups/${groupId}/group-balances?limit=50`, 0, { sync: false });
+  useSync((current, previous) => {
+    if (current.activityCursor !== previous.activityCursor) reloadGroupBalancesFresh();
+  });
   const activeExtraGroupBalancePage = extraGroupBalancePage?.groupId === groupId &&
     extraGroupBalancePage.firstPage === groupBalancesData ? extraGroupBalancePage : null;
   const [editing, setEditing] = useState<Parameters<typeof ExpenseForm>[0]["existing"]>(null);

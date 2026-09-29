@@ -79,6 +79,12 @@ async function main() {
     { ...body, receives: { method: "equal", participants: [{ userId: outsider.id }] } },
     { ...body, receives: { method: "equal", participants: [{ userId: matthew.id }, { userId: matthew.id }] } },
     { ...body, receives: { method: "percentage", participants: [{ userId: matthew.id, value: 99 }] } },
+    ...(["exact", "percentage", "shares"] as const).map((method) => ({ ...body,
+      receives: { method, participants: [
+        { userId: matthew.id, value: method === "exact" ? 12000 : method === "percentage" ? 100 : 1 },
+        { userId: michael.id },
+      ] },
+    })),
   ]) {
     const rejected = await request(path, { cookie: matthew.cookie, body: invalid });
     assert(rejected.res.status === 400, `invalid allocation was accepted: ${rejected.text}`);
@@ -133,7 +139,9 @@ async function main() {
     body: { ...edit, expectedBalances: await snapshot() } });
   assert(edited.res.ok, `edit: ${edited.text}`);
   current = await nets();
-  assert(current.get(matthew.id) === 1026 && current.get(michael.id) === -1 &&
+  const matthewCredit = matthew.id < michael.id ? 51 : 50;
+  assert(current.get(matthew.id) === 1000 + matthewCredit - 25 &&
+    current.get(michael.id) === 101 - matthewCredit - 51 &&
     current.get(jet.id) === -1025 && current.get(other.id) === 0, "edited nets or cent rounding did not match");
   const reopened = await request(`/api/group-balances/${id}`, { cookie: matthew.cookie });
   const reopenedRow = jsonObject(reopened.json.balance, "reopened balance");
@@ -143,7 +151,8 @@ async function main() {
     "edited selection lost");
   const stale = await request(`/api/group-balances/${id}`, { cookie: matthew.cookie, method: "PATCH",
     body: { ...edit, expectedBalances: await snapshot() } });
-  assert(stale.res.status === 400, "stale edit did not fail");
+  assert(stale.res.status === 400 && String(stale.json.error).includes("Close and reopen"),
+    "same-record stale edit did not require reopen");
   const afterList = await request(path, { cookie: matthew.cookie });
   assert(jsonArray(afterList.json.balances, "group balance list").length === 1, "edit added a duplicate record");
   const deleted = await request(`/api/group-balances/${id}?expectedUpdatedAt=${encodeURIComponent(String(reopenedRow.updatedAt))}`,
@@ -152,6 +161,37 @@ async function main() {
   current = await nets();
   assert(current.get(matthew.id) === 1000 && current.get(jet.id) === -1000 &&
     current.get(michael.id) === 0 && current.get(other.id) === 0, "delete did not restore reimbursement balances");
+
+  const zero = await request(path, { cookie: matthew.cookie, body: {
+    title: "Explicit zero", amountCents: 100,
+    owes: { method: "equal", participants: [{ userId: jet.id }] },
+    receives: { method: "exact", participants: [
+      { userId: matthew.id, value: 100 }, { userId: michael.id, value: 0 },
+    ] }, expectedBalances: await snapshot(),
+  } });
+  assert(zero.res.ok, `explicit zero create: ${zero.text}`);
+  const zeroId = jsonNumber(zero.json.id, "zero id");
+  const zeroDetail = await request(`/api/group-balances/${zeroId}`, { cookie: matthew.cookie });
+  const zeroRow = jsonObject(zeroDetail.json.balance, "zero detail");
+  const zeroParticipants = jsonArray(jsonObject(zeroRow.receives, "zero receive side").participants, "zero participants");
+  assert(zeroParticipants.some((p) => {
+    const value = jsonObject(p, "zero participant");
+    return value.userId === michael.id && value.value === 0;
+  }), "explicit zero did not survive reopen");
+  const zeroRename = await request(`/api/group-balances/${zeroId}`, { cookie: matthew.cookie, method: "PATCH", body: {
+    title: "Explicit zero renamed", amountCents: 100,
+    owes: { method: "equal", participants: [{ userId: jet.id }] },
+    receives: { method: "exact", participants: [
+      { userId: matthew.id, value: 100 }, { userId: michael.id, value: 0 },
+    ] }, expectedUpdatedAt: zeroRow.updatedAt, expectedBalances: await snapshot(),
+  } });
+  assert(zeroRename.res.ok, `explicit zero title edit: ${zeroRename.text}`);
+  const zeroLatest = await request(`/api/group-balances/${zeroId}`, { cookie: matthew.cookie });
+  const zeroVersion = String(jsonObject(zeroLatest.json.balance, "zero latest").updatedAt);
+  const zeroDeleted = await request(`/api/group-balances/${zeroId}?expectedUpdatedAt=${encodeURIComponent(zeroVersion)}`,
+    { cookie: matthew.cookie, method: "DELETE" });
+  assert(zeroDeleted.res.ok, `explicit zero delete: ${zeroDeleted.text}`);
+  console.log("weighted inputs: missing values rejected; explicit zero survived create, reopen, and title edit");
 
   const legacy = await request(path, { cookie: matthew.cookie, body: { title: "Legacy tie", amountCents: 1,
     owes: { method: "equal", participants: [{ userId: matthew.id }, { userId: michael.id }] },
@@ -195,11 +235,6 @@ async function main() {
     "title-only edit moved a rounding cent after display-name reorder");
   console.log("rounding: title edit retained legacy awarded cent after display-name reorder");
 
-  const legacyUpdated = jsonObject(legacyAfter.json.balance, "legacy updated");
-  const removedLegacy = await request(`/api/group-balances/${legacyId}?expectedUpdatedAt=${encodeURIComponent(String(legacyUpdated.updatedAt))}`,
-    { cookie: matthew.cookie, method: "DELETE" });
-  assert(removedLegacy.res.ok, `remove legacy tie: ${removedLegacy.text}`);
-
   const atomic = await request(path, { cookie: matthew.cookie, body: {
     title: "Atomic detail", amountCents: 100,
     owes: { method: "equal", participants: [{ userId: jet.id }] },
@@ -208,6 +243,20 @@ async function main() {
   } });
   assert(atomic.res.ok, `atomic fixture: ${atomic.text}`);
   const atomicId = jsonNumber(atomic.json.id, "atomic id");
+  let reparentRejected = false;
+  try {
+    await sql`UPDATE group_obligation_allocations SET obligation_id = ${atomicId}
+      WHERE obligation_id = ${legacyId} AND side = 'owes' AND user_id = ${oldWinner}`;
+  } catch { reparentRejected = true; }
+  assert(reparentRejected, "allocation parent changed");
+  const originalAllocation = await sql`SELECT count(*)::int AS count FROM group_obligation_allocations
+    WHERE obligation_id = ${legacyId} AND side = 'owes' AND user_id = ${oldWinner}`;
+  assert(Number(originalAllocation[0].count) === 1, "rejected reparent did not preserve its original row");
+  console.log("immutable parent: allocation reparenting rejected");
+  const legacyUpdated = jsonObject(legacyAfter.json.balance, "legacy updated");
+  const removedLegacy = await request(`/api/group-balances/${legacyId}?expectedUpdatedAt=${encodeURIComponent(String(legacyUpdated.updatedAt))}`,
+    { cookie: matthew.cookie, method: "DELETE" });
+  assert(removedLegacy.res.ok, `remove legacy tie: ${removedLegacy.text}`);
   const memberLock = await lockMemberReads();
   let blockedRead: ReturnType<typeof request> | null = null;
   try {

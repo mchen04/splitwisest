@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { AlertCircle, Check, Users } from "lucide-react";
 import { api, ApiClientError, fmtMoney } from "@/lib/client";
 import { simplifyDebts } from "@/lib/money";
-import { computeGroupObligation, groupObligationDelta, parseGroupMoney, type SavedGroupObligation } from "@/lib/group-obligation-math";
+import { computeGroupObligation, groupObligationDelta, parseGroupMoney, GROUP_BALANCE_RECORD_CONFLICT, type SavedGroupObligation } from "@/lib/group-obligation-math";
 import { currencyStep } from "@/lib/currencies";
 import { Button, ErrorNote, Field, Input, Modal } from "./ui";
 import { METHOD_LABELS, ParticipantSplit } from "./expense-splits";
@@ -72,6 +72,7 @@ export function GroupBalanceForm({ groupId, groupName, currency, members, meId, 
   const [receives, setReceives] = useState<Side>(() => initialSide([meId]));
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [recordConflict, setRecordConflict] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -81,12 +82,14 @@ export function GroupBalanceForm({ groupId, groupName, currency, members, meId, 
     setOwes(existing ? savedSide(existing.owes) : initialSide(members.map((m) => m.id)));
     setReceives(existing ? savedSide(existing.receives) : initialSide([meId]));
     setError(null);
+    setRecordConflict(false);
     setBusy(false);
     // Membership sync must not clear a live draft.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, existing?.id]);
 
   const preview = useMemo(() => {
+    if (recordConflict) return { error: GROUP_BALANCE_RECORD_CONFLICT };
     const amountCents = parseGroupMoney(amount);
     if (amountCents === null || amountCents <= 0) return { error: "Enter a positive total" };
     const step = currencyStep(currency);
@@ -116,7 +119,7 @@ export function GroupBalanceForm({ groupId, groupName, currency, members, meId, 
     } catch (e) {
       return { error: e instanceof Error ? e.message : "Check the allocations" };
     }
-  }, [amount, owes, receives, title, members, existing, balances, currency]);
+  }, [amount, owes, receives, title, members, existing, balances, currency, recordConflict]);
 
   function renderSide(name: "owes" | "receives", side: Side, setSide: React.Dispatch<React.SetStateAction<Side>>) {
     return (
@@ -147,6 +150,7 @@ export function GroupBalanceForm({ groupId, groupName, currency, members, meId, 
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (recordConflict) return setError(GROUP_BALANCE_RECORD_CONFLICT);
     setError(null);
     if (!title.trim()) return setError("Enter a description");
     if (!preview.body) return setError(preview.error ?? "Check the allocations");
@@ -158,7 +162,8 @@ export function GroupBalanceForm({ groupId, groupName, currency, members, meId, 
       onClose();
     } catch (e) {
       setError(e instanceof ApiClientError ? e.message : "Could not save group balance");
-      if (e instanceof ApiClientError && e.message.includes("Group balances changed")) onRefresh();
+      if (e instanceof ApiClientError && e.message === GROUP_BALANCE_RECORD_CONFLICT) setRecordConflict(true);
+      else if (e instanceof ApiClientError && e.message.includes("Group balances changed")) onRefresh();
       setBusy(false);
     }
   }
@@ -169,6 +174,7 @@ export function GroupBalanceForm({ groupId, groupName, currency, members, meId, 
         <div className={`group-choice group-hue-${groupId % 6} flex items-center gap-2 rounded-xl bg-[var(--group-soft)] px-3 py-2 text-[var(--group-ink)]`}>
           <Users className="h-4 w-4" /> <span className="text-sm font-semibold">{groupName} · {currency}</span>
         </div>
+        {recordConflict && <ErrorNote message={error} />}
         <Field label="Total to settle">
           <Input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" required
             className="!min-h-14 !text-3xl !font-semibold tracking-tight tnum" />
@@ -199,13 +205,13 @@ export function GroupBalanceForm({ groupId, groupName, currency, members, meId, 
               </li>)}
             </ul> : <p className="text-sm text-ink-faint">All settled up</p>}
           </div>
-        ) : amount && <p role="status" className="flex items-center gap-1.5 rounded-lg bg-owe-soft px-3 py-2 text-sm text-owe">
+        ) : amount && !recordConflict && <p role="status" className="flex items-center gap-1.5 rounded-lg bg-owe-soft px-3 py-2 text-sm text-owe">
           <AlertCircle className="h-4 w-4 shrink-0" /> {preview.error}
         </p>}
         {preview.body && <p role="status" className="flex items-center gap-1.5 rounded-lg bg-owed-soft px-3 py-2 text-sm text-owed">
           <Check className="h-4 w-4 shrink-0" /> Both sides match {fmtMoney(preview.body.amountCents, currency)}
         </p>}
-        <ErrorNote message={error} />
+        {!recordConflict && <ErrorNote message={error} />}
         <div className="sticky -bottom-4 -mx-4 -mb-4 flex justify-end gap-2 rounded-b-2xl border-t border-line bg-card px-4 py-2.5">
           <Button type="button" variant="secondary" onClick={onClose}>Cancel</Button>
           <Button type="submit" busy={busy} disabled={!preview.body || !title.trim()}>

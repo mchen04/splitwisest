@@ -2,7 +2,7 @@ import { sql } from "./db";
 import { badRequest, notFound, forbidden } from "./api";
 import { loadGroupMemberIds } from "./balances";
 import { activityData } from "./activity";
-import { computeGroupObligation, GroupObligationInput, SavedGroupObligation } from "./group-obligation-math";
+import { computeGroupObligation, GroupObligationInput, SavedGroupObligation, GROUP_BALANCE_RECORD_CONFLICT } from "./group-obligation-math";
 
 function allocationsJson(input: GroupObligationInput, computed: ReturnType<typeof computeGroupObligation>) {
   return JSON.stringify((["owes", "receives"] as const).flatMap((side) => {
@@ -107,7 +107,12 @@ export async function updateGroupObligation(
         FROM updated RETURNING 1
       ) SELECT id FROM updated`,
   ]);
-  if (!rows[0]) badRequest("Group balances changed. Refresh and try again");
+  if (!rows[0]) {
+    const version = await sql`SELECT to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS token
+      FROM group_obligations WHERE id = ${id} AND group_id = ${groupId}`;
+    if (!version[0] || version[0].token !== input.expectedUpdatedAt) badRequest(GROUP_BALANCE_RECORD_CONFLICT);
+    badRequest("Group balances changed. Refresh and try again");
+  }
 }
 
 export async function deleteGroupObligation(id: number, groupId: number, user: { id: number; displayName: string }, expectedUpdatedAt: string) {
