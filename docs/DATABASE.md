@@ -28,6 +28,10 @@ migration on existing databases. It checks existing allocations, then adds a
 deferred parent trigger. A parent-only insert or total update now fails if
 either side does not match the total. The transaction rolls back on failure.
 
+Then apply `scripts/migrations/20260929_group_balances_immutable_allocations.sql`.
+It checks existing allocation totals and prevents an allocation from changing
+its parent group balance. The transaction rolls back if the check fails.
+
 **Run the migration before deploying the code** — `getSessionUser` references
 `users.deleted_at`, which the migration adds.
 
