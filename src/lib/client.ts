@@ -293,7 +293,7 @@ export function useUnread(): Unread {
 
 // Invokes onChange when a sync cursor advances. Scoped data can opt into every
 // response so a lower global activity ID cannot hide a later commit.
-export function useSync(onChange: ((c: SyncCursors, prev: SyncCursors, initial: boolean) => void) | undefined,
+export function useSync(onChange: ((c: SyncCursors, prev: SyncCursors) => void) | undefined,
   everyResponse = false) {
   const enabled = !!onChange;
   const last = useRef<SyncCursors | null>(null);
@@ -312,7 +312,7 @@ export function useSync(onChange: ((c: SyncCursors, prev: SyncCursors, initial: 
         c.nudgeCursor !== prev.nudgeCursor ||
         c.requestCursor !== prev.requestCursor
       )) {
-        cb.current?.(c, prev ?? c, !prev);
+        cb.current?.(c, prev ?? c);
       }
     });
   }, [enabled, everyResponse]);
