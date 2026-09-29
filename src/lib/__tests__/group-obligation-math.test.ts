@@ -40,6 +40,67 @@ describe("group obligations", () => {
     expect([...shares.receives]).toEqual([[1, 34], [2, 34], [3, 33]]);
   });
 
+  it("awards the exact largest remainders for high precision percentages", () => {
+    const input = GroupObligationBody.parse({ title: "Exact remainder", amountCents: 99_999_999,
+      owes: equal(4), receives: { method: "percentage", participants: [
+        { userId: 1, value: 37.1454 }, { userId: 2, value: 25.709201 },
+        { userId: 3, value: 37.145399 },
+      ] },
+    });
+    expect([...computeGroupObligation(input, members, "USD").receives])
+      .toEqual([[1, 37_145_399], [2, 25_709_201], [3, 37_145_399]]);
+  });
+
+  it("matches exact rational allocations across methods and boundary totals", () => {
+    function expected(totalCents: number, step: number, weights: [number, string][]) {
+      const totalUnits = BigInt(totalCents / step);
+      const rows = weights.map(([id, weight]) => ({ id, weight: BigInt(weight.replace(".", "")) }));
+      const denominator = rows.reduce((sum, row) => sum + row.weight, BigInt(0));
+      const floors = rows.map((row) => ({ id: row.id,
+        cents: Number(totalUnits * row.weight / denominator) * step,
+        fraction: totalUnits * row.weight % denominator,
+      }));
+      const unassigned = totalCents - floors.reduce((sum, row) => sum + row.cents, 0);
+      const winners = [...floors].sort((a, b) => a.fraction > b.fraction ? -1 :
+        a.fraction < b.fraction ? 1 : a.id - b.id).slice(0, unassigned / step);
+      return new Map(floors.map((row) => [row.id, row.cents + (winners.includes(row) ? step : 0)]));
+    }
+    const cases = [
+      { method: "percentage" as const, weights: ["37.1454000", "25.7092010", "37.1453990"] },
+      { method: "percentage" as const, weights: ["0.0000001", "99.9999999", "0.0000000"] },
+      { method: "shares" as const, weights: ["0.0000001", "900719925.4740990", "1.0000000"] },
+      { method: "shares" as const, weights: ["1.0000000", "1.0000000", "1.0000000"] },
+    ];
+    for (const [totalCents, currency, step] of [
+      [1, "USD", 1], [2, "USD", 1], [101, "USD", 1],
+      [99_999_999, "USD", 1], [100_000_000_000, "USD", 1],
+      [100, "JPY", 100], [100_000_000_000, "JPY", 100],
+    ] as const) {
+      for (const { method, weights } of cases) {
+        const participants = weights.map((weight, index) => ({ userId: index + 1, value: Number(weight) }));
+        const input = GroupObligationBody.parse({ title: "Rational check", amountCents: totalCents,
+          owes: { method, participants }, receives: { method, participants: [...participants].reverse() },
+        });
+        const result = computeGroupObligation(input, members, currency);
+        const oracle = expected(totalCents, step, weights.map((weight, index) => [index + 1, weight]));
+        expect(result.owes).toEqual(oracle);
+        expect(result.receives).toEqual(oracle);
+        expect([...result.net.values()]).toEqual([0, 0, 0, 0]);
+      }
+      const equalResult = computeGroupObligation(GroupObligationBody.parse({ title: "Equal",
+        amountCents: totalCents, owes: equal(3, 2, 1), receives: equal(1, 2, 3),
+      }), members, currency);
+      expect(equalResult.owes).toEqual(expected(totalCents, step, [[1, "1"], [2, "1"], [3, "1"]]));
+      const first = Math.floor(totalCents / 2 / step) * step;
+      const exactResult = computeGroupObligation(GroupObligationBody.parse({ title: "Exact",
+        amountCents: totalCents, owes: exact([1, first], [2, totalCents - first]),
+        receives: exact([2, totalCents - first], [1, first]),
+      }), members, currency);
+      expect(exactResult.owes).toEqual(new Map([[1, first], [2, totalCents - first]]));
+      expect(exactResult.receives).toEqual(exactResult.owes);
+    }
+  });
+
   it("keeps awarded cents on a title edit and orders new ties by user ID", () => {
     const old = { amountCents: 1,
       owes: { method: "equal" as const, participants: [

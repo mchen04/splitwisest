@@ -25,11 +25,12 @@ const Side = z.object({
 
 export const GROUP_BALANCE_WEIGHT_SCALE = 10_000_000;
 
-function groupWeightUnits(value: number): number | null {
-  if (!Number.isFinite(value) || value < 0 ||
-    !Number.isSafeInteger(Math.round(value * GROUP_BALANCE_WEIGHT_SCALE)) ||
-    Number(value.toFixed(7)) !== value) return null;
-  return Math.round(value * GROUP_BALANCE_WEIGHT_SCALE);
+function groupWeightUnits(value: number): bigint | null {
+  if (!Number.isFinite(value) || value < 0) return null;
+  const decimal = value.toFixed(7);
+  if (!/^\d+\.\d{7}$/.test(decimal) || Number(decimal) !== value) return null;
+  const units = BigInt(decimal.replace(".", ""));
+  return units <= BigInt(Number.MAX_SAFE_INTEGER) ? units : null;
 }
 
 export function parseGroupWeight(input: string): number | null {
@@ -72,6 +73,24 @@ export function parseGroupMoney(input: string): number | null {
   return Number.isSafeInteger(cents) && cents <= 100_000_000_000 ? cents : null;
 }
 
+function splitGroupWeighted(totalCents: number, step: number, weights: { userId: number; units: bigint }[]) {
+  const totalWeight = weights.reduce((sum, row) => sum + row.units, BigInt(0));
+  if (totalWeight === BigInt(0)) invalidInput("Total shares must be positive");
+  const totalUnits = BigInt(totalCents / step);
+  const rows = weights.map(({ userId, units }) => {
+    const numerator = totalUnits * units;
+    return { userId, quotient: numerator / totalWeight, remainder: numerator % totalWeight };
+  });
+  let leftover = totalUnits - rows.reduce((sum, row) => sum + row.quotient, BigInt(0));
+  for (const row of [...rows].sort((a, b) =>
+    a.remainder === b.remainder ? a.userId - b.userId : a.remainder > b.remainder ? -1 : 1)) {
+    if (leftover === BigInt(0)) break;
+    row.quotient++;
+    leftover--;
+  }
+  return new Map(rows.map((row) => [row.userId, Number(row.quotient) * step]));
+}
+
 export function computeGroupObligation(input: GroupObligationInput, memberIds: Set<number>, currency: string, saved?: SavedGroupObligation) {
   const step = currencyStep(currency);
   if (input.amountCents % step) invalidInput("Total must be whole units for this currency");
@@ -80,15 +99,17 @@ export function computeGroupObligation(input: GroupObligationInput, memberIds: S
     const ids = participants.map((p) => p.userId);
     if (new Set(ids).size !== ids.length) invalidInput("Duplicate participants");
     if (ids.some((id) => !memberIds.has(id))) invalidInput("All participants must be group members");
+    let weights: { userId: number; units: bigint }[] | null = null;
     if (method === "percentage" || method === "shares") {
-      let totalUnits = 0;
+      weights = [];
+      let totalUnits = BigInt(0);
       for (const participant of participants) {
         const units = groupWeightUnits(participant.value ?? NaN);
         if (units === null) invalidInput("Use at most 7 decimal places");
+        weights.push({ userId: participant.userId, units });
         totalUnits += units;
-        if (!Number.isSafeInteger(totalUnits)) invalidInput("Total weight is too large");
       }
-      if (method === "percentage" && totalUnits !== 100 * GROUP_BALANCE_WEIGHT_SCALE) {
+      if (method === "percentage" && totalUnits !== BigInt(100) * BigInt(GROUP_BALANCE_WEIGHT_SCALE)) {
         invalidInput("Percentages must add up to 100");
       }
     }
@@ -101,7 +122,8 @@ export function computeGroupObligation(input: GroupObligationInput, memberIds: S
     // the allocation did not change; new splits use user ID for stable ties.
     const shares = unchanged && prior
       ? new Map(prior.participants.map((p) => [p.userId, p.shareCents]))
-      : computeShares(method, input.amountCents, [...participants].sort((a, b) => a.userId - b.userId), step);
+      : weights ? splitGroupWeighted(input.amountCents, step, weights.sort((a, b) => a.userId - b.userId))
+        : computeShares(method, input.amountCents, [...participants].sort((a, b) => a.userId - b.userId), step);
     if ([...shares.values()].reduce((sum, cents) => sum + cents, 0) !== input.amountCents) {
       invalidInput("Allocations must match the total");
     }

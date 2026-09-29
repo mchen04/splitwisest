@@ -58,7 +58,7 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
     groupId: number; changeCursor: number; balances: GroupBalanceSummary[]; hasMore: boolean;
   } | null>(null);
   const [loadingGroupBalances, setLoadingGroupBalances] = useState(false);
-  const { data: groupBalancesData, reloadFresh: reloadGroupBalancesFresh } = useApiData<GroupBalancePage>(
+  const { data: groupBalancesData, error: groupBalancesError, reloadFresh: reloadGroupBalancesFresh } = useApiData<GroupBalancePage>(
     `/api/groups/${groupId}/group-balances?limit=50`, 0, { sync: false });
   useSync((_current, _previous, initial) => {
     reloadGroupBalancesFresh();
@@ -142,6 +142,10 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
       setEditingGroupBalance(result.balance);
       setGroupBalanceOpen(true);
     } catch (e) {
+      if (e instanceof ApiClientError && e.status === 404) {
+        reloadGroupBalanceList();
+        refreshBalancePreview();
+      }
       window.alert(e instanceof ApiClientError ? e.message : "Could not open group balance");
     }
   }
@@ -685,7 +689,12 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
               <Plus className="h-3.5 w-3.5" /> Add group balance
             </Button>
           } />
-          {groupBalancesData === null ? (
+          {groupBalancesError ? (
+            <div role="alert" className="flex flex-wrap items-center justify-between gap-3 px-3.5 py-3 text-sm text-danger">
+              <p>{groupBalancesError}</p>
+              <Button variant="secondary" onClick={reloadGroupBalanceList}>Try again</Button>
+            </div>
+          ) : groupBalancesData === null ? (
             <div className="space-y-2 p-3"><div className="skeleton h-10 w-full" /></div>
           ) : groupBalancesData.balances.length === 0 ? (
             <p className="px-3.5 py-3 text-sm text-ink-faint">No group balances yet. Add obligations without recording a payment.</p>
@@ -856,7 +865,7 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
             existing={editingGroupBalance} open={groupBalanceOpen}
             onClose={() => setGroupBalanceOpen(false)}
             onSaved={afterGroupBalanceMutation}
-            onRefresh={refreshBalancePreview}
+            onRefresh={() => { reloadGroupBalanceList(); refreshBalancePreview(); }}
           />
           <SettleModal
             open={settleOpen}

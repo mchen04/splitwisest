@@ -166,9 +166,14 @@ export function GroupBalanceForm({ groupId, groupName, currency, members, meId, 
       onSaved();
       onClose();
     } catch (e) {
-      setError(e instanceof ApiClientError ? e.message : "Could not save group balance");
-      if (e instanceof ApiClientError && e.message === GROUP_BALANCE_RECORD_CONFLICT) setRecordConflict(true);
-      else if (e instanceof ApiClientError && e.message.includes("Group balances changed")) onRefresh();
+      const missingEdit = existing && e instanceof ApiClientError && e.status === 404;
+      const changedEdit = e instanceof ApiClientError && e.message === GROUP_BALANCE_RECORD_CONFLICT;
+      setError(missingEdit || changedEdit ? GROUP_BALANCE_RECORD_CONFLICT :
+        e instanceof ApiClientError ? e.message : "Could not save group balance");
+      if (missingEdit || changedEdit) {
+        setRecordConflict(true);
+        onRefresh();
+      } else if (e instanceof ApiClientError && e.message.includes("Group balances changed")) onRefresh();
       saving.current = false;
       setBusy(false);
     }

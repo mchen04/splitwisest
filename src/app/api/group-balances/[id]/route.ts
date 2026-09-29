@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { handler, notFound } from "@/lib/api";
+import { ApiError, badRequest, handler, notFound } from "@/lib/api";
 import { requireUser } from "@/lib/auth";
 import { loadGroupObligation, updateGroupObligation, deleteGroupObligation } from "@/lib/group-obligations";
-import { GroupObligationBody } from "@/lib/group-obligation-math";
+import { GROUP_BALANCE_RECORD_CONFLICT, GroupObligationBody } from "@/lib/group-obligation-math";
 import { VersionToken } from "@/lib/versions";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -22,7 +22,13 @@ export const GET = handler(async (_req: NextRequest, { params }: Ctx) => {
 export const PATCH = handler(async (req: NextRequest, { params }: Ctx) => {
   const user = await requireUser();
   const id = balanceId((await params).id);
-  const current = await loadGroupObligation(id, user.id);
+  let current;
+  try {
+    current = await loadGroupObligation(id, user.id);
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) badRequest(GROUP_BALANCE_RECORD_CONFLICT);
+    throw error;
+  }
   const input = GroupObligationBody.parse(await req.json());
   await updateGroupObligation(id, current.groupId, current.currency, user, input, current);
   return NextResponse.json({ ok: true });
