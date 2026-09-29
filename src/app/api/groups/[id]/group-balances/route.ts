@@ -16,7 +16,7 @@ export const GET = handler(async (req: NextRequest, { params }: Ctx) => {
   const limit = Math.min(Math.max(Number(req.nextUrl.searchParams.get("limit")) || 50, 1), 200);
   const beforeRaw = req.nextUrl.searchParams.get("before");
   const before = beforeRaw === null ? null : Number(beforeRaw);
-  if (beforeRaw !== null && (!Number.isSafeInteger(before) || before! <= 0)) badRequest("Invalid page cursor");
+  if (before !== null && (!Number.isSafeInteger(before) || before <= 0)) badRequest("Invalid page cursor");
   const rows = await sql`
     SELECT id, title, amount_cents,
       to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS updated_at_token

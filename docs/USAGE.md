@@ -79,4 +79,4 @@ For release verification, follow `docs/PWA.md`.
 
 ## Pagination
 
-Expenses, settlements, activity, and chat all load a bounded first page and fetch more on demand ("Load more" / "Load earlier"), so large groups stay fast.
+Expenses, group balances, settlements, activity, and chat all load a bounded first page and fetch more on demand ("Load more" / "Load earlier"), so large groups stay fast.

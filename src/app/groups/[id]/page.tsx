@@ -23,6 +23,7 @@ import { ActivitySummary } from "@/components/activity-summary";
 import { Expense, Settlement, useGroupPageData } from "./use-group-page-data";
 
 type Tab = "expenses" | "balances" | "insights" | "chat" | "activity";
+type GroupBalanceSummary = { id: number; title: string; amountCents: number; updatedAt: string };
 
 export default function GroupPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -51,11 +52,11 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
   const [expenseOpen, setExpenseOpen] = useState(false);
   const [groupBalanceOpen, setGroupBalanceOpen] = useState(false);
   const [editingGroupBalance, setEditingGroupBalance] = useState<ExistingGroupBalance | null>(null);
-  const [moreGroupBalances, setMoreGroupBalances] = useState<{ id: number; title: string; amountCents: number; updatedAt: string }[]>([]);
+  const [moreGroupBalances, setMoreGroupBalances] = useState<GroupBalanceSummary[]>([]);
   const [moreGroupBalancesAvailable, setMoreGroupBalancesAvailable] = useState<boolean | null>(null);
   const [loadingGroupBalances, setLoadingGroupBalances] = useState(false);
   const { data: groupBalancesData, reload: reloadGroupBalances } = useApiData<{
-    balances: { id: number; title: string; amountCents: number; updatedAt: string }[]; hasMore: boolean;
+    balances: GroupBalanceSummary[]; hasMore: boolean;
   }>(`/api/groups/${groupId}/group-balances?limit=50`);
   const [editing, setEditing] = useState<Parameters<typeof ExpenseForm>[0]["existing"]>(null);
   const [settleOpen, setSettleOpen] = useState(false);
@@ -139,7 +140,7 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
     if (!last || loadingGroupBalances) return;
     setLoadingGroupBalances(true);
     try {
-      const next = await api<{ balances: typeof moreGroupBalances; hasMore: boolean }>(
+      const next = await api<{ balances: GroupBalanceSummary[]; hasMore: boolean }>(
         `/api/groups/${groupId}/group-balances?limit=50&before=${last.id}`);
       setMoreGroupBalances((rows) => [...rows, ...next.balances]);
       setMoreGroupBalancesAvailable(next.hasMore);
@@ -156,7 +157,7 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
     reloadGroupBalances();
   }
 
-  async function removeGroupBalance(row: { id: number; title: string; updatedAt: string }) {
+  async function removeGroupBalance(row: GroupBalanceSummary) {
     if (!window.confirm(`Delete group balance "${row.title}"? Group debts will update.`)) return;
     try {
       await api(`/api/group-balances/${row.id}?expectedUpdatedAt=${encodeURIComponent(row.updatedAt)}`, { method: "DELETE" });

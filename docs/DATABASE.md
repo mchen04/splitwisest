@@ -60,7 +60,7 @@ Pass these on the command line for the `tsx` scripts (they read `.env.local`
 |---|---|
 | `users` | username (unique, lowercase), display name, scrypt hash, personal invite code; `deleted_at` soft-delete tombstone (filtered out of auth) |
 | `sessions` | auth tokens with expiry |
-| `schema_migrations` | ledger of applied one-time data-fixup migrations (`name` → `applied_at`) |
+| `schema_migrations` | ledger of applied one-time migrations and data fixups (`name` → `applied_at`) |
 | `friendships` | unordered user pairs (`user_a < user_b`) |
 | `groups` | name, currency, invite code |
 | `group_members` | membership |
@@ -86,13 +86,13 @@ Pass these on the command line for the `tsx` scripts (they read `.env.local`
 
 - Money is always integer cents (`BIGINT`); never floats.
 - Dates are `DATE` for business dates, `TIMESTAMPTZ` for event times.
-- Cascading deletes: removing an expense removes its shares/items/attachments; removing a group removes its expenses, members, messages, activity. User-referencing money FKs intentionally use the default `NO ACTION` (RESTRICT-like) — never cascade — so a user can't be hard-deleted out from under settled balances; erasure goes through `deleted_at`.
+- Cascading deletes: removing an expense removes its shares/items/attachments; removing a group removes its expenses, group balances and allocations, members, messages, activity. User-referencing money FKs intentionally use the default `NO ACTION` (RESTRICT-like) — never cascade — so a user can't be hard-deleted out from under settled balances; erasure goes through `deleted_at`.
 - The Neon HTTP driver returns `BIGINT` as strings, `bytea` as `\x`-hex, and `DATE` columns as JS `Date` objects (parsed at local midnight); API routes normalize with `Number(...)` / hex decode, and server-side date math normalizes `Date`→`YYYY-MM-DD` (`toYmd`) rather than `String(date).slice(...)`, which would yield a locale string.
 - Attachment filenames are stored only after header/path sanitization; download responses still sanitize again before emitting `Content-Disposition`.
 
 ## Indexes & balance function
 
-- Secondary indexes back the hot read paths: `expenses(group_id)` and `settlements(group_id/payer_id/recipient_id)` feed `group_balance_rows()`; `group_members(user_id)` and `friendships(user_b)` serve the reverse lookups in the sidebar, sync poller, and relationship checks; `attachments(expense_id)` and partial `expenses(recurring_id)` cover the remaining FK joins. Below these, every table has only its primary key.
+- Secondary indexes back the hot read paths: `expenses(group_id)` and `settlements(group_id/payer_id/recipient_id)` feed `group_balance_rows()`; `group_obligations(group_id, id DESC)` pages group balances, while `group_obligation_allocations(user_id)` supports user-reference lookups; `group_members(user_id)` and `friendships(user_b)` serve reverse lookups; `attachments(expense_id)` and partial `expenses(recurring_id)` cover the remaining FK joins.
 - `group_balance_rows(group_id)` returns each member's net (expense payments − expense shares + group balance receives − group balance owes + settlements paid − received). The expense share side allocates every expense's `converted_cents` with a **per-expense largest-remainder** pass using exact integer `div`/`mod`, so converted shares sum exactly to the expense total and no cross-currency rounding residual is misattributed to one member. A whole-group residual-absorption step remains as a defensive backstop (now a no-op in the common case).
 - Group balances add received shares to the credit side and owed shares to the debit side. They use the group currency and never enter spending charts or recorded payments. A deferred trigger checks that both sides equal the stored total.
 - `expenses.recurring_id` has an FK to `recurring_expenses(id)` (`ON DELETE SET NULL`) so already-materialized expenses survive a rule deletion.
