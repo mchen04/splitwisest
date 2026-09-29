@@ -10,6 +10,7 @@ A private, friend-group expense tracker inspired by Splitwise. Track shared expe
 - Groups (trips, apartments, dinners, bills) with per-group currency
 - Expenses show payer, date, and category before advanced split choices
 - Equal, exact, percentage, shares, and itemized splits; custom categories, notes, and receipt attachments
+- Group balances with separate owes and receives allocations; equal, exact, percentage, and shares on each side
 - Multi-currency with automatic conversion (rates snapshotted per expense)
 - Group + friend balances with exact minimum-payment plans for up to 18 active balances
 - Offline settlement recording (group or direct between friends)

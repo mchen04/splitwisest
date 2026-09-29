@@ -14,6 +14,15 @@ scale); on an already-large table, build the money-table indexes with
 DATABASE_URL=... pnpm tsx scripts/migrate.ts
 ```
 
+For an existing database, `scripts/migrations/20260929_group_balances.sql` is the
+scoped group-balance migration. Confirm the database target first. Apply it in
+one transaction before the app update. It creates two tables, replaces the
+group-balance function, adds a deferred sum check, and records its version in
+`schema_migrations`. On failure, PostgreSQL rolls back the whole transaction.
+Keep the prior `group_balance_rows(bigint)` definition for recovery. Restore it
+only if no group-balance entries exist; once entries exist, preserve the new
+tables and their balance effects until the entries are migrated or resolved.
+
 **Run the migration before deploying the code** — `getSessionUser` references
 `users.deleted_at`, which the migration adds.
 
@@ -59,6 +68,8 @@ Pass these on the command line for the `tsx` scripts (they read `.env.local`
 | `expenses` | amount in original currency + `converted_cents` in group currency with `fx_rate` snapshot, split method, payer, category, date, notes |
 | `expense_shares` | per-participant integer-cent shares (always sum to `amount_cents`, DB-enforced by a deferred sum-check trigger), raw input (percent/shares/exact) for editing |
 | `expense_items` | itemized-bill line items with participant id arrays |
+| `group_obligations` | one group balance record with a description, total in group currency, and a method for each side |
+| `group_obligation_allocations` | selected members’ owed and received shares; each side sums to the total |
 | `attachments` | receipts stored as `bytea` (≤ 4 MB, images/PDF) |
 | `settlements` | offline payment ledger; `group_id NULL` = direct friend settlement |
 | `recurring_expenses` | templates with cadence + `next_date`, lazily materialized |
@@ -82,6 +93,7 @@ Pass these on the command line for the `tsx` scripts (they read `.env.local`
 ## Indexes & balance function
 
 - Secondary indexes back the hot read paths: `expenses(group_id)` and `settlements(group_id/payer_id/recipient_id)` feed `group_balance_rows()`; `group_members(user_id)` and `friendships(user_b)` serve the reverse lookups in the sidebar, sync poller, and relationship checks; `attachments(expense_id)` and partial `expenses(recurring_id)` cover the remaining FK joins. Below these, every table has only its primary key.
-- `group_balance_rows(group_id)` returns each member's net (paid − owed + settlements paid − received). The owed side allocates every expense's `converted_cents` across its shares with a **per-expense largest-remainder** pass using exact integer `div`/`mod`, so converted shares sum exactly to the expense total and no cross-currency rounding residual is misattributed to one member. A whole-group residual-absorption step remains as a defensive backstop (now a no-op in the common case).
+- `group_balance_rows(group_id)` returns each member's net (expense payments − expense shares + group balance receives − group balance owes + settlements paid − received). The expense share side allocates every expense's `converted_cents` with a **per-expense largest-remainder** pass using exact integer `div`/`mod`, so converted shares sum exactly to the expense total and no cross-currency rounding residual is misattributed to one member. A whole-group residual-absorption step remains as a defensive backstop (now a no-op in the common case).
+- Group balances add received shares to the credit side and owed shares to the debit side. They use the group currency and never enter spending charts or recorded payments. A deferred trigger checks that both sides equal the stored total.
 - `expenses.recurring_id` has an FK to `recurring_expenses(id)` (`ON DELETE SET NULL`) so already-materialized expenses survive a rule deletion.
 - Zero-decimal currencies (JPY/KRW) are stored as whole units (multiples of 100 cents) and split in whole units, so a share is never an unpayable fraction of a yen/won.

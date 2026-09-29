@@ -12,6 +12,7 @@ import { api, ApiClientError, fmtMoney, fmtDate, fmtTime, useMe, useFilters, use
 import { AppShell } from "@/components/shell";
 import { Card, CardHeader, Money, EmptyState, Button, Avatar, Input, Select, Modal, Menu, MenuItem, DateField } from "@/components/ui";
 import { ExpenseForm } from "@/components/expense-form";
+import { GroupBalanceForm, ExistingGroupBalance } from "@/components/group-balance-form";
 import { SettleModal } from "@/components/settle-modal";
 import { RecurringModal, ExistingRecurring } from "@/components/recurring-modal";
 import { GroupSettingsModal } from "@/components/group-settings-modal";
@@ -48,6 +49,14 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
 
   // modals
   const [expenseOpen, setExpenseOpen] = useState(false);
+  const [groupBalanceOpen, setGroupBalanceOpen] = useState(false);
+  const [editingGroupBalance, setEditingGroupBalance] = useState<ExistingGroupBalance | null>(null);
+  const [moreGroupBalances, setMoreGroupBalances] = useState<{ id: number; title: string; amountCents: number; updatedAt: string }[]>([]);
+  const [moreGroupBalancesAvailable, setMoreGroupBalancesAvailable] = useState<boolean | null>(null);
+  const [loadingGroupBalances, setLoadingGroupBalances] = useState(false);
+  const { data: groupBalancesData, reload: reloadGroupBalances } = useApiData<{
+    balances: { id: number; title: string; amountCents: number; updatedAt: string }[]; hasMore: boolean;
+  }>(`/api/groups/${groupId}/group-balances?limit=50`);
   const [editing, setEditing] = useState<Parameters<typeof ExpenseForm>[0]["existing"]>(null);
   const [settleOpen, setSettleOpen] = useState(false);
   const [settlePrefill, setSettlePrefill] = useState<{ payerId: number; recipientId: number; amountCents: number } | null>(null);
@@ -71,6 +80,12 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setExpenseLimit(50);
   }, [filters]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMoreGroupBalances([]);
+    setMoreGroupBalancesAvailable(null);
+  }, [groupId]);
 
   useEffect(() => {
     if (searchParams.get("add") === "1") {
@@ -106,6 +121,49 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
       // Anything else is unexpected and should surface, not vanish.
       if (e instanceof ApiClientError) refreshAll();
       else throw e;
+    }
+  }
+
+  async function openGroupBalance(id: number) {
+    try {
+      const result = await api<{ balance: ExistingGroupBalance }>(`/api/group-balances/${id}`);
+      setEditingGroupBalance(result.balance);
+      setGroupBalanceOpen(true);
+    } catch (e) {
+      window.alert(e instanceof ApiClientError ? e.message : "Could not open group balance");
+    }
+  }
+
+  async function loadMoreGroupBalances() {
+    const last = moreGroupBalances.at(-1) ?? groupBalancesData?.balances.at(-1);
+    if (!last || loadingGroupBalances) return;
+    setLoadingGroupBalances(true);
+    try {
+      const next = await api<{ balances: typeof moreGroupBalances; hasMore: boolean }>(
+        `/api/groups/${groupId}/group-balances?limit=50&before=${last.id}`);
+      setMoreGroupBalances((rows) => [...rows, ...next.balances]);
+      setMoreGroupBalancesAvailable(next.hasMore);
+    } catch (e) {
+      window.alert(e instanceof ApiClientError ? e.message : "Could not load group balances");
+    } finally {
+      setLoadingGroupBalances(false);
+    }
+  }
+
+  function reloadGroupBalanceList() {
+    setMoreGroupBalances([]);
+    setMoreGroupBalancesAvailable(null);
+    reloadGroupBalances();
+  }
+
+  async function removeGroupBalance(row: { id: number; title: string; updatedAt: string }) {
+    if (!window.confirm(`Delete group balance "${row.title}"? Group debts will update.`)) return;
+    try {
+      await api(`/api/group-balances/${row.id}?expectedUpdatedAt=${encodeURIComponent(row.updatedAt)}`, { method: "DELETE" });
+      reloadGroupBalanceList();
+      refreshAll();
+    } catch (e) {
+      window.alert(e instanceof ApiClientError ? e.message : "Could not delete group balance");
     }
   }
 
@@ -599,6 +657,32 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
       {tab === "balances" && detail && (
         <div className="space-y-4 md:h-full md:overflow-y-auto">
         <Card>
+          <CardHeader title="Group balances" action={
+            <Button variant="ghost" className="!min-h-8 !px-2.5 !py-1 text-xs" onClick={() => {
+              setEditingGroupBalance(null); setGroupBalanceOpen(true);
+            }}>
+              <Plus className="h-3.5 w-3.5" /> Add group balance
+            </Button>
+          } />
+          {groupBalancesData === null ? (
+            <div className="space-y-2 p-3"><div className="skeleton h-10 w-full" /></div>
+          ) : groupBalancesData.balances.length === 0 ? (
+            <p className="px-3.5 py-3 text-sm text-ink-faint">No group balances yet. Add obligations without recording a payment.</p>
+          ) : <>
+            <ul className="divide-y divide-line">
+              {[...groupBalancesData.balances, ...moreGroupBalances].map((row) => <li key={row.id} className="flex min-h-[var(--row-h)] items-center gap-2.5 px-3.5 py-1.5">
+                <button type="button" onClick={() => openGroupBalance(row.id)} className="min-w-0 flex-1 truncate text-left text-sm font-medium hover:text-accent-dark">
+                  {row.title}
+                </button>
+                <span className="tnum shrink-0 text-sm font-semibold">{fmtMoney(row.amountCents, detail.group.currency)}</span>
+                <button type="button" onClick={() => openGroupBalance(row.id)} aria-label={`Edit ${row.title}`} className="rounded-lg p-2.5 text-ink-faint hover:bg-accent-soft hover:text-accent-dark"><Pencil className="h-4 w-4" /></button>
+                <button type="button" onClick={() => removeGroupBalance(row)} aria-label={`Delete ${row.title}`} className="rounded-lg p-2.5 text-ink-faint hover:bg-danger-soft hover:text-danger"><Trash2 className="h-4 w-4" /></button>
+              </li>)}
+            </ul>
+            {(moreGroupBalancesAvailable ?? groupBalancesData.hasMore) && <div className="border-t border-line p-3 text-center"><Button variant="secondary" busy={loadingGroupBalances} onClick={loadMoreGroupBalances}>Load more</Button></div>}
+          </>}
+        </Card>
+        <Card>
           <CardHeader title="Who owes who" />
           {detail.suggestions.length === 0 ? (
             <EmptyState icon={<Scale className="h-8 w-8" />} title="All settled up" hint="Nobody owes anything in this group right now." />
@@ -744,6 +828,13 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
             onClose={() => setExpenseOpen(false)}
             onSaved={refreshAll}
             onCategoryAdded={reloadCategories}
+          />
+          <GroupBalanceForm
+            groupId={groupId} groupName={detail.group.name} currency={detail.group.currency}
+            members={detail.members} meId={me.id} balances={detail.balances}
+            existing={editingGroupBalance} open={groupBalanceOpen}
+            onClose={() => setGroupBalanceOpen(false)}
+            onSaved={() => { reloadGroupBalanceList(); refreshAll(); }}
           />
           <SettleModal
             open={settleOpen}

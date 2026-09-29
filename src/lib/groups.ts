@@ -158,13 +158,20 @@ export async function removeGroupMemberWithActivity({
         AND active
         AND (payer_id = ${targetId} OR ${targetId} = ANY(participant_ids))
     ),
+    group_balance_refs AS (
+      SELECT count(*)::int AS ref_count
+      FROM group_obligation_allocations a
+      JOIN group_obligations go ON go.id = a.obligation_id
+      WHERE go.group_id = ${groupId} AND a.user_id = ${targetId}
+    ),
     del AS (
       DELETE FROM group_members
-      USING member_balance, active_recurring_refs
+      USING member_balance, active_recurring_refs, group_balance_refs
       WHERE group_id = ${groupId}
         AND user_id = ${targetId}
         AND member_balance.net_cents = 0
         AND active_recurring_refs.ref_count = 0
+        AND group_balance_refs.ref_count = 0
       RETURNING user_id
     ),
     t AS (

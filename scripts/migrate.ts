@@ -250,6 +250,29 @@ async function main() {
   )`;
   await sql`CREATE INDEX IF NOT EXISTS expense_items_expense_idx ON expense_items (expense_id)`;
 
+  await sql`CREATE TABLE IF NOT EXISTS group_obligations (
+    id BIGSERIAL PRIMARY KEY,
+    group_id BIGINT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    amount_cents BIGINT NOT NULL CHECK (amount_cents > 0),
+    owed_method TEXT NOT NULL CHECK (owed_method IN ('equal','exact','percentage','shares')),
+    receive_method TEXT NOT NULL CHECK (receive_method IN ('equal','exact','percentage','shares')),
+    created_by BIGINT NOT NULL REFERENCES users(id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`;
+  await sql`CREATE INDEX IF NOT EXISTS group_obligations_group_idx ON group_obligations (group_id, id DESC)`;
+  await sql`CREATE TABLE IF NOT EXISTS group_obligation_allocations (
+    obligation_id BIGINT NOT NULL REFERENCES group_obligations(id) ON DELETE CASCADE,
+    side TEXT NOT NULL CHECK (side IN ('owes','receives')),
+    user_id BIGINT NOT NULL REFERENCES users(id),
+    share_cents BIGINT NOT NULL CHECK (share_cents >= 0),
+    raw_input NUMERIC,
+    PRIMARY KEY (obligation_id, side, user_id)
+  )`;
+  await sql`CREATE INDEX IF NOT EXISTS group_obligation_allocations_user_idx
+    ON group_obligation_allocations (user_id)`;
+
   await sql`CREATE TABLE IF NOT EXISTS attachments (
     id BIGSERIAL PRIMARY KEY,
     expense_id BIGINT NOT NULL REFERENCES expenses(id) ON DELETE CASCADE,
@@ -301,10 +324,15 @@ async function main() {
         WHERE gm.group_id = target_group_id
       ),
       paid AS (
-        SELECT payer_id AS user_id, COALESCE(SUM(converted_cents), 0) AS amount_cents
-        FROM expenses
-        WHERE group_id = target_group_id
-        GROUP BY payer_id
+        SELECT user_id, SUM(amount_cents)::bigint AS amount_cents FROM (
+          SELECT payer_id AS user_id, converted_cents AS amount_cents
+          FROM expenses WHERE group_id = target_group_id
+          UNION ALL
+          SELECT goa.user_id, goa.share_cents AS amount_cents
+          FROM group_obligation_allocations goa
+          JOIN group_obligations go ON go.id = goa.obligation_id
+          WHERE go.group_id = target_group_id AND goa.side = 'receives'
+        ) paid_rows GROUP BY user_id
       ),
       -- Per-expense largest-remainder allocation of each expense's converted_cents
       -- across its shares. div()/mod() are exact integer arithmetic (no numeric-
@@ -332,11 +360,16 @@ async function main() {
         FROM owed_alloc oa
       ),
       owed AS (
-        SELECT user_id, COALESCE(SUM(
-          floor_cents + CASE WHEN rr <= leftover THEN 1 ELSE 0 END
-        ), 0)::bigint AS amount_cents
-        FROM owed_ranked
-        GROUP BY user_id
+        SELECT user_id, SUM(amount_cents)::bigint AS amount_cents FROM (
+          SELECT user_id,
+            (floor_cents + CASE WHEN rr <= leftover THEN 1 ELSE 0 END)::bigint AS amount_cents
+          FROM owed_ranked
+          UNION ALL
+          SELECT goa.user_id, goa.share_cents AS amount_cents
+          FROM group_obligation_allocations goa
+          JOIN group_obligations go ON go.id = goa.obligation_id
+          WHERE go.group_id = target_group_id AND goa.side = 'owes'
+        ) owed_rows GROUP BY user_id
       ),
       settled_out AS (
         SELECT payer_id AS user_id, COALESCE(SUM(converted_cents), 0) AS amount_cents
@@ -640,6 +673,35 @@ async function main() {
         FOR EACH ROW EXECUTE FUNCTION check_expense_shares_sum();
       END IF;
     END $$`;
+
+  await sql`
+    CREATE OR REPLACE FUNCTION check_group_obligation_allocations()
+    RETURNS trigger LANGUAGE plpgsql AS $$
+    DECLARE target_id bigint; expected bigint; owed bigint; received bigint;
+    BEGIN
+      target_id := COALESCE(NEW.obligation_id, OLD.obligation_id);
+      SELECT amount_cents INTO expected FROM group_obligations WHERE id = target_id;
+      IF NOT FOUND THEN RETURN NULL; END IF;
+      SELECT COALESCE(SUM(share_cents) FILTER (WHERE side = 'owes'), 0),
+        COALESCE(SUM(share_cents) FILTER (WHERE side = 'receives'), 0)
+        INTO owed, received
+      FROM group_obligation_allocations WHERE obligation_id = target_id;
+      IF owed <> expected OR received <> expected THEN
+        RAISE EXCEPTION 'group obligation % allocations do not match total', target_id;
+      END IF;
+      RETURN NULL;
+    END;
+    $$`;
+  await sql`
+    DO $$ BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'group_obligation_allocations_sum_check') THEN
+        CREATE CONSTRAINT TRIGGER group_obligation_allocations_sum_check
+        AFTER INSERT OR UPDATE OR DELETE ON group_obligation_allocations
+        DEFERRABLE INITIALLY DEFERRED FOR EACH ROW
+        EXECUTE FUNCTION check_group_obligation_allocations();
+      END IF;
+    END $$`;
+  await markMigration("20260929_group_balances");
 
   console.log("migration complete");
 }

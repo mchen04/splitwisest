@@ -38,6 +38,12 @@
 
 ## Who owes who
 
+- Open a group’s **Balances** tab and choose **Add group balance** to record shared obligations.
+- Enter a description and total in the group currency. Choose who owes and who should receive.
+- Split each side by Equal, Exact amounts, Percentages, or Shares. Both sides must match the total.
+- The preview shows each person’s net change and the resulting group debts before you save.
+- One person can appear on both sides. Only the difference changes their balance.
+- Edit or delete a group balance from the same tab. This does not record a payment.
 - The **group balance strip** shows each member's net. **Suggested settle-up** shows the fewest payments that clear the group.
 - The **Balances page** shows every friend relationship across all groups and what should happen next.
 - **Settle up** records an offline payment (cash, bank transfer — whatever you used). SplitWisest never moves money.
