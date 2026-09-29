@@ -13,7 +13,10 @@ export const GET = handler(async (req: NextRequest, { params }: Ctx) => {
   const user = await requireUser();
   const groupId = parseGroupId((await params).id);
   await requireGroupMember(groupId, user.id);
-  const limit = Math.min(Math.max(Number(req.nextUrl.searchParams.get("limit")) || 50, 1), 200);
+  const rawLimit = req.nextUrl.searchParams.get("limit");
+  const requested = rawLimit === null || rawLimit.trim() === "" ? 50 : Number(rawLimit);
+  if (!Number.isSafeInteger(requested)) badRequest("Invalid page limit");
+  const limit = Math.min(Math.max(requested || 50, 1), 200);
   const beforeRaw = req.nextUrl.searchParams.get("before");
   const before = beforeRaw === null ? null : Number(beforeRaw);
   if (before !== null && (!Number.isSafeInteger(before) || before <= 0)) badRequest("Invalid page cursor");

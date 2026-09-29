@@ -326,7 +326,8 @@ export function useApiData<T>(
   path: string,
   debounceMs = 0,
   opts: { sync?: false | keyof SyncCursors | (keyof SyncCursors)[]; enabled?: boolean } = {}
-): { data: T | null; error: string | null; status: number | null; reload: () => void; reloadFresh: () => void } {
+): { data: T | null; error: string | null; status: number | null; reload: () => void; reloadFresh: () => void;
+  reloadFreshCoalesced: () => void } {
   const enabled = opts.enabled !== false;
   const [state, setState] = useState<{ path: string; data: T | null; error: string | null; status: number | null }>({
     path,
@@ -335,8 +336,15 @@ export function useApiData<T>(
     status: null,
   });
   const requestSeq = useRef(0);
-  const fetchData = useCallback((force: boolean) => {
+  const active = useRef<{ path: string; queued: boolean } | null>(null);
+  const fetchData = useCallback(function fetchData(force: boolean, coalesce = false): void {
     const requestedPath = path;
+    if (coalesce && active.current?.path === requestedPath) {
+      active.current.queued = true;
+      return;
+    }
+    const request = { path: requestedPath, queued: false };
+    active.current = request;
     const seq = ++requestSeq.current;
     apiCached<T>(path, force)
       .then((next) => {
@@ -352,17 +360,26 @@ export function useApiData<T>(
           error: stale ? null : err instanceof ApiClientError ? err.message : "Could not load data",
           status: err instanceof ApiClientError ? err.status : null,
         });
+      })
+      .finally(() => {
+        if (active.current !== request) return;
+        active.current = null;
+        if (request.queued) fetchData(true, true);
       });
   }, [path]);
   const reload = useCallback(() => fetchData(false), [fetchData]);
   const reloadFresh = useCallback(() => fetchData(true), [fetchData]);
+  const reloadFreshCoalesced = useCallback(() => fetchData(true, true), [fetchData]);
+  useEffect(() => () => {
+    if (active.current?.path === path) active.current = null;
+    requestSeq.current++;
+  }, [path]);
   useLayoutEffect(() => {
     if (!enabled) return;
     hydrateReadCache();
     const stale = cacheGet<T>(path);
     if (stale === null) return;
     // A layout update replaces the server skeleton before the first paint.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setState((current) => current.path === path && current.data !== null
       ? current
       : { path, data: stale, error: null, status: null });
@@ -392,6 +409,7 @@ export function useApiData<T>(
     status: enabled && state.path === path ? state.status : null,
     reload,
     reloadFresh,
+    reloadFreshCoalesced,
   };
 }
 

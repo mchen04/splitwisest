@@ -158,7 +158,7 @@ export function useGroupPageData({
   }, [reloadOverview, reloadExpenses, reloadInsightExpenses]);
 
   useSync((c, prev) => {
-    if (c.activityCursor !== prev.activityCursor) refreshAll();
+    if (c.activityCursor !== prev.activityCursor) refreshAll(true);
     if (c.messageCursor !== prev.messageCursor) setRefreshKey((k) => k + 1);
   });
 
