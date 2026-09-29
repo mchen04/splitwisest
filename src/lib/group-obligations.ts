@@ -2,7 +2,7 @@ import { sql } from "./db";
 import { badRequest, notFound, forbidden } from "./api";
 import { loadGroupMemberIds } from "./balances";
 import { activityData } from "./activity";
-import { computeGroupObligation, GroupObligationInput, SavedGroupObligation, GROUP_BALANCE_RECORD_CONFLICT } from "./group-obligation-math";
+import { computeGroupObligation, groupObligationCreatePayload, GroupObligationCreateInput, GroupObligationInput, SavedGroupObligation, GROUP_BALANCE_RECORD_CONFLICT } from "./group-obligation-math";
 
 function allocationsJson(input: GroupObligationInput, computed: ReturnType<typeof computeGroupObligation>) {
   return JSON.stringify((["owes", "receives"] as const).flatMap((side) => {
@@ -13,7 +13,20 @@ function allocationsJson(input: GroupObligationInput, computed: ReturnType<typeo
   }));
 }
 
-export async function createGroupObligation(groupId: number, currency: string, user: { id: number; displayName: string }, input: GroupObligationInput) {
+function resolveCreateRequest(row: Record<string, unknown>, payload: string) {
+  if (row.request_payload !== payload) badRequest("This create request was already used for different details. Start a new entry");
+  if (!row.live) badRequest("This group balance was deleted. Start a new entry");
+  return Number(row.id);
+}
+
+export async function createGroupObligation(groupId: number, currency: string, user: { id: number; displayName: string }, input: GroupObligationCreateInput) {
+  const payload = groupObligationCreatePayload(input);
+  const prior = await sql`
+    SELECT r.obligation_id AS id, r.request_payload,
+      EXISTS (SELECT 1 FROM group_obligations go WHERE go.id = r.obligation_id AND go.group_id = ${groupId}) AS live
+    FROM group_obligation_create_requests r
+    WHERE r.group_id = ${groupId} AND r.created_by = ${user.id} AND r.client_request_id = ${input.clientRequestId}::uuid`;
+  if (prior[0]) return resolveCreateRequest(prior[0], payload);
   if (!input.expectedBalances) badRequest("Group balances changed. Refresh and try again");
   const memberIds = await loadGroupMemberIds(groupId);
   const computed = computeGroupObligation(input, memberIds, currency);
@@ -22,7 +35,12 @@ export async function createGroupObligation(groupId: number, currency: string, u
   const [, rows] = await sql.transaction((tx) => [
     tx`SELECT pg_advisory_xact_lock(${groupId}::int)`,
     tx`
-      WITH allocations AS (
+      WITH prior AS (
+        SELECT r.obligation_id AS id, r.request_payload,
+          EXISTS (SELECT 1 FROM group_obligations go WHERE go.id = r.obligation_id AND go.group_id = ${groupId}) AS live
+        FROM group_obligation_create_requests r
+        WHERE r.group_id = ${groupId} AND r.created_by = ${user.id} AND r.client_request_id = ${input.clientRequestId}::uuid
+      ), allocations AS (
         SELECT x.side, x.user_id, x.share_cents, x.raw_input
         FROM jsonb_to_recordset(${allocationsJson(input, computed)}::jsonb)
           AS x(side text, user_id bigint, share_cents bigint, raw_input numeric)
@@ -32,7 +50,7 @@ export async function createGroupObligation(groupId: number, currency: string, u
            FROM group_balance_rows(${groupId}) b), '[]'::jsonb
         ) AS ok
       ), members_ok AS (
-        SELECT 1 WHERE (SELECT ok FROM balance_unchanged) AND EXISTS (
+        SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM prior) AND (SELECT ok FROM balance_unchanged) AND EXISTS (
           SELECT 1 FROM group_members WHERE group_id = ${groupId} AND user_id = ${user.id}
         ) AND NOT EXISTS (
           SELECT 1 FROM allocations a WHERE NOT EXISTS (
@@ -40,22 +58,27 @@ export async function createGroupObligation(groupId: number, currency: string, u
           )
         )
       ), inserted AS (
-        INSERT INTO group_obligations (group_id, title, amount_cents, owed_method, receive_method, created_by)
-        SELECT ${groupId}, ${input.title}, ${input.amountCents}, ${input.owes.method}, ${input.receives.method}, ${user.id}
+        INSERT INTO group_obligations (group_id, title, amount_cents, owed_method, receive_method, created_by, client_request_id)
+        SELECT ${groupId}, ${input.title}, ${input.amountCents}, ${input.owes.method}, ${input.receives.method}, ${user.id}, ${input.clientRequestId}::uuid
         FROM members_ok RETURNING id
       ), alloc AS (
         INSERT INTO group_obligation_allocations (obligation_id, side, user_id, share_cents, raw_input)
         SELECT inserted.id, a.side, a.user_id, a.share_cents, a.raw_input FROM inserted, allocations a
         RETURNING 1
+      ), receipt AS (
+        INSERT INTO group_obligation_create_requests (group_id, created_by, client_request_id, request_payload, obligation_id)
+        SELECT ${groupId}, ${user.id}, ${input.clientRequestId}::uuid, ${payload}, inserted.id
+        FROM inserted RETURNING obligation_id AS id, request_payload
       ), activity_row AS (
         INSERT INTO activity (group_id, actor_id, type, summary, data)
         SELECT ${groupId}, ${user.id}, 'group_balance.added', ${user.displayName + " " + actionText},
           jsonb_set(${activityData({}, actionText)}::jsonb, '{groupBalanceId}', to_jsonb(inserted.id))
         FROM inserted RETURNING 1
-      ) SELECT id FROM inserted`,
+      ) SELECT id, request_payload, live FROM prior
+        UNION ALL SELECT id, request_payload, true AS live FROM receipt`,
   ]);
   if (!rows[0]) badRequest("Group balances changed. Refresh and try again");
-  return Number(rows[0].id);
+  return resolveCreateRequest(rows[0], payload);
 }
 
 export async function updateGroupObligation(

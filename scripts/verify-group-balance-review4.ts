@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
-import { webkit, type BrowserContext, type Page } from "playwright-core";
+import { webkit, type BrowserContext } from "playwright-core";
 import { assert, cleanupQaUsers, request, signup } from "./qa-support";
 
 if (process.env.NEON_LOCAL_PROXY !== "http://127.0.0.1:4445/sql" ||
@@ -151,7 +151,7 @@ async function main() {
         assert(detail.res.ok, `snapshot: ${detail.text}`);
         const expectedBalances = (detail.json.balances as { userId: number; netCents: number }[])
           .map((row) => [row.userId, row.netCents] as [number, number]).sort((a, b) => a[0] - b[0]);
-        const added = await request(`/api/groups/${groupId}/group-balances`, { cookie: jet.cookie, body: {
+        const added = await request(`/api/groups/${groupId}/group-balances`, { cookie: jet.cookie, body: { clientRequestId: crypto.randomUUID(),
           title, amountCents: 100,
           owes: { method: "equal", participants: [{ userId: jet.id }] },
           receives: { method: "equal", participants: [{ userId: matthew.id }] }, expectedBalances,

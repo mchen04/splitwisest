@@ -129,7 +129,7 @@ async function main() {
         const expectedBalances = (current.json.balances as { userId: number; netCents: number }[])
           .map((b) => [b.userId, b.netCents] as [number, number]).sort((a, b) => a[0] - b[0]);
         const changed = await request(`/api/groups/${groupId}/group-balances`, { cookie: michael.cookie,
-          body: { title: "Concurrent browser change", amountCents: 100,
+          body: { clientRequestId: randomUUID(), title: "Concurrent browser change", amountCents: 100,
             owes: { method: "equal", participants: [{ userId: jet.id }] },
             receives: { method: "equal", participants: [{ userId: matthew.id }] }, expectedBalances,
           } });
@@ -219,7 +219,7 @@ async function main() {
     }
     for (let n = 0; n < 51; n++) {
       const added = await request(`/api/groups/${groupId}/group-balances`, { cookie: matthew.cookie,
-        body: { title: `Page ${n}`, amountCents: 1,
+        body: { clientRequestId: randomUUID(), title: `Page ${n}`, amountCents: 1,
           owes: { method: "equal", participants: [{ userId: jet.id }] },
           receives: { method: "equal", participants: [{ userId: matthew.id }] },
           expectedBalances: await currentSnapshot(),
@@ -231,7 +231,7 @@ async function main() {
     await page.getByRole("button", { name: "Load more" }).click();
     await page.getByRole("button", { name: "Page 0", exact: true }).waitFor();
     const shifted = await request(`/api/groups/${groupId}/group-balances`, { cookie: michael.cookie,
-      body: { title: "Page 51", amountCents: 1,
+      body: { clientRequestId: randomUUID(), title: "Page 51", amountCents: 1,
         owes: { method: "equal", participants: [{ userId: jet.id }] },
         receives: { method: "equal", participants: [{ userId: matthew.id }] },
         expectedBalances: await currentSnapshot(),
@@ -318,7 +318,7 @@ async function main() {
     await cachePage.waitForResponse((response) => response.url().endsWith("/api/sync"));
     const readsBeforeSync = listReads;
     const rapid = await request(`/api/groups/${groupId}/group-balances`, { cookie: michael.cookie,
-      body: { title: "Within fresh cache", amountCents: 1,
+      body: { clientRequestId: randomUUID(), title: "Within fresh cache", amountCents: 1,
         owes: { method: "equal", participants: [{ userId: jet.id }] },
         receives: { method: "equal", participants: [{ userId: matthew.id }] },
         expectedBalances: await currentSnapshot(),

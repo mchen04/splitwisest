@@ -55,7 +55,23 @@ export const GroupObligationBody = z.object({
   expectedBalances: z.array(z.tuple([z.number().int().positive(), z.number().int()])).optional(),
 });
 
+export const GroupObligationCreateBody = GroupObligationBody.extend({
+  clientRequestId: z.uuid(),
+});
+
 export type GroupObligationInput = z.infer<typeof GroupObligationBody>;
+export type GroupObligationCreateInput = z.infer<typeof GroupObligationCreateBody>;
+
+export function groupObligationCreatePayload(input: GroupObligationInput): string {
+  const side = (which: "owes" | "receives") => ({
+    method: input[which].method,
+    participants: input[which].participants.map((p) => input[which].method === "equal"
+      ? { userId: p.userId } : { userId: p.userId, value: p.value })
+      .sort((a, b) => a.userId - b.userId),
+  });
+  return JSON.stringify({ title: input.title, amountCents: input.amountCents,
+    owes: side("owes"), receives: side("receives") });
+}
 export type SavedGroupObligation = {
   amountCents: number;
   owes: { method: GroupObligationInput["owes"]["method"]; participants: { userId: number; shareCents: number; value: number | null }[] };

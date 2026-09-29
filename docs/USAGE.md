@@ -49,6 +49,7 @@
 - Edit or delete a group balance from the same tab. This does not record a payment.
 - If the group balance list fails to load, choose **Try again** on the Balances tab.
 - A group balance form stays open while its save is in progress.
+- If a save response is lost, retry the same entry. The app keeps its create request ID and does not add a second entry. Changing the entry starts a new request.
 - Before removing a member, edit or delete every group balance that includes them. This also applies to zero shares and net-zero entries.
 - The **group balance strip** shows each member's net. **Suggested settle-up** shows the fewest payments that clear the group.
 - The **Balances page** shows every friend relationship across all groups and what should happen next.

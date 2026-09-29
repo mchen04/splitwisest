@@ -4,7 +4,7 @@ import { badRequest, handler } from "@/lib/api";
 import { requireUser } from "@/lib/auth";
 import { parseGroupId, requireGroupMember } from "@/lib/groups";
 import { createGroupObligation } from "@/lib/group-obligations";
-import { GroupObligationBody } from "@/lib/group-obligation-math";
+import { GroupObligationCreateBody } from "@/lib/group-obligation-math";
 import { versionToken } from "@/lib/versions";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -44,7 +44,7 @@ export const POST = handler(async (req: NextRequest, { params }: Ctx) => {
   const user = await requireUser();
   const groupId = parseGroupId((await params).id);
   const group = await requireGroupMember(groupId, user.id);
-  const input = GroupObligationBody.parse(await req.json());
+  const input = GroupObligationCreateBody.parse(await req.json());
   const id = await createGroupObligation(groupId, group.currency, user, input);
   return NextResponse.json({ id });
 });

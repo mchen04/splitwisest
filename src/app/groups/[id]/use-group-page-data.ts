@@ -176,6 +176,7 @@ export function useGroupPageData({
     loadError,
     loadDetail: reloadOverview,
     refreshBalancePreview: detailState.reloadFresh,
+    pollBalancePreview: detailState.reloadFreshCoalesced,
     refreshGroupBalanceMutation: () => refreshAll(true),
     reloadInsights: reloadInsightExpenses,
     refreshAll,

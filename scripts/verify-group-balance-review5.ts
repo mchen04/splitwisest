@@ -72,7 +72,7 @@ async function main() {
   }
   async function add(title: string, amountCents: number, owes: object, receives: object) {
     const response = await request(`/api/groups/${groupId}/group-balances`, { cookie: matthew.cookie,
-      body: { title, amountCents, owes, receives, expectedBalances: await snapshot() } });
+      body: { clientRequestId: crypto.randomUUID(), title, amountCents, owes, receives, expectedBalances: await snapshot() } });
     assert(response.res.ok, `add: ${response.text}`);
     return Number(response.json.id);
   }

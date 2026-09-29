@@ -16,7 +16,7 @@ DATABASE_URL=... pnpm tsx scripts/migrate.ts
 
 `scripts/migrate.ts` also installs the group-balance tables, balance function,
 and allocation guards. If an existing database needs only the group-balance
-change, use the three scoped SQL files below in order instead of running the
+change, use the four scoped SQL files below in order instead of running the
 full migration script. Confirm the database target first.
 
 Apply `scripts/migrations/20260929_group_balances.sql` in one transaction before
@@ -35,6 +35,12 @@ either side does not match the total. The transaction rolls back on failure.
 Then apply `scripts/migrations/20260929_group_balances_immutable_allocations.sql`.
 It checks existing allocation totals and prevents an allocation from changing
 its parent group balance. The transaction rolls back if the check fails.
+
+Then apply `scripts/migrations/20260929_group_balances_create_requests.sql`.
+It adds a nullable UUID to existing balances, a scoped unique index, and a
+create receipt table. Existing financial rows stay unchanged. A receipt keeps
+the original request identity after an edit or delete. The transaction rolls
+back on failure. Verify its ledger entry, column, index, and unchanged balances.
 
 **Run the migration before deploying the code** — `getSessionUser` references
 `users.deleted_at`, which the migration adds.
@@ -81,8 +87,9 @@ Pass these on the command line for the `tsx` scripts (they read `.env.local`
 | `expenses` | amount in original currency + `converted_cents` in group currency with `fx_rate` snapshot, split method, payer, category, date, notes |
 | `expense_shares` | per-participant integer-cent shares (always sum to `amount_cents`, DB-enforced by a deferred sum-check trigger), raw input (percent/shares/exact) for editing |
 | `expense_items` | itemized-bill line items with participant id arrays |
-| `group_obligations` | one group balance record with a description, total in group currency, and a method for each side |
+| `group_obligations` | one group balance record with a description, total in group currency, methods for each side, and an optional create UUID |
 | `group_obligation_allocations` | selected members’ owed and received shares; each side sums to the total |
+| `group_obligation_create_requests` | original create payload and record ID, retained after an entry is edited or deleted; removed with its group |
 | `attachments` | receipts stored as `bytea` (≤ 4 MB, images/PDF) |
 | `settlements` | offline payment ledger; `group_id NULL` = direct friend settlement |
 | `recurring_expenses` | templates with cadence + `next_date`, lazily materialized |
@@ -108,5 +115,6 @@ Pass these on the command line for the `tsx` scripts (they read `.env.local`
 - Secondary indexes back the hot read paths: `expenses(group_id)` and `settlements(group_id/payer_id/recipient_id)` feed `group_balance_rows()`; `group_obligations(group_id, id DESC)` pages group balances, while `group_obligation_allocations(user_id)` supports user-reference lookups; `group_members(user_id)` and `friendships(user_b)` serve reverse lookups; `attachments(expense_id)` and partial `expenses(recurring_id)` cover the remaining FK joins.
 - `group_balance_rows(group_id)` returns each member's net (expense payments − expense shares + group balance receives − group balance owes + settlements paid − received). The expense share side allocates every expense's `converted_cents` with a **per-expense largest-remainder** pass using exact integer `div`/`mod`, so converted shares sum exactly to the expense total and no cross-currency rounding residual is misattributed to one member. A whole-group residual-absorption step remains as a defensive backstop (now a no-op in the common case).
 - Group balances add received shares to the credit side and owed shares to the debit side. They use the group currency and never enter spending charts or recorded payments. Deferred triggers check both allocation changes and parent inserts or total updates against the stored total. An immediate trigger forbids changing an allocation's parent balance.
+- Group balance creates use a UUID scoped to the group and creator. A retry with the same payload returns the first record. A changed payload or deleted record rejects the reused UUID. The receipt table retains that decision after edits and deletes.
 - `expenses.recurring_id` has an FK to `recurring_expenses(id)` (`ON DELETE SET NULL`) so already-materialized expenses survive a rule deletion.
 - Zero-decimal currencies (JPY/KRW) are stored as whole units (multiples of 100 cents) and split in whole units, so a share is never an unpayable fraction of a yen/won.

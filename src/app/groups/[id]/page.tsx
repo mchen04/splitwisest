@@ -46,7 +46,7 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
   const categories = categoriesData?.categories ?? [];
   const {
     detail, expenses, insightExpenses, insightError, hasMoreExpenses, recurring, settlements, hasMoreSettlements,
-    activity, refreshKey, loadError, loadDetail, reloadInsights, refreshAll, refreshBalancePreview,
+    activity, refreshKey, loadError, loadDetail, reloadInsights, refreshAll, refreshBalancePreview, pollBalancePreview,
     refreshGroupBalanceMutation,
   } = useGroupPageData({ groupId, filters, expenseLimit, settlementLimit, insightsEnabled: tab === "insights" });
 
@@ -61,9 +61,9 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
   const { data: groupBalancesData, error: groupBalancesError, reloadFresh: reloadGroupBalancesFresh,
     reloadFreshCoalesced: pollGroupBalanceList } = useApiData<GroupBalancePage>(
     `/api/groups/${groupId}/group-balances?limit=50`, 0, { sync: false });
-  useSync((_current, _previous, initial) => {
+  useSync(() => {
     pollGroupBalanceList();
-    if (initial) refreshBalancePreview();
+    pollBalancePreview();
   }, true);
   const observedBalanceChange = useRef<{ groupId: number; cursor: number } | null>(null);
   useEffect(() => {

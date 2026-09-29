@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, Check, Users } from "lucide-react";
 import { api, ApiClientError, fmtMoney } from "@/lib/client";
 import { simplifyDebts } from "@/lib/money";
-import { computeGroupObligation, formatGroupWeight, groupObligationDelta, parseGroupMoney, parseGroupWeight, GROUP_BALANCE_RECORD_CONFLICT, type SavedGroupObligation } from "@/lib/group-obligation-math";
+import { computeGroupObligation, formatGroupWeight, groupObligationCreatePayload, groupObligationDelta, parseGroupMoney, parseGroupWeight, GROUP_BALANCE_RECORD_CONFLICT, type SavedGroupObligation } from "@/lib/group-obligation-math";
 import { currencyStep } from "@/lib/currencies";
 import { Button, ErrorNote, Field, Input, Modal } from "./ui";
 import { METHOD_LABELS, ParticipantSplit } from "./expense-splits";
@@ -74,6 +74,7 @@ export function GroupBalanceForm({ groupId, groupName, currency, members, meId, 
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const saving = useRef(false);
+  const createRequest = useRef({ id: "", payload: "" });
   const [recordConflict, setRecordConflict] = useState(false);
 
   useEffect(() => {
@@ -87,6 +88,7 @@ export function GroupBalanceForm({ groupId, groupName, currency, members, meId, 
     setRecordConflict(false);
     setBusy(false);
     saving.current = false;
+    createRequest.current = { id: crypto.randomUUID(), payload: "" };
     // Membership sync must not clear a live draft.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, existing?.id]);
@@ -162,7 +164,16 @@ export function GroupBalanceForm({ groupId, groupName, currency, members, meId, 
     setBusy(true);
     try {
       if (existing) await api(`/api/group-balances/${existing.id}`, { method: "PATCH", body: preview.body });
-      else await api(`/api/groups/${groupId}/group-balances`, { body: preview.body });
+      else {
+        const payload = groupObligationCreatePayload(preview.body);
+        if (createRequest.current.payload && createRequest.current.payload !== payload) {
+          createRequest.current.id = crypto.randomUUID();
+        }
+        createRequest.current.payload = payload;
+        await api(`/api/groups/${groupId}/group-balances`, { body: {
+          ...preview.body, clientRequestId: createRequest.current.id,
+        } });
+      }
       onSaved();
       onClose();
     } catch (e) {

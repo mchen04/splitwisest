@@ -136,7 +136,7 @@ async function main() {
         console.log("slow list: balances tab opened");
         await Promise.race([firstSnapshot, new Promise<never>((_, reject) =>
           setTimeout(() => reject(new Error("first slow list response did not start")), 12000))]);
-        const added = await request(`/api/groups/${groupId}/group-balances`, { cookie: jet.cookie, body: {
+        const added = await request(`/api/groups/${groupId}/group-balances`, { cookie: jet.cookie, body: { clientRequestId: crypto.randomUUID(),
           title: "Remote slow balance", amountCents: 100,
           owes: { method: "equal", participants: [{ userId: jet.id }] },
           receives: { method: "equal", participants: [{ userId: matthew.id }] },

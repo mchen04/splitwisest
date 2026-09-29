@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeGroupObligation, groupObligationDelta, GroupObligationBody, parseGroupMoney } from "../group-obligation-math";
+import { computeGroupObligation, groupObligationCreatePayload, groupObligationDelta, GroupObligationBody, GroupObligationCreateBody, parseGroupMoney } from "../group-obligation-math";
 
 const members = new Set([1, 2, 3, 4]);
 const equal = (...ids: number[]) => ({ method: "equal" as const, participants: ids.map((userId) => ({ userId })) });
@@ -7,6 +7,21 @@ const exact = (...entries: [number, number][]) => ({ method: "exact" as const,
   participants: entries.map(([userId, value]) => ({ userId, value })) });
 
 describe("group obligations", () => {
+  it("requires a create UUID and compares allocation intent independent of order or net snapshot", () => {
+    const first = { clientRequestId: "00000000-0000-4000-8000-000000000001",
+      title: "Same intent", amountCents: 101, owes: equal(1, 2),
+      receives: exact([3, 100], [2, 1]), expectedBalances: [[1, 0]],
+    };
+    expect(GroupObligationCreateBody.safeParse({ ...first, clientRequestId: undefined }).success).toBe(false);
+    expect(GroupObligationCreateBody.safeParse({ ...first, clientRequestId: "invalid" }).success).toBe(false);
+    const original = groupObligationCreatePayload(GroupObligationCreateBody.parse(first));
+    const reordered = groupObligationCreatePayload(GroupObligationCreateBody.parse({ ...first,
+      owes: equal(2, 1), receives: exact([2, 1], [3, 100]), expectedBalances: [[1, -1]],
+    }));
+    expect(reordered).toBe(original);
+    expect(groupObligationCreatePayload(GroupObligationCreateBody.parse({ ...first, title: "New intent" })))
+      .not.toBe(original);
+  });
   it("reads exact money without accepting signs or extra precision", () => {
     expect(parseGroupMoney("1,234.56")).toBe(123456);
     expect(parseGroupMoney("12,34")).toBe(1234);

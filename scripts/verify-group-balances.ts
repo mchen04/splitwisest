@@ -65,7 +65,7 @@ async function main() {
   }
   async function nets() { return new Map(await snapshot()); }
 
-  const body = { title: "Shared obligations", amountCents: 12000,
+  const body = { clientRequestId: crypto.randomUUID(), title: "Shared obligations", amountCents: 12000,
     owes: { method: "equal", participants: [matthew, michael, jet].map((m) => ({ userId: m.id })) },
     receives: { method: "exact", participants: [
       { userId: matthew.id, value: 8000 }, { userId: michael.id, value: 4000 },
@@ -125,7 +125,7 @@ async function main() {
     ] },
     expectedUpdatedAt: saved.updatedAt, expectedBalances: await snapshot(),
   };
-  const concurrent = await request(path, { cookie: michael.cookie, body: {
+  const concurrent = await request(path, { cookie: michael.cookie, body: { clientRequestId: crypto.randomUUID(),
     title: "Concurrent change", amountCents: 100,
     owes: { method: "equal", participants: [{ userId: jet.id }] },
     receives: { method: "equal", participants: [{ userId: matthew.id }] },
@@ -168,7 +168,7 @@ async function main() {
   assert(current.get(matthew.id) === 1000 && current.get(jet.id) === -1000 &&
     current.get(michael.id) === 0 && current.get(other.id) === 0, "delete did not restore reimbursement balances");
 
-  const zero = await request(path, { cookie: matthew.cookie, body: {
+  const zero = await request(path, { cookie: matthew.cookie, body: { clientRequestId: crypto.randomUUID(),
     title: "Explicit zero", amountCents: 100,
     owes: { method: "equal", participants: [{ userId: jet.id }] },
     receives: { method: "exact", participants: [
@@ -199,7 +199,7 @@ async function main() {
   assert(zeroDeleted.res.ok, `explicit zero delete: ${zeroDeleted.text}`);
   console.log("weighted inputs: missing values rejected; explicit zero survived create, reopen, and title edit");
 
-  const legacy = await request(path, { cookie: matthew.cookie, body: { title: "Legacy tie", amountCents: 1,
+  const legacy = await request(path, { cookie: matthew.cookie, body: { clientRequestId: crypto.randomUUID(), title: "Legacy tie", amountCents: 1,
     owes: { method: "equal", participants: [{ userId: matthew.id }, { userId: michael.id }] },
     receives: { method: "equal", participants: [{ userId: jet.id }] },
     expectedBalances: await snapshot(),
@@ -241,7 +241,7 @@ async function main() {
     "title-only edit moved a rounding cent after display-name reorder");
   console.log("rounding: title edit retained legacy awarded cent after display-name reorder");
 
-  const atomic = await request(path, { cookie: matthew.cookie, body: {
+  const atomic = await request(path, { cookie: matthew.cookie, body: { clientRequestId: crypto.randomUUID(),
     title: "Atomic detail", amountCents: 100,
     owes: { method: "equal", participants: [{ userId: jet.id }] },
     receives: { method: "equal", participants: [{ userId: matthew.id }] },
@@ -293,7 +293,7 @@ async function main() {
   assert(removedAtomic.res.ok, `remove atomic fixture: ${removedAtomic.text}`);
 
   for (let n = 0; n < 51; n++) {
-    const added = await request(path, { cookie: matthew.cookie, body: { ...body, title: `Page ${n}`, expectedBalances: await snapshot() } });
+    const added = await request(path, { cookie: matthew.cookie, body: { ...body, clientRequestId: crypto.randomUUID(), title: `Page ${n}`, expectedBalances: await snapshot() } });
     assert(added.res.ok, `page fixture ${n}: ${added.text}`);
   }
   const firstPage = await request(`${path}?limit=50`, { cookie: matthew.cookie });
@@ -307,7 +307,7 @@ async function main() {
   const badCursor = await request(`${path}?before=bad`, { cookie: matthew.cookie });
   assert(badCursor.res.status === 400, "invalid cursor was accepted");
 
-  const zeroRef = await request(path, { cookie: matthew.cookie, body: {
+  const zeroRef = await request(path, { cookie: matthew.cookie, body: { clientRequestId: crypto.randomUUID(),
     title: "Zero-share member guard", amountCents: 100,
     owes: { method: "exact", participants: [
       { userId: matthew.id, value: 100 }, { userId: other.id, value: 0 },

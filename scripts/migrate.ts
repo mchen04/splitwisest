@@ -258,10 +258,22 @@ async function main() {
     owed_method TEXT NOT NULL CHECK (owed_method IN ('equal','exact','percentage','shares')),
     receive_method TEXT NOT NULL CHECK (receive_method IN ('equal','exact','percentage','shares')),
     created_by BIGINT NOT NULL REFERENCES users(id),
+    client_request_id UUID,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`;
   await sql`CREATE INDEX IF NOT EXISTS group_obligations_group_idx ON group_obligations (group_id, id DESC)`;
+  await sql`ALTER TABLE group_obligations ADD COLUMN IF NOT EXISTS client_request_id UUID`;
+  await sql`CREATE UNIQUE INDEX IF NOT EXISTS group_obligations_create_request_idx
+    ON group_obligations (group_id, created_by, client_request_id)`;
+  await sql`CREATE TABLE IF NOT EXISTS group_obligation_create_requests (
+    group_id BIGINT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+    created_by BIGINT NOT NULL REFERENCES users(id),
+    client_request_id UUID NOT NULL,
+    request_payload TEXT NOT NULL,
+    obligation_id BIGINT NOT NULL,
+    PRIMARY KEY (group_id, created_by, client_request_id)
+  )`;
   await sql`CREATE TABLE IF NOT EXISTS group_obligation_allocations (
     obligation_id BIGINT NOT NULL REFERENCES group_obligations(id) ON DELETE CASCADE,
     side TEXT NOT NULL CHECK (side IN ('owes','receives')),
@@ -745,6 +757,7 @@ async function main() {
   await markMigration("20260929_group_balances");
   await markMigration("20260929_group_balances_parent_check");
   await markMigration("20260929_group_balances_immutable_allocations");
+  await markMigration("20260929_group_balances_create_requests");
 
   console.log("migration complete");
 }
