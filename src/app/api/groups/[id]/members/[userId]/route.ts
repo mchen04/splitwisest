@@ -26,6 +26,13 @@ export const DELETE = handler(async (_req: NextRequest, { params }: Ctx) => {
   }
 
   const result = await removeGroupMemberWithActivity({ groupId, targetId, actor: user, removingSelf });
+  if (!result.removed && result.groupBalanceRefs > 0) {
+    badRequest(
+      removingSelf
+        ? "Edit or delete group balances that include you before leaving"
+        : "Edit or delete group balances that include this member before removing them"
+    );
+  }
   if (!result.removed && result.netCents !== 0) {
     badRequest(
       removingSelf

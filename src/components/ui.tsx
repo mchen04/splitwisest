@@ -314,6 +314,7 @@ export function Modal({
   children,
   footer,
   wide = false,
+  closeDisabled = false,
 }: {
   open: boolean;
   onClose: () => void;
@@ -321,6 +322,7 @@ export function Modal({
   children: ReactNode;
   footer?: ReactNode;
   wide?: boolean;
+  closeDisabled?: boolean;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
@@ -374,7 +376,7 @@ export function Modal({
       >
         <div className="flex items-center justify-between border-b border-line px-4 py-3">
           <h2 className="text-xl font-semibold tracking-tight">{title}</h2>
-          <IconButton label="Close" onClick={onClose}>
+          <IconButton label="Close" onClick={onClose} disabled={closeDisabled}>
             <X className="h-5 w-5" />
           </IconButton>
         </div>
