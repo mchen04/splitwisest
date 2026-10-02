@@ -15,11 +15,17 @@ export const POST = handler(async (req: NextRequest) => {
   const user = await requireUser();
   const { scope, lastId } = Body.parse(await req.json());
   const cursor = await visibleReadCursor(user.id, scope, lastId);
-  await sql`
+  await sql.transaction((tx) => [tx`
     INSERT INTO read_state (user_id, scope, last_id, updated_at)
     VALUES (${user.id}, ${scope}, ${cursor.lastId}, now())
     ON CONFLICT (user_id, scope) DO UPDATE
-      SET last_id = LEAST(GREATEST(read_state.last_id, ${cursor.lastId}), ${cursor.maxId}), updated_at = now()`;
+      SET last_id = LEAST(GREATEST(read_state.last_id, ${cursor.lastId}), ${cursor.maxId}), updated_at = now()`,
+    tx`UPDATE notifications SET read_at = COALESCE(read_at, now())
+      WHERE user_id = ${user.id} AND category = 'messages'
+        AND ((${scope} LIKE 'msg:group:%' AND group_id = ${scope.startsWith('msg:group:') ? Number(scope.split(':')[2]) : null})
+          OR (${scope} LIKE 'msg:dm:%' AND peer_id = ${scope.startsWith('msg:dm:') ? Number(scope.split(':')[2]) : null}))
+        AND split_part(event_key, ':', 2)::bigint <= ${cursor.lastId}`,
+  ]);
   return NextResponse.json({ ok: true });
 });
 

@@ -16,6 +16,7 @@ A private, friend-group expense tracker inspired by Splitwise. Track shared expe
 - Recurring expenses (weekly/monthly, lazily materialized)
 - Search & filtering by group, friend, date, category, payer, text
 - Activity log (grouped by day), CSV export, SVG charts
+- Notification inbox, per-category phone preferences, and opt-in Web Push with durable retries
 - Group chat + direct friend chat with link rendering and search
 - Realtime via lightweight polling sync cursor (serverless-friendly)
 - Modern, clean UI with one token system, tabular money, and synchronized light and dark controls
@@ -34,6 +35,7 @@ Next.js (App Router, TypeScript), Tailwind CSS v4, Lucide icons, Neon PostgreSQL
 pnpm install
 # .env.local needs DATABASE_URL (SIGNUP_CODE is optional)
 pnpm tsx scripts/migrate.ts  # create tables (idempotent)
+pnpm migrate:notifications  # additive notification schema
 pnpm dev
 ```
 
@@ -74,3 +76,4 @@ Set `DATABASE_URL` in Vercel project env vars. Add `SIGNUP_CODE` only if you wan
 - `docs/DATABASE.md` — schema and migration notes for Neon
 - `docs/PWA.md` — iPhone layout contract and Safari release checks
 - `docs/USAGE.md` — user-facing workflow guide
+- `docs/NOTIFICATIONS.md` — event coverage, device setup, delivery, and rollout

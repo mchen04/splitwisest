@@ -176,7 +176,7 @@ export async function removeGroupMemberWithActivity({
       INSERT INTO activity (group_id, actor_id, type, summary, data)
       SELECT ${groupId}, ${actor.id}, 'group.member_removed',
         ${actor.displayName} || ' ' || t.action,
-        jsonb_build_object('actionText', t.action)
+        jsonb_build_object('actionText', t.action, 'removedUserId', ${targetId}::bigint)
       FROM del, t
       RETURNING 1
     )

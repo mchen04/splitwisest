@@ -55,6 +55,8 @@ export const GET = handler(async () => {
           WHERE fr.to_id = ${user.id}) AS req
     )
     SELECT cur.act, cur.msg, cur.nudge, cur.req,
+      (SELECT COALESCE(MAX(id), 0) FROM notifications n WHERE user_id = ${user.id} AND notification_visible(n)) AS notification_cursor,
+      (SELECT count(*)::int FROM notifications n WHERE user_id = ${user.id} AND read_at IS NULL AND notification_visible(n)) AS unread_notifications,
       (SELECT COUNT(*) FROM chans c
         LEFT JOIN read_state r ON r.user_id = ${user.id} AND r.scope = c.scope
         WHERE c.maxid > COALESCE(r.last_id, 0))::int AS unread_messages,
@@ -71,12 +73,14 @@ export const GET = handler(async () => {
     messageCursor: Number(r.msg),
     nudgeCursor: Number(r.nudge),
     requestCursor: Number(r.req),
+    notificationCursor: Number(r.notification_cursor),
     unread: {
       messages: Number(r.unread_messages),
       activity: Number(r.unread_activity),
       nudges: Number(r.unread_nudges),
       requests: Number(r.unread_requests),
       balances: Number(r.unread_nudges) + Number(r.unread_requests),
+      notifications: Number(r.unread_notifications),
     },
   });
 });

@@ -41,7 +41,7 @@ export async function createSignupAccount({
       ),
       a AS (
         INSERT INTO activity (group_id, actor_id, type, summary, data)
-        SELECT null, u.id, 'user.joined', ${joinedSummary}, ${JSON.stringify({ actionText: "joined SplitWisest" })}::jsonb
+        SELECT null, u.id, 'user.joined', ${joinedSummary}, ${JSON.stringify({ actionText: "joined SplitWisest", visibleUserIds: [String(inviterId)] })}::jsonb
         FROM u
         RETURNING 1
       )

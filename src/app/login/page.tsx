@@ -20,7 +20,8 @@ export default function LoginPage() {
     setError(null);
     try {
       await api("/api/auth/login", { body: { username, password } });
-      router.push("/");
+      const next = new URLSearchParams(window.location.search).get("next") ?? "";
+      router.push(/^\/notifications(?:\/\d+)?$/.test(next) ? next : "/");
     } catch (err) {
       setError(err instanceof ApiClientError ? err.message : "Could not log in");
       setBusy(false);

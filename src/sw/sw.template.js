@@ -266,3 +266,47 @@ self.addEventListener("fetch", (event) => {
   // Everything else (there is nothing else same-origin today) passes through
   // untouched — this handler never responds with undefined.
 });
+
+// A visible notification is required for every push, including in the foreground.
+function pushPath(value) {
+  if (typeof value !== "string" || !/^\/notifications\/\d+$/.test(value)) return "/notifications";
+  return value;
+}
+
+self.addEventListener("push", (event) => {
+  let payload = {};
+  try {
+    const data = event.data?.json();
+    if (data && typeof data === "object") payload = data;
+  } catch { /* A malformed payload still gets a visible, private fallback. */ }
+  const id = Number(payload.notificationId);
+  event.waitUntil(self.registration.showNotification("SplitWisest", {
+    body: payload.test === true ? "Open this test notification to confirm tap-through."
+      : "You have new activity. Open SplitWisest to view it.",
+    icon: "/icon-192.png", badge: "/icon-192.png",
+    tag: Number.isSafeInteger(id) && id > 0 ? `notification-${id}` : "splitwisest-activity",
+    data: { url: pushPath(payload.url) },
+  }));
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const path = pushPath(event.notification.data?.url);
+  event.waitUntil((async () => {
+    const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    const client = windows.find((w) => new URL(w.url).origin === self.location.origin);
+    if (client) {
+      try {
+        await client.focus();
+        const acknowledged = await new Promise((resolve) => {
+          const channel = new MessageChannel();
+          const timeout = setTimeout(() => { channel.port1.close(); resolve(false); }, 1000);
+          channel.port1.onmessage = () => { clearTimeout(timeout); channel.port1.close(); resolve(true); };
+          client.postMessage({ type: "SPLITWISEST_NOTIFICATION_CLICK", url: path }, [channel.port2]);
+        });
+        if (acknowledged) return;
+      } catch { /* A closing or older window falls back to a new app window. */ }
+    }
+    await self.clients.openWindow(path);
+  })());
+});
