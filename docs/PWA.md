@@ -58,6 +58,7 @@ Verify the expense flow at each size:
 - A failed save keeps the modal open and preserves every value.
 - A second click cannot submit while the first save runs.
 - Group tabs and menus support arrow keys, Home, End, and Escape.
+- Open the Balances tab and check the group balance preview, save action, and scrolling at phone widths.
 
 Take a viewport screenshot before the browser closes. Keep screenshots outside the repository.
 

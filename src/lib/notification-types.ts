@@ -1,6 +1,6 @@
 export const NOTIFICATION_CATEGORIES = {
   expenses: "Expenses and receipts",
-  settlements: "Recorded payments",
+  settlements: "Payments and group balances",
   comments: "Expense comments",
   messages: "Group and direct messages",
   reminders: "Settle-up reminders",

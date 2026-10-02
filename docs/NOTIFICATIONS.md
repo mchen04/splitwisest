@@ -11,8 +11,9 @@ The mobile Home badge counts unread notifications. Existing Chat and Balances ba
 | Expense added, edited, deleted; receipt added or removed | Current group members, except actor | Expenses and receipts | Expense, or group activity if deleted |
 | Recurring rule created, updated, stopped | Current group members, except actor | Expenses and receipts | Group activity |
 | Recurring expense materialized; invalid rule paused | Current group members, including owner | Expenses and receipts | Expense or group activity |
-| Group payment recorded, updated, deleted | Current group members, except actor | Recorded payments | Group balances |
-| Direct payment recorded, updated, deleted | Other payment participant | Recorded payments | Balances |
+| Group payment recorded, updated, deleted | Current group members, except actor | Payments and group balances | Group balances |
+| Direct payment recorded, updated, deleted | Other payment participant | Payments and group balances | Balances |
+| Group balance added, edited, deleted | Current group members, except actor, including members without an allocation | Payments and group balances | Group balances |
 | Expense comment | Current group members, except author | Expense comments | Expense |
 | Group message | Current group members, except sender | Group and direct messages | Group chat |
 | Direct message | Other current friend | Group and direct messages | Direct chat |
@@ -28,6 +29,10 @@ The mobile Home badge counts unread notifications. Existing Chat and Balances ba
 
 Notifications start when the schema is installed. There is no historical backfill.
 Turning a phone preference off keeps inbox entries. Turning it on does not send past activity.
+Payments and group balances share the existing `settlements` preference key.
+Group balance alerts say Group balance added, Group balance changed, or Group balance deleted.
+All three open `/groups/{id}?tab=balances`. Failed writes, version conflicts, and idempotent create
+retries emit no extra notifications. Financial allocations and group balance behavior stay unchanged.
 Group notifications become inaccessible after membership ends. Deleted groups remove old scoped
 entries and retain a separate deletion notice. Deleted expenses open group activity.
 
@@ -150,6 +155,8 @@ transactions, injects a sender for deterministic transport failures, and cleans 
 `--probe-message` is the narrow oracle for a disabled-message-trigger negative control.
 `--probe-account-switch` checks session replacement through login, signup, and recovery.
 `--probe-device-cap` checks expired devices, concurrent enrollment, and subscription refresh at the limit.
+`--probe-group-balances` checks group balance recipients, preference muting, destinations, idempotency,
+conflicts, rollback, and membership visibility through real HTTP routes and database transactions.
 
 For the browser regression, sign into a retained local fixture using an isolated `agent-browser` session.
 Open `/notifications`, then run:

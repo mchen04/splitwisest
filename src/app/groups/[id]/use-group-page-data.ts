@@ -143,21 +143,22 @@ export function useGroupPageData({
     ? detailState.error
     : recurringState.error || activityState.error ? "Some group data could not be refreshed" : null;
 
-  const reloadOverview = useCallback(() => {
-    detailState.reload();
+  const reloadOverview = useCallback((freshDetail = false) => {
+    if (freshDetail) detailState.reloadFresh();
+    else detailState.reload();
     recurringState.reload();
     activityState.reload();
     reloadSettlements();
   }, [detailState, recurringState, activityState, reloadSettlements]);
 
-  const refreshAll = useCallback(() => {
-    reloadOverview();
+  const refreshAll = useCallback((freshDetail = false) => {
+    reloadOverview(freshDetail);
     reloadExpenses();
     reloadInsightExpenses();
   }, [reloadOverview, reloadExpenses, reloadInsightExpenses]);
 
   useSync((c, prev) => {
-    if (c.activityCursor !== prev.activityCursor) refreshAll();
+    if (c.activityCursor !== prev.activityCursor) refreshAll(true);
     if (c.messageCursor !== prev.messageCursor) setRefreshKey((k) => k + 1);
   });
 
@@ -174,6 +175,9 @@ export function useGroupPageData({
     refreshKey,
     loadError,
     loadDetail: reloadOverview,
+    refreshBalancePreview: detailState.reloadFresh,
+    pollBalancePreview: detailState.reloadFreshCoalesced,
+    refreshGroupBalanceMutation: () => refreshAll(true),
     reloadInsights: reloadInsightExpenses,
     refreshAll,
   };

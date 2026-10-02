@@ -1,4 +1,4 @@
-import { randomBytes, createECDH } from "node:crypto";
+import { randomBytes, randomUUID, createECDH } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { sql } from "../src/lib/db";
 import { hashPassword, hashRecoveryCode, newInviteCode, createSession } from "../src/lib/auth";
@@ -127,11 +127,89 @@ async function deviceCap() {
   receipts.push("An expired endpoint cannot bypass the active-device cap");
 }
 
+async function groupBalanceNotifications() {
+  const actor = await user("balance_actor"), reader = await user("balance_reader");
+  const observer = await user("balance_observer"), outside = await user("balance_outside");
+  const group = await call<{ id: number; inviteCode: string }>(actor, "/api/groups", { name: "Balance notification fixture", currency: "USD" });
+  for (const member of [reader, observer]) await call(member, "/api/groups/join", { code: group.inviteCode });
+  const path = `/api/groups/${group.id}/group-balances`;
+  async function balances() {
+    const result = await call<{ balances: { userId: number; netCents: number }[] }>(actor, `/api/groups/${group.id}`);
+    return result.balances.map((r) => [r.userId, r.netCents]).sort((a, b) => a[0] - b[0]);
+  }
+  const body = { clientRequestId: randomUUID(), title: "Private group balance fixture", amountCents: 100,
+    owes: { method: "exact", participants: [{ userId: actor.id, value: 50 }, { userId: reader.id, value: 50 }] },
+    receives: { method: "exact", participants: [{ userId: actor.id, value: 100 }, { userId: reader.id, value: 0 }] },
+    expectedBalances: await balances() };
+  await sql`INSERT INTO push_subscriptions(user_id,session_token,endpoint,p256dh,auth,vapid_key,label)
+    VALUES (${reader.id},${reader.token},${`https://fcm.googleapis.com/fcm/send/balance-${suffix}`},
+      ${p256dh},${auth},'fixture-only','Group balance fixture')`;
+  async function notice(type: string, title: string, work: () => Promise<unknown>, queued: boolean) {
+    const id = await event(type, reader, work, actor);
+    const rows = await sql`SELECT * FROM notifications WHERE group_id = ${group.id} AND type = ${type}`;
+    check(rows.length === 2 && rows.some((n) => Number(n.user_id) === observer.id), `${type}: every other member, including nonparticipants`);
+    check(rows.every((n) => n.category === 'settlements' && n.title === title && n.href === `/groups/${group.id}?tab=balances`),
+      `${type}: payment preference, exact title, and balances destination`);
+    check((await sql`SELECT 1 FROM notification_deliveries WHERE notification_id = ${id}`).length === (queued ? 1 : 0),
+      `${type}: category mute controls push while inbox remains`);
+    await call(outside, `/api/notifications/${id}`, undefined, "GET", 404);
+    return id;
+  }
+  let balanceId = 0;
+  const added = await notice("group_balance.added", "Group balance added", async () => {
+    const replies = await Promise.all([call<{ id: number }>(actor, path, body), call<{ id: number }>(actor, path, body)]);
+    check(replies[0].id === replies[1].id, "Concurrent group balance create retries retain one record");
+    balanceId = replies[0].id;
+  }, true);
+  check((await balances()).find(([id]) => id === reader.id)?.[1] === -50, "Group balance allocation still changes the expected net");
+  const detailPath = `/api/group-balances/${balanceId}`;
+  const detail = () => call<{ balance: { updatedAt: string } }>(actor, detailPath);
+  const version = (await detail()).balance.updatedAt;
+  let before = await lastId();
+  check((await call<{ id: number }>(actor, path, body)).id === balanceId, "Sequential group balance retry retains the record");
+  await call(actor, path, { ...body, title: "Conflicting intent" }, "POST", 400);
+  await call(actor, path, { ...body, clientRequestId: randomUUID() }, "POST", 400);
+  await call(outside, path, body, "POST", 403);
+  check(await lastId() === before, "Group balance retries and rejected stale/unauthorized creates emit no duplicate notifications");
+  const edit = { ...body, title: "Private group balance revised", expectedUpdatedAt: version, expectedBalances: await balances(),
+    owes: { method: "exact", participants: [{ userId: actor.id, value: 100 }, { userId: reader.id, value: 0 }] } };
+  await call(reader, "/api/notification-settings", { categories: { settlements: false } }, "PATCH");
+  await notice("group_balance.edited", "Group balance changed", () => call(actor, detailPath, edit, "PATCH"), false);
+  check((await balances()).every(([, net]) => net === 0), "Group balance edit retains zero-net allocation semantics");
+  before = await lastId();
+  await call(actor, detailPath, edit, "PATCH", 400);
+  await call(actor, `${detailPath}?expectedUpdatedAt=${encodeURIComponent(version)}`, undefined, "DELETE", 400);
+  await call(actor, `/api/groups/${group.id}/members/${reader.id}`, undefined, "DELETE", 400);
+  check(await lastId() === before, "Stale group balance edits/deletes and zero-allocation member removal emit no alert");
+  let rolledBack = false;
+  try {
+    await sql.transaction((tx) => [tx`INSERT INTO activity(group_id,actor_id,type,summary,data)
+      VALUES (${group.id},${actor.id},'group_balance.added','Rolled-back fixture','{}')`, tx`SELECT 1/0`]);
+  } catch { rolledBack = true; }
+  check(rolledBack && await lastId() === before, "Group balance transaction failure rolls back notifications and outbox");
+  await call(reader, "/api/notification-settings", { categories: { settlements: true } }, "PATCH");
+  const latest = (await detail()).balance.updatedAt;
+  await notice("group_balance.deleted", "Group balance deleted", () =>
+    call(actor, `${detailPath}?expectedUpdatedAt=${encodeURIComponent(latest)}`, undefined, "DELETE"), true);
+  before = await lastId();
+  await call(actor, path, body, "POST", 400);
+  check(await lastId() === before, "Create retry after group balance deletion does not resurrect a record or notice");
+  const observerNotice = (await sql`SELECT id FROM notifications WHERE group_id = ${group.id} AND user_id = ${observer.id}
+    AND type = 'group_balance.added'`)[0];
+  await call(actor, `/api/groups/${group.id}/members/${observer.id}`, undefined, "DELETE");
+  await call(observer, `/api/notifications/${observerNotice.id}`, undefined, "GET", 404);
+  check((await call<{ notification: { href: string } }>(reader, `/api/notifications/${added}`)).notification.href === `/groups/${group.id}?tab=balances`,
+    "Deleted group balance keeps the balances destination for remaining members");
+  receipts.push("Group balance notifications retain current-membership access rules");
+}
+
 async function run() {
   if (process.argv.includes("--probe-account-switch")) return accountSwitches();
   if (process.argv.includes("--probe-device-cap")) return deviceCap();
+  if (process.argv.includes("--probe-group-balances")) return groupBalanceNotifications();
   await accountSwitches();
   await deviceCap();
+  await groupBalanceNotifications();
   for (const path of ["/api/notifications", "/api/notification-settings", "/api/notifications/1"]) {
     await call(null, path, undefined, "GET", 401); receipts.push(`${path}: authentication required`);
   }

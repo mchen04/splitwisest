@@ -102,7 +102,7 @@ DECLARE
 BEGIN
   kind := CASE split_part(NEW.type, '.', 1)
     WHEN 'expense' THEN 'expenses' WHEN 'recurring' THEN 'expenses'
-    WHEN 'settlement' THEN 'settlements' WHEN 'group' THEN 'groups'
+    WHEN 'settlement' THEN 'settlements' WHEN 'group_balance' THEN 'settlements' WHEN 'group' THEN 'groups'
     WHEN 'friend' THEN 'friends' WHEN 'user' THEN 'friends'
   END;
   heading := CASE NEW.type
@@ -112,6 +112,8 @@ BEGIN
     WHEN 'recurring.created' THEN 'Recurring expense set up' WHEN 'recurring.updated' THEN 'Recurring expense changed'
     WHEN 'recurring.stopped' THEN 'Recurring expense stopped' WHEN 'recurring.paused' THEN 'Recurring expense paused'
     WHEN 'settlement.recorded' THEN 'Payment recorded' WHEN 'settlement.updated' THEN 'Payment changed'
+    WHEN 'group_balance.added' THEN 'Group balance added' WHEN 'group_balance.edited' THEN 'Group balance changed'
+    WHEN 'group_balance.deleted' THEN 'Group balance deleted'
     WHEN 'settlement.deleted' THEN 'Payment deleted' WHEN 'group.joined' THEN 'Group member joined'
     WHEN 'group.renamed' THEN 'Group renamed' WHEN 'group.member_removed' THEN 'Group membership changed'
     WHEN 'friend.added' THEN 'Friend request accepted' WHEN 'friend.removed' THEN 'Friend removed'

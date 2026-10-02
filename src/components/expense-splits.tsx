@@ -29,7 +29,7 @@ const LEGEND = "mb-1 block text-sm font-medium text-ink-soft";
 // Participant picker for equal/exact/percentage/shares: a checkbox per member
 // plus, for weighted methods, the per-member value input.
 export function ParticipantSplit({
-  members, selected, method, values, amountCents, currency, participantCount, onToggle, onValue,
+  members, selected, method, values, amountCents, currency, participantCount, onToggle, onValue, idPrefix = "p",
 }: {
   members: Member[];
   selected: Set<number>;
@@ -40,6 +40,7 @@ export function ParticipantSplit({
   participantCount: number;
   onToggle: (id: number) => void;
   onValue: (id: number, value: string) => void;
+  idPrefix?: string;
 }) {
   if (method === "solo") {
     return (
@@ -112,13 +113,13 @@ export function ParticipantSplit({
           return (
             <div key={m.id} className="flex min-h-12 items-center gap-3 px-3 py-1.5">
               <input
-                id={`p-${m.id}`}
+                id={`${idPrefix}-${m.id}`}
                 type="checkbox"
                 checked={checked}
                 onChange={() => onToggle(m.id)}
                 className="h-4 w-4 accent-[var(--color-accent)]"
               />
-              <label htmlFor={`p-${m.id}`} className="min-w-0 flex-1 truncate text-sm font-medium">
+              <label htmlFor={`${idPrefix}-${m.id}`} className="min-w-0 flex-1 truncate text-sm font-medium">
                 {m.displayName}
               </label>
               {checked && (
