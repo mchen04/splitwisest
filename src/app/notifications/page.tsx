@@ -66,8 +66,9 @@ function InboxPage() {
         hint={unreadOnly ? "New activity appears here." : "Messages, expenses, and other activity from your friends appear here."} />
         : <Card className="shrink-0 divide-y divide-line overflow-hidden">
           {data.notifications.map((n) => <div key={n.id} className={`flex items-start gap-2 px-3 py-3 sm:px-4 ${n.readAt ? "" : "bg-accent-soft"}`}>
-            <span className={`mt-2 h-2 w-2 shrink-0 rounded-full ${n.readAt ? "bg-line" : "bg-accent"}`} aria-label={n.readAt ? "Read" : "Unread"} />
+            <span className={`mt-2 h-2 w-2 shrink-0 rounded-full ${n.readAt ? "bg-line" : "bg-accent"}`} aria-hidden="true" />
             <Link href={`/notifications/${n.id}`} className="min-w-0 flex-1 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+              <span className="sr-only">{n.readAt ? "Read" : "Unread"}</span>
               <p className="text-sm font-semibold">{n.title}</p>
               <p className="mt-0.5 break-words text-sm text-ink-soft">{n.body}</p>
               <p className="mt-1 text-xs text-ink-faint">{fmtTime(n.createdAt)}</p>

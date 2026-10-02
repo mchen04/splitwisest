@@ -1,7 +1,7 @@
 import { randomBytes, createECDH } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { sql } from "../src/lib/db";
-import { hashPassword, newInviteCode, createSession } from "../src/lib/auth";
+import { hashPassword, hashRecoveryCode, newInviteCode, createSession } from "../src/lib/auth";
 import { deliverNotifications } from "../src/lib/notification-delivery";
 import type { PushResult } from "../src/lib/web-push";
 import webpush from "web-push";
@@ -51,7 +51,87 @@ async function currentExpense(who: typeof users[number], id: number) {
 const subKeys = createECDH("prime256v1"); subKeys.generateKeys();
 const p256dh = subKeys.getPublicKey().toString("base64url"); const auth = randomBytes(16).toString("base64url");
 
+async function accountSwitches() {
+  for (const route of ["login", "signup", "recover"]) {
+    const previous = await user(`previous_${route}`);
+    const target = route === "signup" ? null : await user(`target_${route}`);
+    const otherToken = await createSession(previous.id);
+    const subscriptions = await sql`INSERT INTO push_subscriptions(user_id, session_token, endpoint, p256dh, auth, vapid_key, label)
+      SELECT ${previous.id}, token, ${`https://fcm.googleapis.com/fcm/send/switch-${suffix}-`} || token,
+        ${p256dh}, ${auth}, 'fixture-only', 'Account switch fixture'
+      FROM sessions WHERE token = ANY(${[previous.token, otherToken]}) RETURNING id, session_token`;
+    const oldDevice = subscriptions.find((s) => s.session_token === previous.token)!;
+    const otherDevice = subscriptions.find((s) => s.session_token === otherToken)!;
+    const notification = await sql`INSERT INTO notifications(user_id,event_key,category,type,title,body,href)
+      VALUES (${previous.id}, ${`switch:${suffix}:${route}`}, 'test','test','Switch fixture','Fixture only','/notifications') RETURNING id`;
+    await sql`INSERT INTO notification_deliveries(notification_id, subscription_id)
+      VALUES (${notification[0].id}, ${oldDevice.id})`;
+    const code = randomBytes(8).toString("hex");
+    if (route === "recover") await sql`INSERT INTO recovery_codes(user_id, code_hash)
+      VALUES (${target!.id}, ${hashRecoveryCode(code)})`;
+    const username = target?.username ?? `notif_new_${suffix}`;
+    const body = route === "recover" ? { username, code, newPassword: password }
+      : { username, password, ...(route === "signup" ? { displayName: "Notification Test Switch" } : {}) };
+    const invalid = route === "login" ? { ...body, password: "wrong password" }
+      : route === "recover" ? { ...body, code: "wrong code" } : { ...body, username: previous.username };
+    await call(previous, `/api/auth/${route}`, invalid, "POST", 400);
+    check((await sql`SELECT 1 FROM sessions WHERE token = ${previous.token}`).length === 1
+      && (await sql`SELECT 1 FROM push_subscriptions WHERE id = ${oldDevice.id}`).length === 1,
+    `${route}: rejected credentials preserve the current session and subscription`);
+    const response = await fetch(origin + `/api/auth/${route}`, { method: "POST",
+      headers: { cookie: previous.cookie, "content-type": "application/json" }, body: JSON.stringify(body) });
+    check(response.status === 200, `${route}: account switch succeeds`);
+    const cookie = response.headers.getSetCookie().find((c) => c.startsWith("sw_session="))?.split(";")[0];
+    check(cookie, `${route}: replacement session cookie is set`);
+    const id = Number((await sql`SELECT id FROM users WHERE username = ${username}`)[0].id);
+    if (!target) users.push({ id, username, cookie, token: cookie.slice("sw_session=".length), inviteCode: "" });
+    const me = await call<{ user: { id: number } }>({ ...previous, cookie }, "/api/me");
+    check(me.user.id === id, `${route}: new session belongs to the target account`);
+    check((await sql`SELECT 1 FROM sessions WHERE token = ${previous.token}`).length === 0,
+      `${route}: account switch revokes the previous session`);
+    await call(previous, "/api/me", undefined, "GET", 401);
+    check((await sql`SELECT 1 FROM push_subscriptions WHERE id = ${oldDevice.id}`).length === 0
+      && (await sql`SELECT 1 FROM notification_deliveries WHERE subscription_id = ${oldDevice.id}`).length === 0,
+    `${route}: account switch removes the previous device and its queued deliveries`);
+    check((await sql`SELECT 1 FROM push_subscriptions WHERE id = ${otherDevice.id}`).length === 1
+      && (await call<{ user: { id: number } }>({ ...previous, cookie: `sw_session=${otherToken}` }, "/api/me")).user.id === previous.id,
+    `${route}: another device stays signed in and subscribed`);
+  }
+}
+
+async function deviceCap() {
+  const owner = await user("device_cap");
+  const expiredToken = await createSession(owner.id);
+  await sql`UPDATE sessions SET expires_at = now() - interval '1 minute' WHERE token = ${expiredToken}`;
+  const endpoint = `https://fcm.googleapis.com/fcm/send/cap-${suffix}`;
+  await sql`INSERT INTO push_subscriptions(user_id,session_token,endpoint,p256dh,auth,vapid_key,label)
+    SELECT ${owner.id}, ${expiredToken}, ${endpoint} || '-expired-' || i, ${p256dh}, ${auth}, 'fixture-only', 'Expired fixture'
+    FROM generate_series(1,10) i`;
+  const devices = async () => (await call<{ devices: { id: number }[] }>(owner, "/api/notification-settings")).devices;
+  check((await devices()).length === 0, "Expired-session devices are hidden before cleanup");
+  const body = { endpoint, p256dh, auth, publicKey: process.env.VAPID_PUBLIC_KEY, label: "Cap fixture" };
+  await call(owner, "/api/push/subscriptions", body);
+  check((await devices()).length === 1, "Ten expired subscriptions do not block a new visible device");
+  await sql`INSERT INTO push_subscriptions(user_id,session_token,endpoint,p256dh,auth,vapid_key,label)
+    SELECT ${owner.id}, ${owner.token}, ${endpoint} || '-active-' || i, ${p256dh}, ${auth}, 'fixture-only', 'Active fixture'
+    FROM generate_series(1,8) i`;
+  const attempts = await Promise.all([1, 2].map((i) => fetch(origin + "/api/push/subscriptions", {
+    method: "POST", headers: { cookie: owner.cookie, "content-type": "application/json" },
+    body: JSON.stringify({ ...body, endpoint: `${endpoint}-concurrent-${i}` }),
+  })));
+  check(attempts.map((r) => r.status).sort().join(",") === "200,409" && (await devices()).length === 10,
+    "Concurrent enrollments cannot exceed ten active devices");
+  await call(owner, "/api/push/subscriptions", body);
+  check((await devices()).length === 10, "An active device can refresh its subscription at the cap");
+  await call(owner, "/api/push/subscriptions", { ...body, endpoint: `${endpoint}-expired-1` }, "POST", 409);
+  receipts.push("An expired endpoint cannot bypass the active-device cap");
+}
+
 async function run() {
+  if (process.argv.includes("--probe-account-switch")) return accountSwitches();
+  if (process.argv.includes("--probe-device-cap")) return deviceCap();
+  await accountSwitches();
+  await deviceCap();
   for (const path of ["/api/notifications", "/api/notification-settings", "/api/notifications/1"]) {
     await call(null, path, undefined, "GET", 401); receipts.push(`${path}: authentication required`);
   }

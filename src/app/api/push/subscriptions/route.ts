@@ -19,8 +19,10 @@ export const POST = handler(async (req: NextRequest) => {
   const body = Body.parse(await req.json());
   if (body.publicKey !== keys.publicKey) throw new ApiError("Notification settings changed. Refresh and try again", 409);
   const token = await notificationSessionToken();
-  const [, rows] = await sql.transaction((tx) => [
+  const [, , rows] = await sql.transaction((tx) => [
     tx`SELECT pg_advisory_xact_lock(174829, ${user.id}::int)`,
+    tx`DELETE FROM push_subscriptions sub USING sessions sess
+      WHERE sub.session_token = sess.token AND sub.user_id = ${user.id} AND sess.expires_at <= now()`,
     tx`INSERT INTO push_subscriptions(user_id, session_token, endpoint, p256dh, auth, vapid_key, label)
       SELECT ${user.id}, ${token}, ${body.endpoint}, ${body.p256dh}, ${body.auth}, ${keys.publicKey}, ${body.label}
       WHERE (SELECT count(*) FROM push_subscriptions WHERE user_id = ${user.id}) < 10
