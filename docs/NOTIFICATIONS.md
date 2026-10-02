@@ -118,7 +118,16 @@ skipped events, and failures. Provider acceptance is not proof that a device dis
 
 Vercel Hobby only supports daily cron jobs, so it is not used for this retry interval.
 A preview must have its own scheduler or a controlled temporary runner; deploying this branch does not
-activate the GitHub schedule. Production rollout waits for independent review and device verification.
+activate the GitHub schedule until the workflow reaches the default branch.
+
+This release has completed independent review. Michael waives native Safari and physical-iPhone
+receipt, background delivery, and tap-through checks. Both remain **WAIVED/UNVERIFIED**, not passed.
+These waivers do not replace software checks or actual hosted delivery evidence. Record manual workflow
+runs and naturally scheduled runs separately; configuration and a Mac retry loop do not prove either.
+
+Production push delivery starts with an explicit allowlist of controlled test accounts. Accounts outside
+that list retain the inbox but cannot enroll for phone alerts. This is a restricted rollout, not push
+availability for every account. Do not infer a production identity from a preview account ID.
 
 ## Platforms and acceptance
 
@@ -129,6 +138,7 @@ Web Push subject to browser policy. Unsupported browsers, private modes, blocked
 devices, OS Focus settings, and battery restrictions can prevent or delay receipt. The inbox still works
 online. Push enrollment is intentionally unavailable in the development server, which unregisters workers.
 
+The following device procedure remains a reference for future testing; it does not block this waived release.
 For each physical test device, sign in, open Notifications settings, and tap Turn on notifications.
 Accept the OS prompt. Use Send test while the app is foregrounded. Then use Test in 15 seconds,
 leave the app, observe the background alert, and tap it. Confirm the test-opened banner. Repeat with
