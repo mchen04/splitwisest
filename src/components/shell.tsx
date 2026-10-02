@@ -5,10 +5,11 @@ import { usePathname, useRouter } from "next/navigation";
 import { ReactNode, useEffect, useState } from "react";
 import {
   LayoutDashboard, Users, Scale, Receipt, LogOut, Wallet,
-  MessageSquare, ScrollText, Moon, Sun, Plus, ChevronDown,
+  MessageSquare, ScrollText, Moon, Sun, Plus, ChevronDown, Bell,
 } from "lucide-react";
 import { api, useApiData, useMe, useUnread, type Unread } from "@/lib/client";
 import { useTheme } from "@/lib/theme";
+import { syncExistingPush } from "@/lib/push-client";
 import { Avatar, Button, IconButton, Modal } from "./ui";
 
 interface GroupRef {
@@ -29,10 +30,11 @@ const NAV: { href: string; label: string; icon: typeof LayoutDashboard; badge?: 
   { href: "/expenses", label: "Expenses", icon: Receipt },
   { href: "/chat", label: "Chat", icon: MessageSquare, badge: "messages" },
   { href: "/activity", label: "Activity", icon: ScrollText, badge: "activity" },
+  { href: "/notifications", label: "Notifications", icon: Bell, badge: "notifications" },
 ];
 
 const MOBILE_NAV: { href: string; label: string; icon: typeof LayoutDashboard; badge?: BadgeKey }[] = [
-  { href: "/", label: "Home", icon: LayoutDashboard, badge: "activity" },
+  { href: "/", label: "Home", icon: LayoutDashboard, badge: "notifications" },
   { href: "/groups", label: "Groups", icon: Users },
   { href: "/balances", label: "Balances", icon: Scale, badge: "balances" },
   { href: "/chat", label: "Chat", icon: MessageSquare, badge: "messages" },
@@ -62,6 +64,15 @@ export function AppShell({ title, children }: { title?: string; children: ReactN
   const currentGroupId = pathname.match(/^\/groups\/(\d+)/)?.[1];
   const isChatPage = pathname === "/chat";
   const [expensePickerOpen, setExpensePickerOpen] = useState(false);
+
+  useEffect(() => {
+    if (!me) return;
+    const refresh = () => { void syncExistingPush(me.id).catch(() => {}); };
+    refresh();
+    window.addEventListener("pageshow", refresh);
+    window.addEventListener("focus", refresh);
+    return () => { window.removeEventListener("pageshow", refresh); window.removeEventListener("focus", refresh); };
+  }, [me]);
 
   const [groupsOpen, setGroupsOpen] = useState(false);
   useEffect(() => {

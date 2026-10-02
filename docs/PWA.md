@@ -34,7 +34,8 @@ pnpm lint
 pnpm build
 ```
 
-Check desktop WebKit and phone widths of 320, 390, and 393 pixels. Use an iPhone WebKit profile for installed-app checks.
+Check desktop WebKit and phone widths of 320, 390, and 393 pixels. An iPhone WebKit profile tests layout emulation.
+It does not prove native Safari, an installed PWA, or a physical phone. Check those separately.
 
 Set `navigator.standalone` to `true` before navigation. Use a long conversation, then verify these values:
 
@@ -124,6 +125,7 @@ whole contract against two local production builds differing only in
 GITHUB_SHA, swapped on one origin behind a local TLS proxy, driven as an
 INSTALLED app: Playwright WebKit, iPhone profile, `navigator.standalone`,
 display-mode standalone, launched at the manifest start_url, logged in.
+This is installed-mode emulation, not an installed PWA on a physical device.
 Scenarios cover first install, cold start, cold start across a swap,
 foreground-resume across a swap, in-session navigation across a swap,
 three-cycle reload stability, offline cold start, and poisoned-cache repair.

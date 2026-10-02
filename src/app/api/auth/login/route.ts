@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { sql } from "@/lib/db";
 import { handler, badRequest } from "@/lib/api";
-import { verifyPasswordForLogin, createSession, setSessionCookie } from "@/lib/auth";
+import { verifyPasswordForLogin, clearSession, createSession, setSessionCookie } from "@/lib/auth";
 import { assertAuthRateLimit, clearAuthRateLimit } from "@/lib/rate-limit";
 
 const Body = z.object({
@@ -17,6 +17,7 @@ export const POST = handler(async (req: NextRequest) => {
   const ok = verifyPasswordForLogin(password, rows[0]?.password_hash);
   if (!ok) badRequest("Incorrect username or password");
   await clearAuthRateLimit("login", username);
+  await clearSession();
   const token = await createSession(Number(rows[0].id));
   await setSessionCookie(token, Number(rows[0].id));
   return NextResponse.json({ ok: true });

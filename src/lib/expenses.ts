@@ -185,7 +185,7 @@ export async function insertExpense(
         WHERE group_id = ${groupId} AND user_id = ${input.payerId}
       )
       AND (
-        ${activityType}::text IS NULL OR EXISTS (
+        ${recurringId}::bigint IS NOT NULL OR ${activityType}::text IS NULL OR EXISTS (
           SELECT 1 FROM group_members
           WHERE group_id = ${groupId} AND user_id = ${createdBy}
         )
@@ -863,9 +863,15 @@ async function deactivateRecurringIfSnapshotStillInvalid(
           )
         )
     )
-    UPDATE recurring_expenses SET active = false, updated_at = now()
-    FROM stale_invalid
-    WHERE id = ${snapshot.id}`,
+    , paused AS (
+      UPDATE recurring_expenses SET active = false, updated_at = now()
+      FROM stale_invalid WHERE id = ${snapshot.id} RETURNING created_by
+    )
+    INSERT INTO activity(group_id, actor_id, type, summary, data)
+    SELECT ${groupId}, created_by, 'recurring.paused',
+      'SplitWisest paused a recurring expense because a participant is no longer in the group',
+      '{"actionText":"paused a recurring expense because a participant is no longer in the group"}'::jsonb
+    FROM paused`,
   ]);
 }
 
@@ -934,6 +940,7 @@ export async function materializeRecurring(groupId: number) {
             participants,
           },
           {
+            activity: { actorName: "SplitWisest", type: "expense.recurring", actionText: `added the recurring expense "${snapshot.title}"` },
             recurring: {
               id: snapshot.id,
               currentDate: current,
@@ -944,7 +951,11 @@ export async function materializeRecurring(groupId: number) {
             },
           }
         );
-        if (inserted === null) break;
+        if (inserted === null) {
+          // A stale concurrent edit stays untouched. A matching invalid rule pauses with an alert.
+          await deactivateRecurringIfSnapshotStillInvalid(groupId, snapshot);
+          break;
+        }
         storedAnchorDay = effectiveAnchorDay;
       } catch (e) {
         // Log only name+message — never the raw error object, which for a Neon

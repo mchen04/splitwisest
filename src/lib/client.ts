@@ -22,7 +22,8 @@ export async function api<T = unknown>(
   });
   if (res.status === 401 && typeof window !== "undefined" && !location.pathname.startsWith("/login")) {
     clearReadCache(true);
-    location.href = "/login";
+    const next = /^\/notifications(?:\/\d+)?$/.test(location.pathname) ? `?next=${encodeURIComponent(location.pathname)}` : "";
+    location.href = `/login${next}`;
     throw new ApiClientError("Not authenticated", 401);
   }
   const json = await res.json().catch(() => ({}));
@@ -35,7 +36,15 @@ export async function api<T = unknown>(
     // Keep stale values available for paint, but force the next read to reach
     // the server. Authentication changes must remove the previous owner data.
     for (const key of cacheTimes.keys()) cacheTimes.set(key, 0);
-    if (path.startsWith("/api/auth")) clearReadCache(path.endsWith("/logout"));
+    if (path.startsWith("/api/auth")) {
+      clearReadCache(path.endsWith("/logout"));
+      lastSync = null;
+      syncAccountVersion++;
+      if (path.endsWith("/logout")) {
+        const { forgetPushDevice } = await import("./push-client");
+        forgetPushDevice();
+      }
+    }
   }
   return json as T;
 }
@@ -211,6 +220,7 @@ export interface Unread {
   nudges: number;
   requests: number;
   balances: number;
+  notifications: number;
 }
 
 export interface SyncCursors {
@@ -218,6 +228,7 @@ export interface SyncCursors {
   messageCursor: number;
   nudgeCursor: number;
   requestCursor: number;
+  notificationCursor: number;
   unread?: Unread;
 }
 
@@ -236,6 +247,7 @@ export function markRead(scope: string, lastId: number) {
 const SYNC_INTERVAL_MS = 4000;
 const syncListeners = new Set<(c: SyncCursors) => void>();
 let lastSync: SyncCursors | null = null;
+let syncAccountVersion = 0;
 let syncLoopRunning = false;
 let syncWake: (() => void) | null = null;
 
@@ -245,7 +257,9 @@ function ensureSyncLoop() {
   (async () => {
     while (syncListeners.size > 0) {
       try {
+        const accountVersion = syncAccountVersion;
         const c = await api<SyncCursors>("/api/sync");
+        if (accountVersion !== syncAccountVersion) continue;
         lastSync = c;
         for (const l of [...syncListeners]) l(c);
       } catch {
@@ -276,7 +290,7 @@ function subscribeSync(listener: (c: SyncCursors) => void): () => void {
 // Exposes the latest unread counts for nav badges via the shared sync poller.
 export function useUnread(): Unread {
   const [unread, setUnread] = useState<Unread>(
-    () => lastSync?.unread ?? { messages: 0, activity: 0, nudges: 0, requests: 0, balances: 0 }
+    () => lastSync?.unread ?? { messages: 0, activity: 0, nudges: 0, requests: 0, balances: 0, notifications: 0 }
   );
   useEffect(() => subscribeSync((c) => {
     if (!c.unread) return;
@@ -285,7 +299,7 @@ export function useUnread(): Unread {
     // re-render (and repaint) on every poll tick.
     setUnread((prev) =>
       prev.messages === u.messages && prev.activity === u.activity && prev.nudges === u.nudges &&
-      prev.requests === u.requests && prev.balances === u.balances ? prev : u
+      prev.requests === u.requests && prev.balances === u.balances && prev.notifications === u.notifications ? prev : u
     );
   }), []);
   return unread;
@@ -310,7 +324,8 @@ export function useSync(onChange: ((c: SyncCursors, prev: SyncCursors) => void) 
         c.activityCursor !== prev.activityCursor ||
         c.messageCursor !== prev.messageCursor ||
         c.nudgeCursor !== prev.nudgeCursor ||
-        c.requestCursor !== prev.requestCursor
+        c.requestCursor !== prev.requestCursor || c.notificationCursor !== prev.notificationCursor ||
+        c.unread?.notifications !== prev.unread?.notifications
       )) {
         cb.current?.(c, prev ?? c);
       }

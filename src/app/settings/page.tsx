@@ -7,6 +7,7 @@ import { api, useApiData, useFormState } from "@/lib/client";
 import { useTheme } from "@/lib/theme";
 import { AppShell } from "@/components/shell";
 import { Card, CardHeader, Button, Field, Input, ErrorNote } from "@/components/ui";
+import { NotificationSettingsCard } from "@/components/notification-settings";
 
 interface Me {
   id: number;
@@ -42,6 +43,7 @@ export default function SettingsPage() {
             </Card>
           </div>
           <div className="space-y-4">
+            <NotificationSettingsCard />
             <PasswordCard />
             <RecoveryCard />
           </div>

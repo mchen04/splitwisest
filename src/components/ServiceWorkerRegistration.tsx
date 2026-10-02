@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { createDraftGuard } from "@/lib/draft-guard";
 import { decideUpdateAction } from "@/lib/update-policy";
 
@@ -46,6 +47,19 @@ function askControllerBuild(): Promise<string | null> {
 }
 
 export function ServiceWorkerRegistration() {
+  const router = useRouter();
+  useEffect(() => {
+    if (!("serviceWorker" in navigator)) return;
+    const onMessage = (event: MessageEvent) => {
+      if (event.data?.type !== "SPLITWISEST_NOTIFICATION_CLICK") return;
+      const url = event.data.url;
+      if (typeof url !== "string" || !/^\/notifications(?:\/\d+)?$/.test(url)) return;
+      router.push(url);
+      event.ports[0]?.postMessage({ opened: true });
+    };
+    navigator.serviceWorker.addEventListener("message", onMessage);
+    return () => navigator.serviceWorker.removeEventListener("message", onMessage);
+  }, [router]);
   useEffect(() => {
     if (!("serviceWorker" in navigator)) return;
     // The SW caches /_next/static/ cache-first, which is only safe for

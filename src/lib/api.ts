@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { ZodError } from "zod";
 import { AuthError } from "./auth";
 import { DomainError } from "./errors";
@@ -33,7 +33,19 @@ export function handler<T extends unknown[]>(
       if (blockedCrossOrigin(args[0])) {
         return NextResponse.json({ error: "Cross-origin request blocked" }, { status: 403 });
       }
-      return await fn(...args);
+      const response = await fn(...args);
+      const req = args[0];
+      if (response.ok && process.env.VAPID_PUBLIC_KEY && req instanceof Request &&
+        !new URL(req.url).pathname.startsWith("/api/push/") &&
+        (!SAFE_METHODS.has(req.method) || /^\/api\/groups\/\d+(?:\/expenses)?$/.test(new URL(req.url).pathname))) {
+        after(async () => {
+          try {
+            const { deliverNotifications } = await import("./notification-delivery");
+            await deliverNotifications();
+          } catch { console.error("Notification delivery remains queued for retry"); }
+        });
+      }
+      return response;
     } catch (e) {
       if (e instanceof AuthError) {
         return NextResponse.json({ error: "Not authenticated" }, { status: 401 });

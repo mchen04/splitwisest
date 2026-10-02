@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { sql } from "@/lib/db";
 import { handler, badRequest } from "@/lib/api";
-import { hashPassword, createSession, setSessionCookie } from "@/lib/auth";
+import { hashPassword, clearSession, createSession, setSessionCookie } from "@/lib/auth";
 import { createSignupAccount } from "@/lib/signup";
 import { assertAuthRateLimit, clearAuthRateLimit } from "@/lib/rate-limit";
 
@@ -49,6 +49,7 @@ export const POST = handler(async (req: NextRequest) => {
     joinGroupId,
   });
 
+  await clearSession();
   const token = await createSession(userId);
   await clearAuthRateLimit("signup", username);
   if (inviteCode && inviteCode !== process.env.SIGNUP_CODE) await clearAuthRateLimit("invite", inviteCode);

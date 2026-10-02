@@ -5,6 +5,7 @@ import { handler, badRequest } from "@/lib/api";
 import {
   hashPassword,
   matchingRecoveryCodeId,
+  clearSession,
   createSession,
   setSessionCookie,
 } from "@/lib/auth";
@@ -53,6 +54,7 @@ export const POST = handler(async (req: NextRequest) => {
   if (reset.length === 0) badRequest("Invalid username or recovery code");
 
   await clearAuthRateLimit("recover", username);
+  await clearSession();
   const token = await createSession(userId);
   await setSessionCookie(token, userId);
   return NextResponse.json({ ok: true });
