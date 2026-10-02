@@ -33,6 +33,7 @@ entries and retain a separate deletion notice. Deleted expenses open group activ
 
 Reading chat also marks its message notifications read. Dismissing reminders or resolving friend
 requests marks their notifications read. Other inbox items have explicit read and unread controls.
+Each inbox link includes Read or Unread in its accessible name.
 Mark all read uses the visible newest ID, so a later arrival stays unread. Inbox entries expire after 90 days.
 
 Intentional exclusions: your own manual changes; group creation with no other members; ordinary
@@ -41,6 +42,9 @@ category, export, filter, and read-state changes. These actions do not create ac
 Notifications are not security-login alerts, email, SMS, payment transfers, or scheduled debt chasing.
 Recurring expenses keep their existing on-view materialization schedule. No new due-date scheduler runs.
 Receipt and recurring system events now also appear in the existing activity feed.
+Personal-invite signups also appear in the inviter's activity feed.
+A recurring rule pauses when its payer or a participant is no longer a group member.
+Valid rules still materialize after their creator leaves.
 
 ## Delivery and privacy
 
@@ -58,9 +62,13 @@ crash after provider acceptance. Stable notification tags reduce duplicates on s
 
 Each send rechecks recipient ownership, session validity, group or friendship access, read state,
 preferences, VAPID key, and the deployment recipient allowlist. The subscription follows its session:
-logout, password recovery, and revocation of that session remove it. Session expiry stops sends.
+logout and session revocation remove it.
+Successful login, signup, or recovery replaces this browser's session and removes its previous subscription.
+Rejected authentication leaves the current session intact. Password recovery also revokes the recovered account's other sessions.
+Session expiry stops sends.
 Log in and turn notifications on again after expiry. Remote device removal stays off until a new tap.
-Key rotation requires reconnecting the device. The device list supports up to ten subscriptions per account.
+Key rotation requires reconnecting the device. Each account supports up to ten subscriptions with unexpired sessions.
+Enrollment removes expired-session subscriptions before applying that limit.
 
 Push content always identifies SplitWisest and says there is new activity. It never includes names,
 amounts, expense titles, or message text. Details require authenticated access inside the app.
@@ -140,6 +148,19 @@ The executable suite refuses remote databases and any local database except
 transactions, injects a sender for deterministic transport failures, and cleans up its own fixtures.
 `--keep` retains fixtures for browser checks and writes credentials only to a gitignored private file.
 `--probe-message` is the narrow oracle for a disabled-message-trigger negative control.
+`--probe-account-switch` checks session replacement through login, signup, and recovery.
+`--probe-device-cap` checks expired devices, concurrent enrollment, and subscription refresh at the limit.
+
+For the browser regression, sign into a retained local fixture using an isolated `agent-browser` session.
+Open `/notifications`, then run:
+
+```sh
+AGENT_BROWSER_SESSION=<owned-session> node scripts/verify-notification-read-state.mjs
+```
+
+The check toggles a notification's read state and restores its original state.
+It checks the link's accessible name in both states. It does not prove screen-reader speech or physical-device receipt.
+Close the task-created browser session after the check.
 
 The starting reference is [Pancake PR 74](https://github.com/jormyy/pancake/pull/74), at
 `b413c17cb6db43e43bea2d6ec4fb9d7195ebef88`. Its client, encryption, and delivery suites are reproduced

@@ -102,14 +102,14 @@ export default function Dashboard() {
               {/* The mobile shell has no top bar, so the hero carries the account entry point. */}
               {me && (
                 <div className="flex items-center gap-1 md:hidden">
-                <Link href="/notifications" aria-label={`Notifications${unread.notifications ? `, ${unread.notifications} unread` : ""}`}
-                  className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-accent hover:bg-accent-soft">
-                  <Bell className="h-5 w-5" />
-                  {unread.notifications > 0 && <span className="absolute right-0 top-0 flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1 text-xs font-semibold text-on-accent">{unread.notifications > 9 ? "9+" : unread.notifications}</span>}
-                </Link>
-                <Link href="/settings" aria-label="Account settings" className="-my-2 -mr-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-full md:hidden">
-                  <Avatar name={me.displayName} size="sm" />
-                </Link>
+                  <Link href="/notifications" aria-label={`Notifications${unread.notifications ? `, ${unread.notifications} unread` : ""}`}
+                    className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-accent hover:bg-accent-soft">
+                    <Bell className="h-5 w-5" />
+                    {unread.notifications > 0 && <span className="absolute right-0 top-0 flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1 text-xs font-semibold text-on-accent">{unread.notifications > 9 ? "9+" : unread.notifications}</span>}
+                  </Link>
+                  <Link href="/settings" aria-label="Account settings" className="-my-2 -mr-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-full md:hidden">
+                    <Avatar name={me.displayName} size="sm" />
+                  </Link>
                 </div>
               )}
             </div>
