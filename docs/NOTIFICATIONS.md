@@ -111,7 +111,7 @@ in the deployment's environment store. Never put the private key in a client-pre
 | `PUSH_CRON_SECRET` | At least 32 random characters, shared only with the schedulers |
 | `CRON_SECRET` | Production only; the same value as `PUSH_CRON_SECRET`. Vercel Cron sends it as the bearer token |
 
-Two schedulers call `/api/notifications/deliver` with the same bearer secret:
+Three schedulers call `/api/notifications/deliver` with the same bearer secret:
 
 - **Vercel Cron** (`vercel.json`) sends a GET once a day at 17:00 UTC. Vercel can start it any time in
   that hour. This is the guaranteed run. The Hobby plan allows one run per day for each cron job; a
@@ -120,13 +120,17 @@ Two schedulers call `/api/notifications/deliver` with the same bearer secret:
   GitHub treats schedules as best effort. In October 2026 it ran about every five hours. Treat it as
   extra retries, not as a deadline.
 
-Delivery skips jobs older than 24 hours. A job that fails while no app is open and GitHub skips its
-runs can therefore wait up to a day, and may expire before the daily run. A tighter guaranteed schedule
-needs Vercel Pro (per-minute cron) or an external scheduler, such as a Cloudflare Worker cron trigger
-that POSTs with the same secret.
+- **Hermes** (Michael's always-on Mac, job "Splitwisest push retries") POSTs every ten minutes with
+  the same secret, read from `~/.config/splitwisest/push-cron-secret` (mode 600). It is silent on
+  success and alerts the operations channel on any non-200 or failed delivery. This is the frequent
+  trigger while the Mac is up.
 
-To rotate the secret, change `PUSH_CRON_SECRET` and `CRON_SECRET` in Vercel production and the GitHub
-secret `PUSH_CRON_SECRET` together, then redeploy. Set repository secret `PUSH_DELIVERY_URL` to the complete
+Delivery skips jobs older than 24 hours. If the Mac is down and GitHub skips its runs, a failed push
+can wait for the daily Vercel run and may expire first. A guarantee that does not depend on the Mac
+needs Vercel Pro (per-minute cron) or a Cloudflare Worker cron trigger that POSTs with the same secret.
+
+To rotate the secret, change `PUSH_CRON_SECRET` and `CRON_SECRET` in Vercel production, the GitHub
+secret `PUSH_CRON_SECRET` and the Hermes secret file together, then redeploy. Set repository secret `PUSH_DELIVERY_URL` to the complete
 production HTTPS endpoint. This public repository uses standard GitHub-hosted runners. Do not move
 the schedule to a paid/private runner without a new cost decision.
 
