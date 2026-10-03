@@ -18,6 +18,7 @@ The mobile Home badge counts unread notifications. Existing Chat and Balances ba
 | Group message | Current group members, except sender | Group and direct messages | Group chat |
 | Direct message | Other current friend | Group and direct messages | Direct chat |
 | New or refreshed reminder | Named recipient | Settle-up reminders | Balances |
+| Monthly settle-up reminder | Active users with an outstanding balance in that scope | Settle-up reminders | The group's Balances tab, or Balances for direct balances |
 | Group joined or renamed | Current group members, except actor | Group changes | Group activity |
 | Member leaves or is removed | Remaining members, except actor; removed member if someone else removes them | Group changes | Group activity or Groups |
 | Group deleted | Previous members, except creator | Group changes | Groups |
@@ -28,7 +29,7 @@ The mobile Home badge counts unread notifications. Existing Chat and Balances ba
 | Device test | Only the selected device in the current session | Explicit test bypasses category mute | Test confirmation in inbox |
 
 Notifications start when the schema is installed. There is no historical backfill.
-Turning a phone preference off keeps inbox entries. Turning it on does not send past activity.
+Turning a phone preference off keeps inbox entries. Turning it on does not create phone jobs for past activity.
 Payments and group balances share the existing `settlements` preference key.
 Group balance alerts say Group balance added, Group balance changed, or Group balance deleted.
 All three open `/groups/{id}?tab=balances`. Failed writes, version conflicts, and idempotent create
@@ -44,12 +45,51 @@ Mark all read uses the visible newest ID, so a later arrival stays unread. Inbox
 Intentional exclusions: your own manual changes; group creation with no other members; ordinary
 signup; declined or cancelled friend requests; profile, password, recovery-code, session, theme,
 category, export, filter, and read-state changes. These actions do not create activity alerts.
-Notifications are not security-login alerts, email, SMS, payment transfers, or scheduled debt chasing.
+Notifications are not security-login alerts, email, SMS, or payment transfers.
 Recurring expenses keep their existing on-view materialization schedule. No new due-date scheduler runs.
 Receipt and recurring system events now also appear in the existing activity feed.
 Personal-invite signups also appear in the inviter's activity feed.
 A recurring rule pauses when its payer or a participant is no longer a group member.
 Valid rules still materialize after their creator leaves.
+
+## Monthly settle-up reminders
+
+The existing delivery endpoint creates monthly reminders before sending queued phone alerts.
+It runs on the first day of each month from 17:00 through 23:59:59 UTC.
+The app has no saved user timezone. Business dates use UTC, and the daily cron already runs at 17:00 UTC.
+That time is 09:00 Pacific in winter and 10:00 Pacific in summer.
+The daily Vercel call can start within the 17:00 UTC hour. More frequent retry calls can create reminders at 17:00.
+Late runs on the same UTC day still qualify. Runs on later days do not backfill missed months.
+
+Each active user receives one inbox entry per outstanding group and one entry for all outstanding direct balances.
+Both debtors and creditors qualify. A group qualifies when the user's current `group_balance_rows` net is nonzero.
+This includes expenses, group balance allocations, and recorded group payments. Current membership controls access.
+Direct balances qualify when a current friend's payment net is nonzero in at least one currency.
+Different groups, friends, and currencies do not cancel each other's obligations.
+Zero balances, fully settled scopes, deleted accounts, and inaccessible direct balances do not qualify.
+Recurring expenses qualify only after the app's existing materialization has recorded them.
+
+The title is **Monthly settle-up reminder**. The group body names the group and opens its Balances tab.
+The direct body asks the user to open Balances. These are automatic SplitWisest notices with no person as sender.
+They do not create nudges, activity entries, payments, or settlements.
+
+The existing `reminders` preference covers both manual nudges and monthly reminders.
+Its default is on, as is the existing global `pushEnabled` preference. These preferences control phone alerts only.
+Missing preference values follow those defaults. A false `reminders` value or false `pushEnabled` suppresses phone jobs.
+The inbox still receives the reminder. Phone alerts require an enrolled device with a valid session and the deployment allowlist.
+The existing restricted production push rollout remains in force. This feature does not expand it.
+A preference change does not create phone jobs for past reminders.
+Newly enrolled devices do not receive past reminders.
+An existing pending job can send after unmuting if it still passes the delivery checks.
+A skipped job stays skipped.
+Delivery rechecks preferences, access, and the scope's outstanding balance. A balance settled before a retry suppresses its phone alert.
+The existing inbox entry remains readable. Phone text continues to hide names, amounts, and financial details.
+
+The unique `(user_id, event_key)` index prevents duplicate inbox entries during concurrent calls and response-loss retries.
+Keys include the UTC month and group ID, or the direct scope. The inbox insert and outbox trigger share one transaction.
+Phone delivery retains the existing lease, backoff, expiry, and provider-acceptance limits described below.
+No schema migration, financial update, historical backfill, or new scheduler registration is needed.
+Rollback restores the previous app revision. Keep financial data and existing inbox entries.
 
 ## Delivery and privacy
 
@@ -137,12 +177,13 @@ the schedule to a paid/private runner without a new cost decision.
 Manual runs use POST with the same secret. Each run returns and logs (`event: notification-delivery`,
 `trigger: vercel-cron` or `manual`) the counts of provider acceptance, retries, expired devices,
 skipped events, and failures. Provider acceptance is not proof that a device displayed an alert.
+The `remindersCreated` receipt counts newly inserted monthly inbox entries across all eligible scopes.
 Unauthenticated calls get 401.
 
 A preview has no scheduler. Use manual POSTs with the preview's own secret.
 
-This release has completed independent review. Michael waives native Safari and physical-iPhone
-receipt, background delivery, and tap-through checks. Both remain **WAIVED/UNVERIFIED**, not passed.
+The prior notification release waives native Safari and physical-iPhone receipt, background delivery,
+and tap-through checks. These checks remain **WAIVED/UNVERIFIED**, not passed.
 These waivers do not replace software checks or actual hosted delivery evidence. Record manual workflow
 runs and naturally scheduled runs separately; configuration and a Mac retry loop do not prove either.
 
@@ -175,6 +216,7 @@ pnpm exec tsc --noEmit
 pnpm lint
 pnpm verify:ui-tokens
 pnpm build
+node --env-file=.env.local node_modules/tsx/dist/cli.mjs scripts/verify-monthly-reminders.ts
 # Isolated local Postgres + Neon HTTP proxy, described in DATABASE.md:
 node --env-file=.env.local node_modules/tsx/dist/cli.mjs scripts/verify-notifications.ts
 ```
@@ -188,6 +230,23 @@ transactions, injects a sender for deterministic transport failures, and cleans 
 `--probe-device-cap` checks expired devices, concurrent enrollment, and subscription refresh at the limit.
 `--probe-group-balances` checks group balance recipients, preference muting, destinations, idempotency,
 conflicts, rollback, and membership visibility through real HTTP routes and database transactions.
+
+The monthly suite uses its own empty `splitwisest_monthly_qa` database with the same local proxy.
+It tests scope eligibility, preferences, real SQL concurrency, delivery leases, transient retries, and unchanged financial checksums.
+It uses an injected push transport. It does not prove provider acceptance or physical receipt.
+Its `--keep` option retains private local fixtures for desktop/mobile browser navigation checks.
+Its `--hosted` option permits an explicit Vercel runtime/build check against controlled fixtures only.
+That check uses platform secrets inside Vercel, scopes every reminder and send to its newly created accounts, and removes its fixtures.
+It preserves sanitized schema readback and financial counts/checksums in its output. It never reads secret values into evidence.
+Hosted fixture execution does not prove a natural first-of-month firing.
+For retained local fixtures, verify actual desktop/mobile links with:
+
+```sh
+MONTHLY_REMINDER_EVIDENCE_DIR=/absolute/path/outside/checkout pnpm tsx scripts/verify-monthly-reminder-ui.ts
+```
+
+This uses the local production build on port 3476. It covers inbox rendering, balance navigation, read state, and the existing reminder preference.
+Chromium mobile emulation does not prove Safari or physical phone receipt.
 
 For the browser regression, sign into a retained local fixture using an isolated `agent-browser` session.
 Open `/notifications`, then run:

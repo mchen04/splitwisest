@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { sql } from "./db";
 import { allowedPushUsers, pushKeys, sendPush } from "./web-push";
+import { monthlyBalanceOutstanding } from "./monthly-reminders";
 
 export async function deliverNotifications(send = sendPush) {
   const keys = pushKeys();
@@ -30,7 +31,7 @@ export async function deliverNotifications(send = sendPush) {
   for (let i = 0; i < jobs.length; i += 4) {
     await Promise.all(jobs.slice(i, i + 4).map(async (job) => {
       const rows = await sql`
-        SELECT s.endpoint, s.p256dh, s.auth, n.id, n.category,
+        SELECT s.endpoint, s.p256dh, s.auth, n.id, n.category, n.type, n.user_id, n.group_id,
           (s.user_id = n.user_id AND sess.user_id = n.user_id AND sess.expires_at > now()
             AND u.deleted_at IS NULL AND notification_visible(n)
             AND n.created_at > now() - interval '24 hours'
@@ -47,7 +48,9 @@ export async function deliverNotifications(send = sendPush) {
       const row = rows[0];
       if (!row) return;
       let state = "skipped"; let status: number | null = null; let retrySeconds = 0;
-      if (row.eligible) {
+      const eligible = row.eligible && (row.type !== "reminder.monthly"
+        || await monthlyBalanceOutstanding(Number(row.user_id), row.group_id === null ? null : Number(row.group_id)));
+      if (eligible) {
         // A configuration error never deletes a working subscription or leaks its endpoint.
         const result = await send({ endpoint: row.endpoint, p256dh: row.p256dh, auth: row.auth }, {
           notificationId: Number(row.id), url: `/notifications/${row.id}`, test: row.category === "test",

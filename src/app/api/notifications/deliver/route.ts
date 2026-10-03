@@ -2,6 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { deliverNotifications } from "@/lib/notification-delivery";
 import { sql } from "@/lib/db";
+import { enqueueMonthlyReminders } from "@/lib/monthly-reminders";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
@@ -16,7 +17,8 @@ async function deliver(req: NextRequest) {
     return NextResponse.json({ error: "Not authorized" }, { status: 401 });
   }
   try {
-    const result = await deliverNotifications();
+    const remindersCreated = await enqueueMonthlyReminders();
+    const result = { ...await deliverNotifications(), remindersCreated };
     await sql`DELETE FROM notifications WHERE id IN
       (SELECT id FROM notifications WHERE created_at < now() - interval '90 days' ORDER BY id LIMIT 500)`;
     await sql`DELETE FROM push_subscriptions WHERE id IN

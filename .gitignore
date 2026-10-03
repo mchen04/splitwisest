@@ -8,3 +8,5 @@ next-env.d.ts
 .pwa-harness
 public/sw.js
 .migration-snapshots
+.monthly-fixtures.local.json
+.monthly-*.local.env

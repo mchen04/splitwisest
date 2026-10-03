@@ -12,7 +12,8 @@
     "verify:profiles": "tsx scripts/verify-private-profiles.ts",
     "migrate:apply": "tsx scripts/apply-migration.ts",
     "migrate:notifications": "tsx scripts/migrate-notifications.ts",
-    "verify:notifications": "tsx scripts/verify-notifications.ts"
+    "verify:notifications": "tsx scripts/verify-notifications.ts",
+    "verify:monthly-reminders": "tsx scripts/verify-monthly-reminders.ts"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",
