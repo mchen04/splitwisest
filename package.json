@@ -10,6 +10,7 @@
     "verify:ui-tokens": "tsx scripts/check-ui-tokens.ts",
     "verify:core": "tsx scripts/verify-core-flows.ts",
     "verify:profiles": "tsx scripts/verify-private-profiles.ts",
+    "migrate:apply": "tsx scripts/apply-migration.ts",
     "migrate:notifications": "tsx scripts/migrate-notifications.ts",
     "verify:notifications": "tsx scripts/verify-notifications.ts"
   },

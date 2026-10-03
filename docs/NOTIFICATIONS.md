@@ -56,7 +56,7 @@ Valid rules still materialize after their creator leaves.
 Database triggers write the inbox and per-device outbox in the same transaction as the event.
 Failed business writes produce no notifications. Recipients are recorded at event time, never
 reconstructed from a later membership list. A successful application request attempts delivery after
-its response. A separate scheduler retries when no app is open.
+its response. Opening a group page also attempts delivery. Scheduled runs retry when no app is open.
 
 The sender claims up to 24 jobs with row locks and two-minute leases. Four sends run at once.
 Network errors, 429, and 5xx retry with backoff from one minute to one hour. Retry-After is respected
@@ -96,6 +96,8 @@ pnpm migrate:notifications
 For a new empty fixture database, first run `pnpm tsx scripts/migrate.ts`. Do not rerun the broad
 bootstrap migration against production for this feature. The dedicated migration uses one transaction,
 creates four tables and seven triggers, and reads their presence back. Rerunning it does not backfill events.
+It uses the row guard described in DATABASE.md: it snapshots `schema_migrations`, the only existing
+table it writes, and fails if an existing row there changes.
 
 Generate VAPID keys with `web-push.generateVAPIDKeys()` in a private setup script. Store the keys directly
 in the deployment's environment store. Never put the private key in a client-prefixed variable or logs.
@@ -106,19 +108,34 @@ in the deployment's environment store. Never put the private key in a client-pre
 | `VAPID_PRIVATE_KEY` | Matching server-only private key |
 | `VAPID_SUBJECT` | Operator HTTPS contact URL or mailto URI; do not use localhost for Safari |
 | `PUSH_ALLOWED_USER_IDS` | Comma-separated approved test IDs; empty disables delivery; `all` is the later opt-in rollout |
-| `PUSH_CRON_SECRET` | At least 32 random characters, shared only with the scheduler |
+| `PUSH_CRON_SECRET` | At least 32 random characters, shared only with the schedulers |
+| `CRON_SECRET` | Production only; the same value as `PUSH_CRON_SECRET`. Vercel Cron sends it as the bearer token |
 
-The GitHub workflow calls `/api/notifications/deliver` with a bearer secret every five minutes.
-Set repository secrets `PUSH_DELIVERY_URL` (the complete HTTPS endpoint) and `PUSH_CRON_SECRET` only for
-the intended deployment. This public repository uses standard GitHub-hosted runners. Do not move
-the schedule to a paid/private runner without a new cost decision. GitHub schedules run on the default
-branch and can be delayed; they do not promise a delivery deadline. The endpoint also supports manual
-POSTs using the same secret. It returns counts of provider acceptance, retries, expired devices,
+Two schedulers call `/api/notifications/deliver` with the same bearer secret:
+
+- **Vercel Cron** (`vercel.json`) sends a GET once a day at 17:00 UTC. Vercel can start it any time in
+  that hour. This is the guaranteed run. The Hobby plan allows one run per day for each cron job; a
+  more frequent expression fails the deployment. Vercel runs crons only for the production deployment.
+- **GitHub Actions** (`.github/workflows/notification-delivery.yml`) asks for a POST every five minutes.
+  GitHub treats schedules as best effort. In October 2026 it ran about every five hours. Treat it as
+  extra retries, not as a deadline.
+
+Delivery skips jobs older than 24 hours. A job that fails while no app is open and GitHub skips its
+runs can therefore wait up to a day, and may expire before the daily run. A tighter guaranteed schedule
+needs Vercel Pro (per-minute cron) or an external scheduler, such as a Cloudflare Worker cron trigger
+that POSTs with the same secret.
+
+To rotate the secret, change `PUSH_CRON_SECRET` and `CRON_SECRET` in Vercel production and the GitHub
+secret `PUSH_CRON_SECRET` together, then redeploy. Set repository secret `PUSH_DELIVERY_URL` to the complete
+production HTTPS endpoint. This public repository uses standard GitHub-hosted runners. Do not move
+the schedule to a paid/private runner without a new cost decision.
+
+Manual runs use POST with the same secret. Each run returns and logs (`event: notification-delivery`,
+`trigger: vercel-cron` or `manual`) the counts of provider acceptance, retries, expired devices,
 skipped events, and failures. Provider acceptance is not proof that a device displayed an alert.
+Unauthenticated calls get 401.
 
-Vercel Hobby only supports daily cron jobs, so it is not used for this retry interval.
-A preview must have its own scheduler or a controlled temporary runner; deploying this branch does not
-activate the GitHub schedule until the workflow reaches the default branch.
+A preview has no scheduler. Use manual POSTs with the preview's own secret.
 
 This release has completed independent review. Michael waives native Safari and physical-iPhone
 receipt, background delivery, and tap-through checks. Both remain **WAIVED/UNVERIFIED**, not passed.

@@ -19,7 +19,30 @@ and allocation guards. If an existing database needs only the group-balance
 change, use the four scoped SQL files below in order instead of running the
 full migration script. Confirm the database target first.
 
-Apply `scripts/migrations/20260929_group_balances.sql` in one transaction before
+Apply each scoped SQL file with the guarded runner. Confirm the database target first.
+
+```bash
+DATABASE_URL=... pnpm migrate:apply scripts/migrations/<file>.sql
+```
+
+The runner snapshots, then applies, then checks:
+
+1. It finds the existing tables the file writes directly (`INSERT`, `UPDATE`, `DELETE`, `ALTER TABLE`,
+   `TRUNCATE`, `DROP TABLE`, `MERGE`, `COPY`), including in `DO` blocks. Function bodies are skipped,
+   because they do not run during the migration.
+2. It saves the rows of those tables to `.migration-snapshots/` (gitignored, mode 600).
+3. It runs the file in one transaction. At the start, it records a hash of each existing row in those
+   tables. At the end, it fails if any recorded row changed or is gone. Added rows pass, such as the
+   `schema_migrations` ledger entry. On failure, PostgreSQL rolls back the whole transaction.
+
+The check ignores tables the file does not write. Live tables such as `sessions` therefore cannot cause a
+false failure. A `DO` block with dynamic `EXECUTE` must name its tables with `--writes <table>`.
+Writes made by triggers or by functions the file calls are not detected. Name those tables too.
+For an intended data fix, pass `--expect-change <table>`, then compare the result with the snapshot.
+`--print-transaction` prints the guarded SQL without connecting. `BEGIN` and `COMMIT` lines in a file
+are dropped, because the runner owns the transaction.
+
+Apply `scripts/migrations/20260929_group_balances.sql` before
 the app update. It creates two tables, replaces the
 group-balance function, adds a deferred sum check, and records its version in
 `schema_migrations`. On failure, PostgreSQL rolls back the whole transaction.
