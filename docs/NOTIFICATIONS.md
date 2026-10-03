@@ -29,7 +29,7 @@ The mobile Home badge counts unread notifications. Existing Chat and Balances ba
 | Device test | Only the selected device in the current session | Explicit test bypasses category mute | Test confirmation in inbox |
 
 Notifications start when the schema is installed. There is no historical backfill.
-Turning a phone preference off keeps inbox entries. Turning it on does not send past activity.
+Turning a phone preference off keeps inbox entries. Turning it on does not create phone jobs for past activity.
 Payments and group balances share the existing `settlements` preference key.
 Group balance alerts say Group balance added, Group balance changed, or Group balance deleted.
 All three open `/groups/{id}?tab=balances`. Failed writes, version conflicts, and idempotent create
@@ -78,7 +78,10 @@ Its default is on, as is the existing global `pushEnabled` preference. These pre
 Missing preference values follow those defaults. A false `reminders` value or false `pushEnabled` suppresses phone jobs.
 The inbox still receives the reminder. Phone alerts require an enrolled device with a valid session and the deployment allowlist.
 The existing restricted production push rollout remains in force. This feature does not expand it.
-Turning a preference on, or enrolling a device later, does not send an earlier reminder.
+A preference change does not create phone jobs for past reminders.
+Newly enrolled devices do not receive past reminders.
+An existing pending job can send after unmuting if it still passes the delivery checks.
+A skipped job stays skipped.
 Delivery rechecks preferences, access, and the scope's outstanding balance. A balance settled before a retry suppresses its phone alert.
 The existing inbox entry remains readable. Phone text continues to hide names, amounts, and financial details.
 
