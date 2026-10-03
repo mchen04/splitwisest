@@ -1,0 +1,76 @@
+name: Application checks
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Generate isolated test credentials
+        run: |
+          node --input-type=module - <<'JS'
+          import { writeFileSync } from 'node:fs';
+          import { randomBytes } from 'node:crypto';
+          import webpush from 'web-push';
+          const password = randomBytes(24).toString('hex');
+          const keys = webpush.generateVAPIDKeys();
+          const database = new URL('postgres://db.localtest.me:5476/splitwisest_monthly_qa');
+          database.username = 'postgres';
+          database.password = password;
+          const proxy = new URL(database);
+          proxy.hostname = 'monthly-postgres';
+          proxy.port = '5432';
+          const save = (file, values) => writeFileSync(file, Object.entries(values).map(([key, value]) => `${key}=${value}`).join('\n') + '\n', { mode: 0o600 });
+          save('.env.local', {
+            DATABASE_URL: database.href,
+            NEON_LOCAL_PROXY: 'http://127.0.0.1:4444/sql', PUSH_ALLOWED_USER_IDS: 'all',
+            VAPID_PUBLIC_KEY: keys.publicKey, VAPID_PRIVATE_KEY: keys.privateKey, VAPID_SUBJECT: 'https://splitwisest.invalid',
+          });
+          save('.monthly-postgres.local.env', { POSTGRES_USER: 'postgres', POSTGRES_PASSWORD: password, POSTGRES_DB: 'splitwisest_monthly_qa' });
+          save('.monthly-proxy.local.env', { PG_CONNECTION_STRING: proxy.href });
+          JS
+      - name: Start isolated database proxy
+        run: |
+          docker network create monthly-qa
+          docker run -d --name monthly-postgres --network monthly-qa \
+            --env-file .monthly-postgres.local.env -p 127.0.0.1:5476:5432 postgres:16
+          for attempt in $(seq 1 30); do
+            if docker exec monthly-postgres pg_isready -U postgres; then break; fi
+            sleep 1
+          done
+          docker run -d --name monthly-proxy --network monthly-qa \
+            --env-file .monthly-proxy.local.env -p 127.0.0.1:4444:4444 \
+            ghcr.io/timowilhelm/local-neon-http-proxy:main
+          for attempt in $(seq 1 30); do
+            if curl --silent --output /dev/null http://127.0.0.1:4444; then break; fi
+            sleep 1
+          done
+      - run: pnpm vitest run
+      - run: pnpm exec tsc --noEmit
+      - run: pnpm lint
+      - run: pnpm verify:ui-tokens
+      - name: Verify monthly reminders with real SQL
+        run: |
+          node --env-file=.env.local node_modules/tsx/dist/cli.mjs scripts/migrate.ts
+          node --env-file=.env.local node_modules/tsx/dist/cli.mjs scripts/migrate-notifications.ts
+          node --env-file=.env.local node_modules/tsx/dist/cli.mjs scripts/verify-monthly-reminders.ts > "${{ runner.temp }}/monthly-reminders.json"
+          cat "${{ runner.temp }}/monthly-reminders.json"
+      - run: pnpm build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: monthly-reminder-proof
+          path: ${{ runner.temp }}/monthly-reminders.json

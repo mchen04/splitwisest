@@ -3,7 +3,9 @@ import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const deliverNotifications = vi.fn();
+const enqueueMonthlyReminders = vi.fn();
 vi.mock("@/lib/notification-delivery", () => ({ deliverNotifications }));
+vi.mock("@/lib/monthly-reminders", () => ({ enqueueMonthlyReminders }));
 vi.mock("@/lib/db", () => ({ sql: vi.fn().mockResolvedValue([]) }));
 
 const secret = "s".repeat(40);
@@ -14,15 +16,16 @@ const request = (method: string, auth?: string, agent?: string) =>
   });
 
 describe("notification retry endpoint", () => {
-  beforeEach(() => { vi.clearAllMocks(); vi.stubEnv("PUSH_CRON_SECRET", secret); deliverNotifications.mockResolvedValue(totals); });
+  beforeEach(() => { vi.clearAllMocks(); vi.stubEnv("PUSH_CRON_SECRET", secret); deliverNotifications.mockResolvedValue(totals); enqueueMonthlyReminders.mockResolvedValue(2); });
 
   it("runs for the Vercel Cron GET with the shared secret", async () => {
     const route = await import("@/app/api/notifications/deliver/route");
     const info = vi.spyOn(console, "info").mockImplementation(() => {});
     const res = await route.GET(request("GET", `Bearer ${secret}`, "vercel-cron/1.0"));
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual(totals);
-    expect(JSON.parse(info.mock.calls[0][0])).toEqual({ event: "notification-delivery", trigger: "vercel-cron", ...totals });
+    expect(await res.json()).toEqual({ ...totals, remindersCreated: 2 });
+    expect(enqueueMonthlyReminders).toHaveBeenCalledWith();
+    expect(JSON.parse(info.mock.calls[0][0])).toEqual({ event: "notification-delivery", trigger: "vercel-cron", ...totals, remindersCreated: 2 });
   });
 
   it("keeps POST for the GitHub workflow and manual runs", async () => {
@@ -35,6 +38,14 @@ describe("notification retry endpoint", () => {
     const route = await import("@/app/api/notifications/deliver/route");
     expect((await route.GET(request("GET", auth))).status).toBe(401);
     expect((await route.POST(request("POST", auth))).status).toBe(401);
+    expect(deliverNotifications).not.toHaveBeenCalled();
+    expect(enqueueMonthlyReminders).not.toHaveBeenCalled();
+  });
+
+  it("returns a retry response when reminder creation fails", async () => {
+    enqueueMonthlyReminders.mockRejectedValueOnce(new Error("database unavailable"));
+    const route = await import("@/app/api/notifications/deliver/route");
+    expect((await route.POST(request("POST", `Bearer ${secret}`))).status).toBe(503);
     expect(deliverNotifications).not.toHaveBeenCalled();
   });
 
