@@ -179,8 +179,8 @@ Unauthenticated calls get 401.
 
 A preview has no scheduler. Use manual POSTs with the preview's own secret.
 
-This release has completed independent review. Michael waives native Safari and physical-iPhone
-receipt, background delivery, and tap-through checks. Both remain **WAIVED/UNVERIFIED**, not passed.
+The prior notification release waives native Safari and physical-iPhone receipt, background delivery,
+and tap-through checks. These checks remain **WAIVED/UNVERIFIED**, not passed.
 These waivers do not replace software checks or actual hosted delivery evidence. Record manual workflow
 runs and naturally scheduled runs separately; configuration and a Mac retry loop do not prove either.
 
