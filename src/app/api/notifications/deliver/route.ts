@@ -5,7 +5,10 @@ import { sql } from "@/lib/db";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
-export async function POST(req: NextRequest) {
+
+// Vercel Cron sends GET with `Bearer $CRON_SECRET`; production sets CRON_SECRET to PUSH_CRON_SECRET.
+// The GitHub workflow and manual runs use POST with the same secret.
+async function deliver(req: NextRequest) {
   const secret = process.env.PUSH_CRON_SECRET;
   const value = Buffer.from(req.headers.get("authorization") ?? "");
   const expected = Buffer.from(`Bearer ${secret}`);
@@ -19,8 +22,13 @@ export async function POST(req: NextRequest) {
     await sql`DELETE FROM push_subscriptions WHERE id IN
       (SELECT s.id FROM push_subscriptions s JOIN sessions sess ON sess.token = s.session_token
         WHERE sess.expires_at <= now() ORDER BY s.id LIMIT 100)`;
+    const trigger = req.headers.get("user-agent")?.startsWith("vercel-cron") ? "vercel-cron" : "manual";
+    console.info(JSON.stringify({ event: "notification-delivery", trigger, ...result }));
     return NextResponse.json(result);
   } catch {
     return NextResponse.json({ error: "Delivery will retry on the next run" }, { status: 503 });
   }
 }
+
+export const GET = deliver;
+export const POST = deliver;

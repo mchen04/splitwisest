@@ -7,3 +7,4 @@ next-env.d.ts
 .vercel
 .pwa-harness
 public/sw.js
+.migration-snapshots
