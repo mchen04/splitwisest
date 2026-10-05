@@ -24,7 +24,7 @@ import { Expense, Settlement, useGroupPageData } from "./use-group-page-data";
 
 type Tab = "expenses" | "balances" | "insights" | "chat" | "activity";
 type GroupBalanceSummary = { id: number; title: string; amountCents: number; updatedAt: string };
-type GroupBalancePage = { balances: GroupBalanceSummary[]; hasMore: boolean; changeCursor: number };
+type GroupBalancePage = { version: string; balances: GroupBalanceSummary[]; hasMore: boolean; changeCursor: number };
 
 export default function GroupPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -61,9 +61,27 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
   const { data: groupBalancesData, error: groupBalancesError, reloadFresh: reloadGroupBalancesFresh,
     reloadFreshCoalesced: pollGroupBalanceList } = useApiData<GroupBalancePage>(
     `/api/groups/${groupId}/group-balances?limit=50`, 0, { sync: false });
-  useSync(() => {
-    pollGroupBalanceList();
-    pollBalancePreview();
+  // Each tick asks for the group's content fingerprints and refetches only the
+  // detail or list whose fingerprint differs from the one it was served with.
+  // Responses carry a fingerprint no newer than their data, so a missed, failed,
+  // or stale read is retried on the next tick. An open group-balance form keeps
+  // reading the detail every tick for its live preview.
+  const versionCheck = useRef(false);
+  useSync((c, prev) => {
+    if (groupBalanceOpen) pollBalancePreview();
+    if (c.activityCursor !== prev.activityCursor) pollGroupBalanceList();
+    if (versionCheck.current) return;
+    versionCheck.current = true;
+    api<{ detail: string; list: string; recurringDue: boolean }>(`/api/groups/${groupId}/version`)
+      .then((v) => {
+        if (v.recurringDue || v.detail !== detail?.version) pollBalancePreview();
+        if (v.list !== groupBalancesData?.version) pollGroupBalanceList();
+      })
+      .catch(() => {
+        pollBalancePreview();
+        pollGroupBalanceList();
+      })
+      .finally(() => { versionCheck.current = false; });
   }, true);
   const observedBalanceChange = useRef<{ groupId: number; cursor: number } | null>(null);
   useEffect(() => {

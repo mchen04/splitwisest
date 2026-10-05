@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { sql } from "@/lib/db";
 import { badRequest, handler } from "@/lib/api";
 import { requireUser } from "@/lib/auth";
-import { parseGroupId, requireGroupMember } from "@/lib/groups";
+import { parseGroupId, requireGroupMember, requireGroupMemberVersions } from "@/lib/groups";
 import { createGroupObligation } from "@/lib/group-obligations";
 import { GroupObligationCreateBody } from "@/lib/group-obligation-math";
 import { versionToken } from "@/lib/versions";
@@ -12,7 +12,7 @@ type Ctx = { params: Promise<{ id: string }> };
 export const GET = handler(async (req: NextRequest, { params }: Ctx) => {
   const user = await requireUser();
   const groupId = parseGroupId((await params).id);
-  await requireGroupMember(groupId, user.id);
+  const { versions } = await requireGroupMemberVersions(groupId, user.id);
   const rawLimit = req.nextUrl.searchParams.get("limit");
   const requested = rawLimit === null || rawLimit.trim() === "" ? 50 : Number(rawLimit);
   if (!Number.isSafeInteger(requested)) badRequest("Invalid page limit");
@@ -34,7 +34,7 @@ export const GET = handler(async (req: NextRequest, { params }: Ctx) => {
          AND type IN ('group_balance.added', 'group_balance.edited', 'group_balance.deleted')) AS change_cursor,
       (SELECT COALESCE(jsonb_agg(to_jsonb(page) ORDER BY page.id DESC), '[]'::jsonb) FROM page) AS balances`;
   const listed = rows[0].balances as { id: number; title: string; amount_cents: number; updated_at_token: string }[];
-  return NextResponse.json({ changeCursor: Number(rows[0].change_cursor), hasMore: listed.length > limit, balances: listed.slice(0, limit).map((r) => ({
+  return NextResponse.json({ version: versions.list, changeCursor: Number(rows[0].change_cursor), hasMore: listed.length > limit, balances: listed.slice(0, limit).map((r) => ({
     id: Number(r.id), title: r.title, amountCents: Number(r.amount_cents),
     updatedAt: versionToken(r.updated_at_token),
   })) });

@@ -42,4 +42,16 @@ describe("group expense data", () => {
     expect(route).toContain("await materializeRecurring(groupId)");
     expect(route.indexOf("await materializeRecurring(groupId)")).toBeLessThan(route.indexOf("const rows = await sql"));
   });
+
+  it("reads group fingerprints before the data they describe", () => {
+    const detail = source("src/app/api/groups/[id]/route.ts");
+    const list = source("src/app/api/groups/[id]/group-balances/route.ts");
+    const detailVersion = detail.indexOf("await requireGroupMemberVersions(groupId");
+    const listVersion = list.indexOf("await requireGroupMemberVersions(groupId");
+
+    expect(detailVersion).toBeGreaterThan(-1);
+    expect(detailVersion).toBeLessThan(detail.indexOf("await materializeRecurring(groupId)"));
+    expect(listVersion).toBeGreaterThan(-1);
+    expect(listVersion).toBeLessThan(list.indexOf("const rows = await sql"));
+  });
 });

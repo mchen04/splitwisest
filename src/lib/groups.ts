@@ -25,14 +25,62 @@ export async function requireGroupMember(groupId: number, userId: number): Promi
       ) AS is_member
     FROM groups g
     WHERE g.id = ${groupId}`;
-  if (rows.length === 0) notFound();
-  if (!rows[0].is_member) forbidden("You are not a member of this group");
+  return authorizedGroup(rows[0]);
+}
+
+function authorizedGroup(row: Record<string, unknown> | undefined): AuthorizedGroup {
+  if (!row) notFound();
+  if (!row.is_member) forbidden("You are not a member of this group");
   return {
-    id: Number(rows[0].id),
-    name: rows[0].name,
-    currency: rows[0].currency,
-    inviteCode: rows[0].invite_code,
-    createdBy: Number(rows[0].created_by),
+    id: Number(row.id),
+    name: row.name as string,
+    currency: row.currency as string,
+    inviteCode: row.invite_code as string,
+    createdBy: Number(row.created_by),
+  };
+}
+
+export interface GroupVersions {
+  detail: string;
+  list: string;
+  recurringDue: boolean;
+}
+
+// Membership check plus fingerprints of everything the group detail and the
+// group-balance list return, read in one statement. Routes read their data
+// after this snapshot, so a response's fingerprint never runs ahead of its data.
+export async function requireGroupMemberVersions(
+  groupId: number,
+  userId: number,
+): Promise<AuthorizedGroup & { versions: GroupVersions }> {
+  const rows = await sql`
+    SELECT g.id, g.name, g.currency, g.invite_code, g.created_by, m.is_member,
+      CASE WHEN m.is_member THEN md5(jsonb_build_array(g.name, g.currency, g.invite_code, g.created_by,
+        (SELECT jsonb_agg(jsonb_build_array(u.id, u.display_name, u.username) ORDER BY u.id)
+         FROM group_members gm JOIN users u ON u.id = gm.user_id WHERE gm.group_id = g.id),
+        (SELECT jsonb_agg(jsonb_build_array(b.user_id, b.display_name, b.net_cents) ORDER BY b.user_id)
+         FROM group_balance_rows(g.id) b))::text) END AS detail_version,
+      CASE WHEN m.is_member THEN md5(jsonb_build_array(
+        (SELECT jsonb_agg(jsonb_build_array(o.id, o.title, o.amount_cents, o.updated_at) ORDER BY o.id)
+         FROM group_obligations o WHERE o.group_id = g.id),
+        (SELECT MAX(a.id) FROM activity a WHERE a.group_id = g.id
+           AND a.type IN ('group_balance.added', 'group_balance.edited', 'group_balance.deleted')))::text) END AS list_version,
+      m.is_member AND EXISTS (
+        SELECT 1 FROM recurring_expenses r
+        WHERE r.group_id = g.id AND r.active AND r.next_date <= CURRENT_DATE
+      ) AS recurring_due
+    FROM groups g
+    CROSS JOIN LATERAL (
+      SELECT EXISTS (SELECT 1 FROM group_members gm WHERE gm.group_id = g.id AND gm.user_id = ${userId}) AS is_member
+    ) m
+    WHERE g.id = ${groupId}`;
+  return {
+    ...authorizedGroup(rows[0]),
+    versions: {
+      detail: rows[0].detail_version,
+      list: rows[0].list_version,
+      recurringDue: rows[0].recurring_due,
+    },
   };
 }
 

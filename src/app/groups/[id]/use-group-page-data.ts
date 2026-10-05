@@ -6,6 +6,7 @@ import type { Member } from "@/components/expense-form";
 
 export interface GroupDetail {
   group: { id: number; name: string; currency: string; inviteCode: string; createdBy: number };
+  version: string;
   members: (Member & { username: string })[];
   balances: { userId: number; displayName: string; netCents: number }[];
   suggestions: { from: number; to: number; amountCents: number }[];

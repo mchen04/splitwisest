@@ -5,14 +5,16 @@ import { badRequest, handler, forbidden } from "@/lib/api";
 import { requireUser } from "@/lib/auth";
 import { groupBalances, suggestSettlements } from "@/lib/balances";
 import { materializeRecurring } from "@/lib/expenses";
-import { deleteGroup, parseGroupId, renameGroupWithActivity, requireGroupMember } from "@/lib/groups";
+import {
+  deleteGroup, parseGroupId, renameGroupWithActivity, requireGroupMember, requireGroupMemberVersions,
+} from "@/lib/groups";
 
 type Ctx = { params: Promise<{ id: string }> };
 
 export const GET = handler(async (_req: NextRequest, { params }: Ctx) => {
   const user = await requireUser();
   const groupId = parseGroupId((await params).id);
-  const group = await requireGroupMember(groupId, user.id);
+  const group = await requireGroupMemberVersions(groupId, user.id);
 
   // materializeRecurring writes (must run first); members + balances are then
   // independent reads — run them as one parallel level over the Neon driver.
@@ -33,6 +35,7 @@ export const GET = handler(async (_req: NextRequest, { params }: Ctx) => {
       inviteCode: group.inviteCode,
       createdBy: group.createdBy,
     },
+    version: group.versions.detail,
     members: members.map((m) => ({ id: Number(m.id), displayName: m.display_name, username: m.username })),
     balances,
     suggestions,
