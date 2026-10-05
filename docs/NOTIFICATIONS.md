@@ -96,7 +96,8 @@ Rollback restores the previous app revision. Keep financial data and existing in
 Database triggers write the inbox and per-device outbox in the same transaction as the event.
 Failed business writes produce no notifications. Recipients are recorded at event time, never
 reconstructed from a later membership list. A successful application request attempts delivery after
-its response. Opening a group page also attempts delivery. Scheduled runs retry when no app is open.
+its response. Opening a group page also attempts delivery, and an open group page attempts it on each
+member group check (every 4 seconds while visible, 16 seconds while hidden). Scheduled runs retry when no app is open.
 
 The sender claims up to 24 jobs with row locks and two-minute leases. Four sends run at once.
 Network errors, 429, and 5xx retry with backoff from one minute to one hour. Retry-After is respected
