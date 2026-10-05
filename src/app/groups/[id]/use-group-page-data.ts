@@ -167,6 +167,7 @@ export function useGroupPageData({
 
   return {
     detail: detailState.data,
+    detailSettled: detailState.settled,
     expenses,
     insightExpenses,
     insightError,

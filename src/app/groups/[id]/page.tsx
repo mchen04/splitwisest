@@ -53,7 +53,7 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
   const categories = categoriesData?.categories ?? [];
   const {
     detail, expenses, insightExpenses, insightError, hasMoreExpenses, recurring, settlements, hasMoreSettlements,
-    activity, refreshKey, loadError, loadDetail, reloadInsights, refreshAll, refreshBalancePreview, pollBalancePreview,
+    activity, refreshKey, loadError, loadDetail, reloadInsights, refreshAll, refreshBalancePreview, pollBalancePreview, detailSettled,
     refreshGroupBalanceMutation,
   } = useGroupPageData({ groupId, filters, expenseLimit, settlementLimit, insightsEnabled: tab === "insights" });
 
@@ -65,24 +65,46 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
     groupId: number; changeCursor: number; balances: GroupBalanceSummary[]; hasMore: boolean;
   } | null>(null);
   const [loadingGroupBalances, setLoadingGroupBalances] = useState(false);
-  const { data: groupBalancesData, error: groupBalancesError, reloadFresh: reloadGroupBalancesFresh,
-    reloadFreshCoalesced: pollGroupBalanceList } = useApiData<GroupBalancePage>(
+  const { data: groupBalancesData, error: groupBalancesError, settled: groupBalancesSettled,
+    reloadFresh: reloadGroupBalancesFresh, reloadFreshCoalesced: pollGroupBalanceList } = useApiData<GroupBalancePage>(
     `/api/groups/${groupId}/group-balances?limit=50`, 0, { sync: false });
   // Each tick asks for the group's content fingerprints and refetches only the
   // detail or list whose fingerprint differs from the one it was served with.
   // Responses carry a fingerprint no newer than their data, so a missed, failed,
   // or stale read is retried on the next tick. An open group-balance form keeps
-  // reading the detail every tick for its live preview.
+  // reading the detail every tick for its live preview. While the first load of
+  // the detail or list is still in flight, its tick result waits for that load
+  // and refetches only if the loaded fingerprint differs.
   const versionCheck = useRef(false);
+  const latest = useRef({ groupId, detail, detailSettled, list: groupBalancesData, listSettled: groupBalancesSettled });
+  const deferred = useRef<{ groupId: number; detail?: { version: string; due: boolean }; list?: string }>({ groupId });
+  useLayoutEffect(() => {
+    latest.current = { groupId, detail, detailSettled, list: groupBalancesData, listSettled: groupBalancesSettled };
+    const waiting = deferred.current;
+    if (waiting.groupId !== groupId) { deferred.current = { groupId }; return; }
+    if (waiting.detail && detailSettled) {
+      if (waiting.detail.due || waiting.detail.version !== detail?.version) pollBalancePreview();
+      waiting.detail = undefined;
+    }
+    if (waiting.list !== undefined && groupBalancesSettled) {
+      if (waiting.list !== groupBalancesData?.version) pollGroupBalanceList();
+      waiting.list = undefined;
+    }
+  }, [groupId, detail, detailSettled, groupBalancesData, groupBalancesSettled, pollBalancePreview, pollGroupBalanceList]);
   useSync((c, prev) => {
     if (groupBalanceOpen) pollBalancePreview();
     if (c.activityCursor !== prev.activityCursor) pollGroupBalanceList();
     if (versionCheck.current) return;
     versionCheck.current = true;
-    api<{ detail: string; list: string; recurringDue: boolean }>(`/api/groups/${groupId}/version`)
+    const tickGroup = groupId;
+    api<{ detail: string; list: string; recurringDue: boolean }>(`/api/groups/${tickGroup}/version`)
       .then((v) => {
-        if (v.recurringDue || v.detail !== detail?.version) pollBalancePreview();
-        if (v.list !== groupBalancesData?.version) pollGroupBalanceList();
+        const now = latest.current;
+        if (now.groupId !== tickGroup) return;
+        if (!now.detailSettled) deferred.current.detail = { version: v.detail, due: v.recurringDue };
+        else if (v.recurringDue || v.detail !== now.detail?.version) pollBalancePreview();
+        if (!now.listSettled) deferred.current.list = v.list;
+        else if (v.list !== now.list?.version) pollGroupBalanceList();
       })
       .catch(() => {
         pollBalancePreview();

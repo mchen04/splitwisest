@@ -341,14 +341,16 @@ export function useApiData<T>(
   path: string,
   debounceMs = 0,
   opts: { sync?: false | keyof SyncCursors | (keyof SyncCursors)[]; enabled?: boolean } = {}
-): { data: T | null; error: string | null; status: number | null; reload: () => void; reloadFresh: () => void;
+): { data: T | null; error: string | null; status: number | null; settled: boolean; reload: () => void; reloadFresh: () => void;
   reloadFreshCoalesced: () => void } {
   const enabled = opts.enabled !== false;
-  const [state, setState] = useState<{ path: string; data: T | null; error: string | null; status: number | null }>({
+  // `settled` turns true once a fetch for this path has finished, success or failure.
+  const [state, setState] = useState<{ path: string; data: T | null; error: string | null; status: number | null; settled: boolean }>({
     path,
     data: null,
     error: null,
     status: null,
+    settled: false,
   });
   const requestSeq = useRef(0);
   const active = useRef<{ path: string; queued: boolean } | null>(null);
@@ -364,7 +366,7 @@ export function useApiData<T>(
     apiCached<T>(path, force)
       .then((next) => {
         if (seq !== requestSeq.current) return;
-        setState({ path: requestedPath, data: next, error: null, status: 200 });
+        setState({ path: requestedPath, data: next, error: null, status: 200, settled: true });
       })
       .catch((err) => {
         if (seq !== requestSeq.current) return;
@@ -374,6 +376,7 @@ export function useApiData<T>(
           data: stale,
           error: stale ? null : err instanceof ApiClientError ? err.message : "Could not load data",
           status: err instanceof ApiClientError ? err.status : null,
+          settled: true,
         });
       })
       .finally(() => {
@@ -397,7 +400,7 @@ export function useApiData<T>(
     // A layout update replaces the server skeleton before the first paint.
     setState((current) => current.path === path && current.data !== null
       ? current
-      : { path, data: stale, error: null, status: null });
+      : { path, data: stale, error: null, status: null, settled: false });
   }, [path, enabled]);
   useEffect(() => {
     if (!enabled) return;
@@ -422,6 +425,7 @@ export function useApiData<T>(
     data: enabled ? state.path === path ? state.data ?? cached : cached : null,
     error: enabled && state.path === path ? state.error : null,
     status: enabled && state.path === path ? state.status : null,
+    settled: enabled && state.path === path && state.settled,
     reload,
     reloadFresh,
     reloadFreshCoalesced,
