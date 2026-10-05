@@ -1,3 +1,4 @@
+import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const sql = vi.fn();
@@ -11,6 +12,8 @@ vi.mock("next/headers", () => ({ cookies: async () => store }));
 
 const versionRoute = await import("@/app/api/groups/[id]/version/route");
 const syncRoute = await import("@/app/api/sync/route");
+const detailRoute = await import("@/app/api/groups/[id]/route");
+const listRoute = await import("@/app/api/groups/[id]/group-balances/route");
 
 const groupRow = { viewer_id: 5, id: 7, name: "Trip", currency: "USD", invite_code: "x", created_by: 5, is_member: true,
   detail_version: "d", list_version: "l", recurring_due: false };
@@ -65,5 +68,18 @@ describe("polling routes check the session in their own statement", () => {
     sql.mockResolvedValueOnce([{ viewer_id: null }]);
     expect((await syncRoute.GET()).status).toBe(401);
     expect(store.set).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["invalid session", { viewer_id: null, id: null, is_member: false }, 401],
+    ["missing group", { id: null, is_member: false }, 404],
+    ["non-member", { is_member: false }, 403],
+  ])("detail and list stop after one query for a %s (no recurring writes)", async (_name, row, status) => {
+    jar.set("sw_session", "t");
+    sql.mockResolvedValue([{ ...groupRow, ...row }]);
+    const ctx = { params: Promise.resolve({ id: "7" }) };
+    expect((await detailRoute.GET(new Request("https://app.example/api/groups/7") as never, ctx)).status).toBe(status);
+    expect((await listRoute.GET(new NextRequest("https://app.example/api/groups/7/group-balances?limit=50"), ctx)).status).toBe(status);
+    expect(sql).toHaveBeenCalledTimes(2);
   });
 });

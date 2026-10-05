@@ -46,8 +46,8 @@ describe("group expense data", () => {
   it("reads group fingerprints before the data they describe", () => {
     const detail = source("src/app/api/groups/[id]/route.ts");
     const list = source("src/app/api/groups/[id]/group-balances/route.ts");
-    const detailVersion = detail.indexOf("await requireGroupMemberVersions(groupId");
-    const listVersion = list.indexOf("await requireGroupMemberVersions(groupId");
+    const detailVersion = detail.indexOf("await requireGroupViewerVersions(");
+    const listVersion = list.indexOf("await requireGroupViewerVersions(");
 
     expect(detailVersion).toBeGreaterThan(-1);
     expect(detailVersion).toBeLessThan(detail.indexOf("await materializeRecurring(groupId)"));

@@ -6,15 +6,14 @@ import { requireUser } from "@/lib/auth";
 import { groupBalances, suggestSettlements } from "@/lib/balances";
 import { materializeRecurring } from "@/lib/expenses";
 import {
-  deleteGroup, parseGroupId, renameGroupWithActivity, requireGroupMember, requireGroupMemberVersions,
+  deleteGroup, parseGroupId, renameGroupWithActivity, requireGroupMember, requireGroupViewerVersions,
 } from "@/lib/groups";
 
 type Ctx = { params: Promise<{ id: string }> };
 
 export const GET = handler(async (_req: NextRequest, { params }: Ctx) => {
-  const user = await requireUser();
-  const groupId = parseGroupId((await params).id);
-  const group = await requireGroupMemberVersions(groupId, { userId: user.id });
+  const group = await requireGroupViewerVersions((await params).id);
+  const groupId = group.id;
 
   // materializeRecurring writes (must run first); members + balances are then
   // independent reads — run them as one parallel level over the Neon driver.

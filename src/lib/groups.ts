@@ -1,6 +1,6 @@
 import { sql } from "./db";
 import { forbidden, notFound } from "./api";
-import { AuthError, markSessionOwner, newInviteCode, SessionUser } from "./auth";
+import { AuthError, markSessionOwner, newInviteCode, requireSessionToken, requireUser, SessionUser } from "./auth";
 
 export interface AuthorizedGroup {
   id: number;
@@ -46,23 +46,21 @@ export interface GroupVersions {
   recurringDue: boolean;
 }
 
-// Membership check plus fingerprints of everything the group detail and the
-// group-balance list return, read in one statement. Routes read their data
-// after this snapshot, so a response's fingerprint never runs ahead of its data.
-// A polling caller passes its session token instead of a user, and the session
-// check (401 before 404/403) runs in the same statement.
-export async function requireGroupMemberVersions(
-  groupId: number,
-  viewer: { userId: number } | { token: string },
+// Session, membership, and fingerprints of everything the group detail and the
+// group-balance list return, read in one statement (401 before 404/403). Routes
+// read or write their data only after this succeeds, and the fingerprint never
+// runs ahead of that data. The session predicate matches getSessionUser.
+export async function requireGroupViewerVersions(
+  rawId: string,
 ): Promise<AuthorizedGroup & { versions: GroupVersions }> {
-  const userId = "userId" in viewer ? viewer.userId : null;
-  const token = "token" in viewer ? viewer.token : null;
+  const token = await requireSessionToken();
+  // A malformed id keeps the old order: an invalid session still answers 401.
+  if (!Number.isInteger(Number(rawId))) await requireUser();
+  const groupId = parseGroupId(rawId);
   const rows = await sql`
     WITH viewer AS (
-      SELECT ${userId}::bigint AS id WHERE ${userId}::bigint IS NOT NULL
-      UNION ALL
-      SELECT s.user_id FROM sessions s JOIN users u ON u.id = s.user_id
-      WHERE s.token = ${token}::text AND s.expires_at > now() AND u.deleted_at IS NULL
+      SELECT s.user_id AS id FROM sessions s JOIN users u ON u.id = s.user_id
+      WHERE s.token = ${token} AND s.expires_at > now() AND u.deleted_at IS NULL
     )
     SELECT v.viewer_id, g.id, g.name, g.currency, g.invite_code, g.created_by, m.is_member,
       CASE WHEN m.is_member THEN md5(jsonb_build_array(g.name, g.currency, g.invite_code, g.created_by,
@@ -86,7 +84,7 @@ export async function requireGroupMemberVersions(
     ) m`;
   if (rows[0].viewer_id === null) throw new AuthError();
   // Like requireUser, a confirmed session refreshes the owner cookie even when 404/403 follows.
-  if (token !== null) await markSessionOwner(Number(rows[0].viewer_id));
+  await markSessionOwner(Number(rows[0].viewer_id));
   return {
     ...authorizedGroup(rows[0]),
     versions: {
