@@ -140,9 +140,11 @@ export function useGroupPageData({
   const { insightExpenses, insightError, reloadInsightExpenses } = useInsightExpenses(groupId, insightsEnabled);
   const { settlements, hasMoreSettlements, reloadSettlements } = useSettlements(groupId, settlementLimit);
   const [refreshKey, setRefreshKey] = useState(0);
+  // Wait for the group detail before blaming a side request, so a missing or
+  // forbidden group always reports the detail's own error.
   const loadError = detailState.error
     ? detailState.error
-    : recurringState.error || activityState.error ? "Some group data could not be refreshed" : null;
+    : detailState.data && (recurringState.error || activityState.error) ? "Some group data could not be refreshed" : null;
 
   const reloadOverview = useCallback((freshDetail = false) => {
     if (freshDetail) detailState.reloadFresh();

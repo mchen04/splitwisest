@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState, use } from "react";
+import { Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState, use } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -26,11 +26,18 @@ type Tab = "expenses" | "balances" | "insights" | "chat" | "activity";
 type GroupBalanceSummary = { id: number; title: string; amountCents: number; updatedAt: string };
 type GroupBalancePage = { version: string; balances: GroupBalanceSummary[]; hasMore: boolean; changeCursor: number };
 
+// Reads deep-link query params inside its own Suspense boundary, so the rest of
+// the page renders into the statically generated per-id shell.
+function GroupQuery({ onQuery }: { onQuery: (searchParams: URLSearchParams) => void }) {
+  const searchParams = useSearchParams();
+  useEffect(() => onQuery(searchParams), [searchParams, onQuery]);
+  return null;
+}
+
 export default function GroupPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const groupId = Number(id);
   const router = useRouter();
-  const searchParams = useSearchParams();
   const me = useMe();
   const [expenseLimit, setExpenseLimit] = useState(50);
   const [settlementLimit, setSettlementLimit] = useState(50);
@@ -118,10 +125,9 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
     setExpenseLimit(50);
   }, [filters]);
 
-  useEffect(() => {
+  const applyQuery = useCallback((searchParams: URLSearchParams) => {
     if (searchParams.get("add") === "1") {
       // Deep links may request the add-expense modal.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setEditing(null);
       setExpenseOpen(true);
     }
@@ -140,7 +146,7 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
     if (searchParams.get("add") === "1" || t || expenseId > 0) {
       window.history.replaceState(null, "", window.location.pathname);
     }
-  }, [searchParams]);
+  }, []);
 
   async function openEdit(expenseId: number) {
     try {
@@ -228,9 +234,12 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
     }
   }
 
+  const query = <Suspense fallback={null}><GroupQuery onQuery={applyQuery} /></Suspense>;
+
   if (loadError) {
     return (
       <AppShell title="Group">
+        {query}
         <EmptyState title={loadError} action={<Link href="/groups"><Button variant="secondary">Back to groups</Button></Link>} />
       </AppShell>
     );
@@ -290,6 +299,7 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
 
   return (
     <AppShell title={detail?.group.name ?? "Group"}>
+      {query}
       <section className={`group-context group-hue-${groupId % 6} mb-3 md:shrink-0 lg:grid lg:grid-cols-[minmax(0,1fr)_auto_minmax(10rem,auto)] lg:items-center lg:gap-x-5`} aria-label="Current group">
         <div className="flex items-center gap-2">
           {detail ? (
