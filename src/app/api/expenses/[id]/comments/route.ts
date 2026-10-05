@@ -4,7 +4,7 @@ import { sql } from "@/lib/db";
 import { handler, notFound, forbidden } from "@/lib/api";
 import { requireUser } from "@/lib/auth";
 import { isGroupMember } from "@/lib/balances";
-import { insertExpenseComment } from "@/lib/expenses";
+import { assertExpenseAccess, EXPENSE_READ, expenseAccessQuery, insertExpenseComment } from "@/lib/expenses";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -18,11 +18,14 @@ export const GET = handler(async (_req: NextRequest, { params }: Ctx) => {
   const user = await requireUser();
   const id = Number((await params).id);
   if (!Number.isInteger(id)) notFound();
-  await requireExpenseAccess(id, user.id);
-  const rows = await sql`
-    SELECT c.id, c.author_id, c.body, c.created_at, u.display_name
-    FROM expense_comments c JOIN users u ON u.id = c.author_id
-    WHERE c.expense_id = ${id} ORDER BY c.id ASC`;
+  const [access, rows] = await sql.transaction((tx) => [
+    expenseAccessQuery(tx, id, user.id),
+    tx`
+      SELECT c.id, c.author_id, c.body, c.created_at, u.display_name
+      FROM expense_comments c JOIN users u ON u.id = c.author_id
+      WHERE c.expense_id = ${id} ORDER BY c.id ASC`,
+  ], EXPENSE_READ);
+  assertExpenseAccess(access);
   return NextResponse.json({
     comments: rows.map((c) => ({
       id: Number(c.id),
