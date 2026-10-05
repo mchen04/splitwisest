@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState, use } from "react";
+import { Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState, use } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -24,13 +24,20 @@ import { Expense, Settlement, useGroupPageData } from "./use-group-page-data";
 
 type Tab = "expenses" | "balances" | "insights" | "chat" | "activity";
 type GroupBalanceSummary = { id: number; title: string; amountCents: number; updatedAt: string };
-type GroupBalancePage = { balances: GroupBalanceSummary[]; hasMore: boolean; changeCursor: number };
+type GroupBalancePage = { version: string; balances: GroupBalanceSummary[]; hasMore: boolean; changeCursor: number };
+
+// Reads deep-link query params inside its own Suspense boundary, so the rest of
+// the page renders into the statically generated per-id shell.
+function GroupQuery({ onQuery }: { onQuery: (searchParams: URLSearchParams) => void }) {
+  const searchParams = useSearchParams();
+  useEffect(() => onQuery(searchParams), [searchParams, onQuery]);
+  return null;
+}
 
 export default function GroupPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const groupId = Number(id);
   const router = useRouter();
-  const searchParams = useSearchParams();
   const me = useMe();
   const [expenseLimit, setExpenseLimit] = useState(50);
   const [settlementLimit, setSettlementLimit] = useState(50);
@@ -46,7 +53,7 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
   const categories = categoriesData?.categories ?? [];
   const {
     detail, expenses, insightExpenses, insightError, hasMoreExpenses, recurring, settlements, hasMoreSettlements,
-    activity, refreshKey, loadError, loadDetail, reloadInsights, refreshAll, refreshBalancePreview, pollBalancePreview,
+    activity, refreshKey, loadError, loadDetail, reloadInsights, refreshAll, refreshBalancePreview, pollBalancePreview, detailSettled,
     refreshGroupBalanceMutation,
   } = useGroupPageData({ groupId, filters, expenseLimit, settlementLimit, insightsEnabled: tab === "insights" });
 
@@ -58,12 +65,52 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
     groupId: number; changeCursor: number; balances: GroupBalanceSummary[]; hasMore: boolean;
   } | null>(null);
   const [loadingGroupBalances, setLoadingGroupBalances] = useState(false);
-  const { data: groupBalancesData, error: groupBalancesError, reloadFresh: reloadGroupBalancesFresh,
-    reloadFreshCoalesced: pollGroupBalanceList } = useApiData<GroupBalancePage>(
+  const { data: groupBalancesData, error: groupBalancesError, settled: groupBalancesSettled,
+    reloadFresh: reloadGroupBalancesFresh, reloadFreshCoalesced: pollGroupBalanceList } = useApiData<GroupBalancePage>(
     `/api/groups/${groupId}/group-balances?limit=50`, 0, { sync: false });
-  useSync(() => {
-    pollGroupBalanceList();
-    pollBalancePreview();
+  // Each tick asks for the group's content fingerprints and refetches only the
+  // detail or list whose fingerprint differs from the one it was served with.
+  // Responses carry a fingerprint no newer than their data, so a missed, failed,
+  // or stale read is retried on the next tick. An open group-balance form keeps
+  // reading the detail every tick for its live preview. While the first load of
+  // the detail or list is still in flight, its tick result waits for that load
+  // and refetches only if the loaded fingerprint differs.
+  const versionCheck = useRef(false);
+  const latest = useRef({ groupId, detail, detailSettled, list: groupBalancesData, listSettled: groupBalancesSettled });
+  const deferred = useRef<{ groupId: number; detail?: { version: string; due: boolean }; list?: string }>({ groupId });
+  useLayoutEffect(() => {
+    latest.current = { groupId, detail, detailSettled, list: groupBalancesData, listSettled: groupBalancesSettled };
+    const waiting = deferred.current;
+    if (waiting.groupId !== groupId) { deferred.current = { groupId }; return; }
+    if (waiting.detail && detailSettled) {
+      if (waiting.detail.due || waiting.detail.version !== detail?.version) pollBalancePreview();
+      waiting.detail = undefined;
+    }
+    if (waiting.list !== undefined && groupBalancesSettled) {
+      if (waiting.list !== groupBalancesData?.version) pollGroupBalanceList();
+      waiting.list = undefined;
+    }
+  }, [groupId, detail, detailSettled, groupBalancesData, groupBalancesSettled, pollBalancePreview, pollGroupBalanceList]);
+  useSync((c, prev) => {
+    if (groupBalanceOpen) pollBalancePreview();
+    if (c.activityCursor !== prev.activityCursor) pollGroupBalanceList();
+    if (versionCheck.current) return;
+    versionCheck.current = true;
+    const tickGroup = groupId;
+    api<{ detail: string; list: string; recurringDue: boolean }>(`/api/groups/${tickGroup}/version`)
+      .then((v) => {
+        const now = latest.current;
+        if (now.groupId !== tickGroup) return;
+        if (!now.detailSettled) deferred.current.detail = { version: v.detail, due: v.recurringDue };
+        else if (v.recurringDue || v.detail !== now.detail?.version) pollBalancePreview();
+        if (!now.listSettled) deferred.current.list = v.list;
+        else if (v.list !== now.list?.version) pollGroupBalanceList();
+      })
+      .catch(() => {
+        pollBalancePreview();
+        pollGroupBalanceList();
+      })
+      .finally(() => { versionCheck.current = false; });
   }, true);
   const observedBalanceChange = useRef<{ groupId: number; cursor: number } | null>(null);
   useEffect(() => {
@@ -100,10 +147,9 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
     setExpenseLimit(50);
   }, [filters]);
 
-  useEffect(() => {
+  const applyQuery = useCallback((searchParams: URLSearchParams) => {
     if (searchParams.get("add") === "1") {
       // Deep links may request the add-expense modal.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setEditing(null);
       setExpenseOpen(true);
     }
@@ -122,7 +168,7 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
     if (searchParams.get("add") === "1" || t || expenseId > 0) {
       window.history.replaceState(null, "", window.location.pathname);
     }
-  }, [searchParams]);
+  }, []);
 
   async function openEdit(expenseId: number) {
     try {
@@ -210,9 +256,12 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
     }
   }
 
+  const query = <Suspense fallback={null}><GroupQuery onQuery={applyQuery} /></Suspense>;
+
   if (loadError) {
     return (
       <AppShell title="Group">
+        {query}
         <EmptyState title={loadError} action={<Link href="/groups"><Button variant="secondary">Back to groups</Button></Link>} />
       </AppShell>
     );
@@ -272,6 +321,7 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
 
   return (
     <AppShell title={detail?.group.name ?? "Group"}>
+      {query}
       <section className={`group-context group-hue-${groupId % 6} mb-3 md:shrink-0 lg:grid lg:grid-cols-[minmax(0,1fr)_auto_minmax(10rem,auto)] lg:items-center lg:gap-x-5`} aria-label="Current group">
         <div className="flex items-center gap-2">
           {detail ? (

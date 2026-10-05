@@ -37,7 +37,7 @@ export function handler<T extends unknown[]>(
       const req = args[0];
       if (response.ok && process.env.VAPID_PUBLIC_KEY && req instanceof Request &&
         !new URL(req.url).pathname.startsWith("/api/push/") &&
-        (!SAFE_METHODS.has(req.method) || /^\/api\/groups\/\d+(?:\/expenses)?$/.test(new URL(req.url).pathname))) {
+        (!SAFE_METHODS.has(req.method) || /^\/api\/groups\/\d+(?:\/expenses|\/version)?$/.test(new URL(req.url).pathname))) {
         after(async () => {
           try {
             const { deliverNotifications } = await import("./notification-delivery");

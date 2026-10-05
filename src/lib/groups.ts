@@ -1,6 +1,6 @@
 import { sql } from "./db";
 import { forbidden, notFound } from "./api";
-import { newInviteCode, SessionUser } from "./auth";
+import { AuthError, markSessionOwner, newInviteCode, requireSessionToken, requireUser, SessionUser } from "./auth";
 
 export interface AuthorizedGroup {
   id: number;
@@ -25,14 +25,73 @@ export async function requireGroupMember(groupId: number, userId: number): Promi
       ) AS is_member
     FROM groups g
     WHERE g.id = ${groupId}`;
-  if (rows.length === 0) notFound();
-  if (!rows[0].is_member) forbidden("You are not a member of this group");
+  return authorizedGroup(rows[0]);
+}
+
+function authorizedGroup(row: Record<string, unknown> | undefined): AuthorizedGroup {
+  if (!row || row.id === null) notFound();
+  if (!row.is_member) forbidden("You are not a member of this group");
   return {
-    id: Number(rows[0].id),
-    name: rows[0].name,
-    currency: rows[0].currency,
-    inviteCode: rows[0].invite_code,
-    createdBy: Number(rows[0].created_by),
+    id: Number(row.id),
+    name: row.name as string,
+    currency: row.currency as string,
+    inviteCode: row.invite_code as string,
+    createdBy: Number(row.created_by),
+  };
+}
+
+export interface GroupVersions {
+  detail: string;
+  list: string;
+  recurringDue: boolean;
+}
+
+// Session, membership, and fingerprints of everything the group detail and the
+// group-balance list return, read in one statement (401 before 404/403). Routes
+// read or write their data only after this succeeds, and the fingerprint never
+// runs ahead of that data. The session predicate matches getSessionUser.
+export async function requireGroupViewerVersions(
+  rawId: string,
+): Promise<AuthorizedGroup & { versions: GroupVersions }> {
+  const token = await requireSessionToken();
+  // A malformed id keeps the old order: an invalid session still answers 401.
+  if (!Number.isInteger(Number(rawId))) await requireUser();
+  const groupId = parseGroupId(rawId);
+  const rows = await sql`
+    WITH viewer AS (
+      SELECT s.user_id AS id FROM sessions s JOIN users u ON u.id = s.user_id
+      WHERE s.token = ${token} AND s.expires_at > now() AND u.deleted_at IS NULL
+    )
+    SELECT v.viewer_id, g.id, g.name, g.currency, g.invite_code, g.created_by, m.is_member,
+      CASE WHEN m.is_member THEN md5(jsonb_build_array(g.name, g.currency, g.invite_code, g.created_by,
+        (SELECT jsonb_agg(jsonb_build_array(u.id, u.display_name, u.username) ORDER BY u.id)
+         FROM group_members gm JOIN users u ON u.id = gm.user_id WHERE gm.group_id = g.id),
+        (SELECT jsonb_agg(jsonb_build_array(b.user_id, b.display_name, b.net_cents) ORDER BY b.user_id)
+         FROM group_balance_rows(g.id) b))::text) END AS detail_version,
+      CASE WHEN m.is_member THEN md5(jsonb_build_array(
+        (SELECT jsonb_agg(jsonb_build_array(o.id, o.title, o.amount_cents, o.updated_at) ORDER BY o.id)
+         FROM group_obligations o WHERE o.group_id = g.id),
+        (SELECT MAX(a.id) FROM activity a WHERE a.group_id = g.id
+           AND a.type IN ('group_balance.added', 'group_balance.edited', 'group_balance.deleted')))::text) END AS list_version,
+      m.is_member AND EXISTS (
+        SELECT 1 FROM recurring_expenses r
+        WHERE r.group_id = g.id AND r.active AND r.next_date <= CURRENT_DATE
+      ) AS recurring_due
+    FROM (SELECT (SELECT id FROM viewer) AS viewer_id) v
+    LEFT JOIN groups g ON g.id = ${groupId}
+    CROSS JOIN LATERAL (
+      SELECT EXISTS (SELECT 1 FROM group_members gm WHERE gm.group_id = g.id AND gm.user_id = v.viewer_id) AS is_member
+    ) m`;
+  if (rows[0].viewer_id === null) throw new AuthError();
+  // Like requireUser, a confirmed session refreshes the owner cookie even when 404/403 follows.
+  await markSessionOwner(Number(rows[0].viewer_id));
+  return {
+    ...authorizedGroup(rows[0]),
+    versions: {
+      detail: rows[0].detail_version,
+      list: rows[0].list_version,
+      recurringDue: rows[0].recurring_due,
+    },
   };
 }
 

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { NeonQueryFunctionInTransaction } from "@neondatabase/serverless";
 import { sql } from "./db";
 import { computeShares, computeItemizedShares, fmtMoney, SplitMethod } from "./money";
 import { convert, CURRENCIES } from "./fx";
@@ -971,4 +972,20 @@ export async function materializeRecurring(groupId: number) {
       current = next;
     }
   }
+}
+
+// Expense reads run their access check and data queries as one read-only
+// snapshot in a single round trip; rows are returned only after the check passes.
+export const EXPENSE_READ = { isolationLevel: "RepeatableRead", readOnly: true } as const;
+
+export function expenseAccessQuery(tx: NeonQueryFunctionInTransaction<false, false>, expenseId: number, userId: number) {
+  return tx`
+    SELECT e.group_id,
+      EXISTS (SELECT 1 FROM group_members gm WHERE gm.group_id = e.group_id AND gm.user_id = ${userId}) AS is_member
+    FROM expenses e WHERE e.id = ${expenseId}`;
+}
+
+export function assertExpenseAccess(rows: Record<string, unknown>[]) {
+  if (rows.length === 0) notFound("Expense not found");
+  if (!rows[0].is_member) forbidden();
 }
