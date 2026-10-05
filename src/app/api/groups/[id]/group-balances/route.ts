@@ -12,7 +12,7 @@ type Ctx = { params: Promise<{ id: string }> };
 export const GET = handler(async (req: NextRequest, { params }: Ctx) => {
   const user = await requireUser();
   const groupId = parseGroupId((await params).id);
-  const { versions } = await requireGroupMemberVersions(groupId, user.id);
+  const { versions } = await requireGroupMemberVersions(groupId, { userId: user.id });
   const rawLimit = req.nextUrl.searchParams.get("limit");
   const requested = rawLimit === null || rawLimit.trim() === "" ? 50 : Number(rawLimit);
   if (!Number.isSafeInteger(requested)) badRequest("Invalid page limit");

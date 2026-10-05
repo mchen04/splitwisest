@@ -125,8 +125,28 @@ export async function getSessionUser(): Promise<SessionUser | null> {
     WHERE s.token = ${token} AND s.expires_at > now() AND u.deleted_at IS NULL`;
   if (rows.length === 0) return null;
   const r = rows[0];
-  if (store.get(CACHE_OWNER_COOKIE)?.value !== String(r.id)) {
-    store.set(CACHE_OWNER_COOKIE, String(r.id), {
+  await markSessionOwner(Number(r.id));
+  return {
+    id: Number(r.id),
+    username: r.username,
+    displayName: r.display_name,
+    inviteCode: r.invite_code,
+  };
+}
+
+// Polling routes fold the session check (same token, expiry, and deleted-user
+// rules as getSessionUser) into their own statement. They read the token here,
+// fail with 401 when it is missing, and call markSessionOwner on success.
+export async function requireSessionToken(): Promise<string> {
+  const token = (await cookies()).get(SESSION_COOKIE)?.value;
+  if (!token) throw new AuthError();
+  return token;
+}
+
+export async function markSessionOwner(userId: number) {
+  const store = await cookies();
+  if (store.get(CACHE_OWNER_COOKIE)?.value !== String(userId)) {
+    store.set(CACHE_OWNER_COOKIE, String(userId), {
       httpOnly: false,
       sameSite: "lax",
       secure: process.env.NODE_ENV === "production",
@@ -134,12 +154,6 @@ export async function getSessionUser(): Promise<SessionUser | null> {
       path: "/",
     });
   }
-  return {
-    id: Number(r.id),
-    username: r.username,
-    displayName: r.display_name,
-    inviteCode: r.invite_code,
-  };
 }
 
 export async function requireUser(): Promise<SessionUser> {

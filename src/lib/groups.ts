@@ -1,6 +1,6 @@
 import { sql } from "./db";
 import { forbidden, notFound } from "./api";
-import { newInviteCode, SessionUser } from "./auth";
+import { AuthError, markSessionOwner, newInviteCode, SessionUser } from "./auth";
 
 export interface AuthorizedGroup {
   id: number;
@@ -29,7 +29,7 @@ export async function requireGroupMember(groupId: number, userId: number): Promi
 }
 
 function authorizedGroup(row: Record<string, unknown> | undefined): AuthorizedGroup {
-  if (!row) notFound();
+  if (!row || row.id === null) notFound();
   if (!row.is_member) forbidden("You are not a member of this group");
   return {
     id: Number(row.id),
@@ -49,12 +49,22 @@ export interface GroupVersions {
 // Membership check plus fingerprints of everything the group detail and the
 // group-balance list return, read in one statement. Routes read their data
 // after this snapshot, so a response's fingerprint never runs ahead of its data.
+// A polling caller passes its session token instead of a user, and the session
+// check (401 before 404/403) runs in the same statement.
 export async function requireGroupMemberVersions(
   groupId: number,
-  userId: number,
+  viewer: { userId: number } | { token: string },
 ): Promise<AuthorizedGroup & { versions: GroupVersions }> {
+  const userId = "userId" in viewer ? viewer.userId : null;
+  const token = "token" in viewer ? viewer.token : null;
   const rows = await sql`
-    SELECT g.id, g.name, g.currency, g.invite_code, g.created_by, m.is_member,
+    WITH viewer AS (
+      SELECT ${userId}::bigint AS id WHERE ${userId}::bigint IS NOT NULL
+      UNION ALL
+      SELECT s.user_id FROM sessions s JOIN users u ON u.id = s.user_id
+      WHERE s.token = ${token}::text AND s.expires_at > now() AND u.deleted_at IS NULL
+    )
+    SELECT v.viewer_id, g.id, g.name, g.currency, g.invite_code, g.created_by, m.is_member,
       CASE WHEN m.is_member THEN md5(jsonb_build_array(g.name, g.currency, g.invite_code, g.created_by,
         (SELECT jsonb_agg(jsonb_build_array(u.id, u.display_name, u.username) ORDER BY u.id)
          FROM group_members gm JOIN users u ON u.id = gm.user_id WHERE gm.group_id = g.id),
@@ -69,11 +79,14 @@ export async function requireGroupMemberVersions(
         SELECT 1 FROM recurring_expenses r
         WHERE r.group_id = g.id AND r.active AND r.next_date <= CURRENT_DATE
       ) AS recurring_due
-    FROM groups g
+    FROM (SELECT (SELECT id FROM viewer) AS viewer_id) v
+    LEFT JOIN groups g ON g.id = ${groupId}
     CROSS JOIN LATERAL (
-      SELECT EXISTS (SELECT 1 FROM group_members gm WHERE gm.group_id = g.id AND gm.user_id = ${userId}) AS is_member
-    ) m
-    WHERE g.id = ${groupId}`;
+      SELECT EXISTS (SELECT 1 FROM group_members gm WHERE gm.group_id = g.id AND gm.user_id = v.viewer_id) AS is_member
+    ) m`;
+  if (rows[0].viewer_id === null) throw new AuthError();
+  // Like requireUser, a confirmed session refreshes the owner cookie even when 404/403 follows.
+  if (token !== null) await markSessionOwner(Number(rows[0].viewer_id));
   return {
     ...authorizedGroup(rows[0]),
     versions: {
