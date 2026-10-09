@@ -99,13 +99,15 @@ export function SettleModal({
       <form onSubmit={submit} className="space-y-3">
         {prefill && !existing ? (
           <div className="rounded-xl bg-subtle px-3 py-2.5">
+            {/* Read from the suggestion itself: the form fields fill in an effect,
+                so they would show the previous payment for one frame. */}
             <p className="text-body text-ink-soft">
-              <strong className="text-ink">{payerId === meId ? "You" : nameOf(payerId)}</strong>
-              {payerId === meId ? " pay " : " pays "}
-              <strong className="text-ink">{recipientId === meId ? "you" : nameOf(recipientId)}</strong>
+              <strong className="text-ink">{prefill.payerId === meId ? "You" : nameOf(prefill.payerId)}</strong>
+              {prefill.payerId === meId ? " pay " : " pays "}
+              <strong className="text-ink">{prefill.recipientId === meId ? "you" : nameOf(prefill.recipientId)}</strong>
             </p>
-            <p className={`tnum text-amount font-semibold tracking-tight ${payerId === meId ? "text-owe" : recipientId === meId ? "text-owed" : "text-ink"}`}>
-              {fmtMoney(amountInputToCents(amount) ?? 0, currency)}
+            <p className={`tnum text-amount font-semibold tracking-tight ${prefill.payerId === meId ? "text-owe" : prefill.recipientId === meId ? "text-owed" : "text-ink"}`}>
+              {fmtMoney(prefill.amountCents, defaultCurrency)}
             </p>
             {onCustom && (
               <button type="button" onClick={onCustom} className="-ml-1 mt-0.5 inline-flex min-h-[var(--control-h-sm)] items-center rounded-lg px-1 text-body font-medium text-accent hover:bg-accent-soft">
