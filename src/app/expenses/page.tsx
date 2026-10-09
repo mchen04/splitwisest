@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Receipt, Search, SlidersHorizontal, X } from "lucide-react";
 import { fmtMoney, fmtDate, useApiData, useFilters } from "@/lib/client";
 import { AppShell } from "@/components/shell";
-import { Card, EmptyState, Input, Select, Button, Chip, DateField, RowMeta, RowTitle, SectionLabel } from "@/components/ui";
+import { Card, EmptyState, Input, Select, Button, Chip, DateField, LoadError, RowMeta, RowTitle, SectionLabel } from "@/components/ui";
 
 interface Expense {
   id: number;
@@ -44,7 +44,7 @@ export default function ExpensesPage() {
   if (filters.from) params.set("from", filters.from);
   if (filters.to) params.set("to", filters.to);
   params.set("limit", String(limit));
-  const { data } = useApiData<{ expenses: Expense[]; hasMore: boolean }>(`/api/expenses?${params}`, filters.q.trim() ? 250 : 0);
+  const { data, error, reload } = useApiData<{ expenses: Expense[]; hasMore: boolean }>(`/api/expenses?${params}`, filters.q.trim() ? 250 : 0);
   const expenses = data?.expenses ?? null;
   const hasMore = data?.hasMore ?? false;
   const { data: groupsData } = useApiData<{ groups: { id: number; name: string }[] }>("/api/groups", 0, { sync: false });
@@ -108,7 +108,9 @@ export default function ExpensesPage() {
 
       <Card className="flex flex-col md:min-h-0 md:flex-1">
         <div className="md:min-h-0 md:flex-1 md:overflow-y-auto">
-        {expenses === null ? (
+        {expenses === null && error ? (
+          <LoadError what="expenses" message={error} onRetry={reload} />
+        ) : expenses === null ? (
           <div className="space-y-2 p-3">{[...Array(5)].map((_, i) => <div key={i} className="skeleton h-12 w-full" />)}</div>
         ) : expenses.length === 0 ? (
           <EmptyState

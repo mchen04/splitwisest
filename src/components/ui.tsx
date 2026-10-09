@@ -539,6 +539,19 @@ export function EmptyState({ icon, title, hint, action }: { icon?: ReactNode; ti
   );
 }
 
+/** A list that could not load: says so, and offers the retry in place. */
+export function LoadError({ what, message, onRetry }: { what: string; message?: string | null; onRetry: () => void }) {
+  const offline = typeof navigator !== "undefined" && navigator.onLine === false;
+  return (
+    <div role="alert" className="flex flex-col items-center gap-1.5 px-6 py-8 text-center">
+      <AlertCircle className="h-6 w-6 text-danger" aria-hidden />
+      <p className="text-row font-medium">Could not load {what}</p>
+      <p className="max-w-sm text-body text-ink-faint">{offline ? "You are offline. Reconnect, then try again." : message || "Check your connection and try again."}</p>
+      <Button className="mt-2" variant="secondary" onClick={onRetry}>Try again</Button>
+    </div>
+  );
+}
+
 export function ErrorNote({ message }: { message: string | null }) {
   if (!message) return null;
   return (

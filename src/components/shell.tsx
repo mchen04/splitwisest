@@ -2,10 +2,10 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { ReactNode, useEffect, useState } from "react";
+import { ReactNode, useEffect, useState, useSyncExternalStore } from "react";
 import {
   LayoutDashboard, Users, Scale, Receipt, LogOut, Wallet,
-  MessageSquare, ScrollText, Moon, Sun, Plus, ChevronDown, Bell,
+  MessageSquare, ScrollText, Moon, Sun, Plus, ChevronDown, Bell, WifiOff,
 } from "lucide-react";
 import { api, useApiData, useMe, useUnread, type Unread } from "@/lib/client";
 import { useTheme } from "@/lib/theme";
@@ -24,6 +24,17 @@ interface GroupRef {
 }
 
 type BadgeKey = keyof Unread;
+
+const subscribeOnline = (listener: () => void) => {
+  window.addEventListener("online", listener);
+  window.addEventListener("offline", listener);
+  return () => { window.removeEventListener("online", listener); window.removeEventListener("offline", listener); };
+};
+
+/** True while the browser reports no connection. */
+function useOffline() {
+  return useSyncExternalStore(subscribeOnline, () => !navigator.onLine, () => false);
+}
 
 const NAV: { href: string; label: string; icon: typeof LayoutDashboard; badge?: BadgeKey }[] = [
   { href: "/", label: "Home", icon: LayoutDashboard },
@@ -90,6 +101,7 @@ export function AppShell({ title, children }: { title?: string; children: ReactN
   const groups = groupsData?.groups ?? [];
   const currentGroupId = pathname.match(/^\/groups\/(\d+)/)?.[1];
   const isChatPage = pathname === "/chat";
+  const offline = useOffline();
   const [quickAdd, setQuickAdd] = useState<{ step: "closed" | "pick" | "form"; groupId: number | null }>({ step: "closed", groupId: null });
 
   useEffect(() => {
@@ -255,6 +267,12 @@ export function AppShell({ title, children }: { title?: string; children: ReactN
       <main className={`px-4 pt-3 sm:px-6 md:ml-56 md:h-dvh md:overflow-y-auto md:pb-6 md:pt-6 lg:px-8 ${isChatPage ? "app-fixed flex min-h-0 flex-1 flex-col overflow-hidden" : "app-scroll pb-4"}`}>
         <div className={`mx-auto flex w-full max-w-6xl flex-col md:h-full md:min-h-0 ${isChatPage ? "min-h-0 flex-1" : ""}`}>
           {title && <h1 className="sr-only">{title}</h1>}
+          {offline && (
+            <p role="status" className="mb-2 flex items-center gap-2 rounded-lg bg-owe-soft px-3 py-2 text-body text-owe md:shrink-0">
+              <WifiOff className="h-4 w-4 shrink-0" aria-hidden />
+              You&rsquo;re offline. Saved data still shows; adding or changing anything needs a connection.
+            </p>
+          )}
           {children}
         </div>
       </main>

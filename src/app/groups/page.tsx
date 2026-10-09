@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { Plus, Users, KeyRound } from "lucide-react";
 import { api, useApiData, useFormState, CURRENCIES } from "@/lib/client";
 import { AppShell } from "@/components/shell";
-import { Card, EmptyState, Button, Modal, Field, Input, Select, ErrorNote, RowMeta, RowTitle } from "@/components/ui";
+import { Card, EmptyState, Button, Modal, Field, Input, Select, ErrorNote, LoadError, RowMeta, RowTitle } from "@/components/ui";
 import { GroupNet } from "@/components/group-net";
 
 interface Group {
@@ -21,7 +21,7 @@ interface Group {
 
 export default function GroupsPage() {
   const router = useRouter();
-  const { data } = useApiData<{ groups: Group[] }>("/api/groups");
+  const { data, error: loadError, reload } = useApiData<{ groups: Group[] }>("/api/groups");
   const groups = data?.groups ?? null;
   const [createOpen, setCreateOpen] = useState(false);
   const [joinOpen, setJoinOpen] = useState(false);
@@ -65,7 +65,9 @@ export default function GroupsPage() {
       </div>
       <div className="flex flex-col md:min-h-0 md:flex-1">
         <div className="md:min-h-0 md:flex-1 md:overflow-y-auto">
-        {groups === null ? (
+        {groups === null && loadError ? (
+          <Card><LoadError what="your groups" message={loadError} onRetry={reload} /></Card>
+        ) : groups === null ? (
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             {[...Array(3)].map((_, i) => (
               <div key={i} className="skeleton h-16 w-full" />

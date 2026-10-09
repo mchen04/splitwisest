@@ -5,7 +5,7 @@ import Link from "next/link";
 import { ScrollText } from "lucide-react";
 import { fmtTime, markRead, useApiData, useSync } from "@/lib/client";
 import { AppShell } from "@/components/shell";
-import { Card, EmptyState, Button, SectionLabel } from "@/components/ui";
+import { Card, EmptyState, Button, LoadError, SectionLabel } from "@/components/ui";
 import { ActivitySummary } from "@/components/activity-summary";
 
 // Calendar-day bucket for the feed, so events scan by day instead of as one wall.
@@ -39,7 +39,7 @@ interface Activity {
 
 export default function ActivityPage() {
   const [limit, setLimit] = useState(50);
-  const { data, reload } = useApiData<{ activity: Activity[]; hasMore: boolean }>(
+  const { data, error, reload } = useApiData<{ activity: Activity[]; hasMore: boolean }>(
     `/api/activity?limit=${limit}`, 0, { sync: false }
   );
   const activity = data?.activity ?? null;
@@ -57,7 +57,9 @@ export default function ActivityPage() {
     <AppShell title="Activity">
       <Card className="flex flex-col md:min-h-0 md:flex-1">
         <div className="md:min-h-0 md:flex-1 md:overflow-y-auto">
-          {activity === null ? (
+          {activity === null && error ? (
+            <LoadError what="activity" message={error} onRetry={reload} />
+          ) : activity === null ? (
             <div className="space-y-2 p-3">{[...Array(6)].map((_, i) => <div key={i} className="skeleton h-8 w-full" />)}</div>
           ) : activity.length === 0 ? (
             <EmptyState icon={<ScrollText className="h-6 w-6" />} title="Nothing yet" hint="Expenses, payments, and group changes will show up here." />

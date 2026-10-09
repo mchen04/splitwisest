@@ -6,7 +6,7 @@ import { Users, ScrollText, Bell, Search, Scale } from "lucide-react";
 import { fmtMoney, fmtTime, useApiData, useMe, useSync, useUnread } from "@/lib/client";
 import { ActivitySummary } from "@/components/activity-summary";
 import { AppShell } from "@/components/shell";
-import { Card, CardHeader, Money, EmptyState, Avatar, HeaderLink, RowMeta, RowTitle } from "@/components/ui";
+import { Card, CardHeader, Money, EmptyState, Avatar, HeaderLink, LoadError, RowMeta, RowTitle } from "@/components/ui";
 import { DirectSettleModal } from "@/components/direct-settle-modal";
 import { FriendBalanceRow, sortByUrgency, useRemind, type FriendWithBalances } from "@/components/friend-balances";
 import { GroupNet } from "@/components/group-net";
@@ -45,9 +45,9 @@ const SETTLE_PREVIEW = 6;
 export default function Dashboard() {
   const me = useMe();
   const unread = useUnread();
-  const { data: groupsData, reload: reloadGroups } = useApiData<{ groups: Group[] }>("/api/groups", 0, { sync: false });
-  const { data: friendsData, reload: reloadFriends } = useApiData<{ friends: Friend[] }>("/api/friends", 0, { sync: false });
-  const { data: activityData, reload: reloadActivity } = useApiData<{ activity: Activity[] }>("/api/activity", 0, { sync: false });
+  const { data: groupsData, error: groupsError, reload: reloadGroups } = useApiData<{ groups: Group[] }>("/api/groups", 0, { sync: false });
+  const { data: friendsData, error: friendsError, reload: reloadFriends } = useApiData<{ friends: Friend[] }>("/api/friends", 0, { sync: false });
+  const { data: activityData, error: activityError, reload: reloadActivity } = useApiData<{ activity: Activity[] }>("/api/activity", 0, { sync: false });
   const groups = groupsData?.groups ?? null;
   const friends = friendsData?.friends ?? null;
   const activity = activityData?.activity ?? null;
@@ -118,7 +118,9 @@ export default function Dashboard() {
             </div>
           )}
         </div>
-        {friends === null ? (
+        {friends === null && friendsError ? (
+          <p role="alert" className="text-body text-ink-soft">Your balance could not load. <button type="button" onClick={reloadFriends} className="inline-flex min-h-[var(--control-h-sm)] items-center font-semibold text-accent">Try again</button></p>
+        ) : friends === null ? (
           // Reserve the loaded hero's footprint so data arriving does not shift the page.
           <div className="mt-1 space-y-2">
             <div className="skeleton h-10 w-44" />
@@ -164,7 +166,9 @@ export default function Dashboard() {
             meta={withBalances.length > 0 ? `${withBalances.length} ${withBalances.length === 1 ? "friend" : "friends"}` : undefined}
             action={<HeaderLink href="/balances">All balances</HeaderLink>}
           />
-          {friends === null ? (
+          {friends === null && friendsError ? (
+            <LoadError what="balances" message={friendsError} onRetry={reloadFriends} />
+          ) : friends === null ? (
             <SkeletonRows n={3} />
           ) : friends.length === 0 ? (
             <EmptyState
@@ -199,7 +203,9 @@ export default function Dashboard() {
         <div className="grid grid-cols-1 gap-3">
           <Card>
             <CardHeader title="Your groups" action={<HeaderLink href="/groups">All groups</HeaderLink>} />
-            {groups === null ? (
+            {groups === null && groupsError ? (
+              <LoadError what="your groups" message={groupsError} onRetry={reloadGroups} />
+            ) : groups === null ? (
               <SkeletonRows n={3} />
             ) : groups.length === 0 ? (
               <EmptyState
@@ -232,7 +238,9 @@ export default function Dashboard() {
 
           <Card>
             <CardHeader title="Recent activity" action={<HeaderLink href="/activity">View all</HeaderLink>} />
-            {activity === null ? (
+            {activity === null && activityError ? (
+              <LoadError what="recent activity" message={activityError} onRetry={reloadActivity} />
+            ) : activity === null ? (
               <SkeletonRows n={4} />
             ) : activityPeek.length === 0 ? (
               <EmptyState
