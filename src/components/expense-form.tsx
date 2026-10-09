@@ -359,7 +359,7 @@ export function ExpenseForm({
           ? "You are offline. Reconnect and try again."
           : err instanceof ApiClientError ? err.message : "Receipt upload failed";
         onSaved();
-        rememberExpenseGroup(groupId);
+        if (createdNewExpense) rememberExpenseGroup(groupId);
         if (createdNewExpense) {
           onClose();
           toast(`Expense saved, but receipt upload failed: ${message}`, { tone: "error" });
@@ -370,7 +370,7 @@ export function ExpenseForm({
         return;
       }
       onSaved();
-      rememberExpenseGroup(groupId);
+      if (createdNewExpense) rememberExpenseGroup(groupId);
       if (createdNewExpense && onCreated) onCreated({ id: expenseId, title: body.title });
       else toast(createdNewExpense ? "Expense added" : "Expense updated");
       onClose();

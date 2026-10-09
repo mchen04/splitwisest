@@ -246,7 +246,7 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
     }
   }
 
-  async function deleteExpense(expense: Expense) {
+  async function deleteExpense(expense: Pick<Expense, "id" | "title" | "amountCents" | "currency" | "updatedAt">) {
     if (!(await confirmAction({
       title: "Delete expense?",
       message: <>Delete <strong className="text-ink">{expense.title}</strong> ({fmtMoney(expense.amountCents, expense.currency)})? Balances will update for everyone. This can&apos;t be undone.</>,
@@ -962,10 +962,9 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
           open={detailId !== null}
           onClose={() => setDetailId(null)}
           onEdit={(eid) => { setDetailId(null); openEdit(eid); }}
-          onDelete={(eid) => {
-            const exp = expenses?.find((x) => x.id === eid) ?? null;
+          onDelete={(expense) => {
             setDetailId(null);
-            if (exp) void deleteExpense(exp);
+            void deleteExpense(expense);
           }}
         />
       )}

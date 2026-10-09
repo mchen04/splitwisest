@@ -59,7 +59,8 @@ export function ExpenseDetailModal({
   open: boolean;
   onClose: () => void;
   onEdit: (id: number) => void;
-  onDelete: (id: number) => void;
+  /** Receives the loaded record, so delete works even when the list page does not hold it. */
+  onDelete: (expense: { id: number; title: string; amountCents: number; currency: string; updatedAt: string }) => void;
 }) {
   const enabled = open && expenseId !== null;
   const { data: detailData } = useApiData<{ expense: Detail }>(
@@ -110,7 +111,7 @@ export function ExpenseDetailModal({
       footer={detail && (
         // Kept outside the scrolling body so Edit and Delete never sit below a long thread.
         <>
-          <Button variant="danger" onClick={() => onDelete(detail.id)}>
+          <Button variant="danger" onClick={() => onDelete(detail)}>
             <Trash2 className="h-4 w-4" /> Delete
           </Button>
           <Button variant="secondary" onClick={() => onEdit(detail.id)}>
