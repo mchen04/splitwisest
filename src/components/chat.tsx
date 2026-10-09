@@ -173,25 +173,25 @@ export function ChatPane({
 
   return (
     <div className={`flex flex-col md:h-full md:min-h-0 ${fill ? "min-h-0 flex-1" : "h-[28rem]"}`}>
-      <div className="border-b border-line px-3 py-2">
+      <div className="border-b border-line px-3 py-1.5">
         <div className="relative">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-faint" />
           <Input
             value={query}
             onChange={(e) => runSearch(e.target.value)}
             placeholder="Search messages"
-            className="!min-h-[var(--control-h-sm)] !py-1.5 pl-8"
+            className="!min-h-[var(--control-h-sm)] !py-1 pl-8"
             aria-label="Search messages"
           />
         </div>
       </div>
-      <div ref={scroller} className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
+      <div ref={scroller} className="min-h-0 flex-1 space-y-2.5 overflow-y-auto px-3 py-3 sm:px-4">
         {hasMoreOlder && !searching && messages && messages.length > 0 && (
           <div className="text-center">
             <button
               onClick={loadEarlier}
               disabled={loadingOlder}
-              className="rounded-full border border-line px-3 py-1 text-xs font-medium text-ink-soft hover:border-accent disabled:opacity-50"
+              className="min-h-[var(--control-h-sm)] rounded-full border border-line px-3 text-body font-medium text-ink-soft hover:border-accent disabled:opacity-50"
             >
               {loadingOlder ? "Loading…" : "Load earlier messages"}
             </button>
@@ -204,25 +204,25 @@ export function ChatPane({
             ))}
           </div>
         ) : messages.length === 0 ? (
-          <p className="py-10 text-center text-sm text-ink-faint">{searching ? "No messages match." : emptyHint}</p>
+          <p className="py-10 text-center text-body text-ink-faint">{searching ? "No messages match." : emptyHint}</p>
         ) : (
           messages.map((m, index) => {
             const mine = m.senderId === meId;
             const showTimestamp = startsMessageBurst(m.createdAt, messages[index - 1]?.createdAt);
             return (
               <div key={m.id} className={showTimestamp ? "space-y-3" : ""}>
-                {showTimestamp && <p className="text-center text-xs text-ink-faint">{fmtTime(m.createdAt)}</p>}
+                {showTimestamp && <p className="text-center text-meta text-ink-faint">{fmtTime(m.createdAt)}</p>}
                 <div className={`flex items-end gap-2 ${mine ? "flex-row-reverse" : ""}`}>
                   {!mine && <Avatar name={m.senderName} size="sm" />}
                   <div className={`max-w-[78%] ${mine ? "text-right" : ""}`}>
                     <div
-                      className={`inline-block rounded-2xl px-3.5 py-2 text-left text-sm leading-relaxed ${
+                      className={`inline-block rounded-2xl px-3.5 py-2 text-left text-row ${
                         mine ? "rounded-br-md bg-accent text-on-accent" : "rounded-bl-md bg-subtle text-ink"
                       }`}
                     >
                       <MessageBody text={m.body} mine={mine} />
                     </div>
-                    {!mine && <p className="mt-0.5 text-xs font-medium text-ink-faint">{m.senderName}</p>}
+                    {!mine && <p className="mt-0.5 text-meta font-medium text-ink-faint">{m.senderName}</p>}
                   </div>
                 </div>
               </div>
@@ -230,7 +230,7 @@ export function ChatPane({
           })
         )}
       </div>
-      <form onSubmit={send} className="flex items-center gap-2 border-t border-line px-3 py-2">
+      <form onSubmit={send} className="flex items-center gap-2 border-t border-line px-3 py-1.5">
         <Input
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
@@ -243,7 +243,11 @@ export function ChatPane({
           type="submit"
           disabled={!draft.trim() || sending}
           aria-label="Send"
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-accent text-on-accent transition-colors hover:bg-accent-dark disabled:opacity-40"
+          // Keep focus in the message field. On a phone a tap that blurred it
+          // brought the bottom navigation back mid-tap, the composer jumped up,
+          // and the tap landed beside Send instead of on it.
+          onMouseDown={(e) => e.preventDefault()}
+          className="flex h-[var(--control-h)] w-[var(--control-h)] shrink-0 items-center justify-center rounded-lg bg-accent text-on-accent transition-colors hover:bg-accent-dark disabled:opacity-40"
         >
           <SendHorizonal className="h-4.5 w-4.5" />
         </button>

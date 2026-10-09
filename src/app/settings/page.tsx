@@ -6,7 +6,7 @@ import { Copy, Check, KeyRound, LogOut, ShieldCheck, UserCog, Palette, Moon, Sun
 import { api, useApiData, useFormState } from "@/lib/client";
 import { useTheme } from "@/lib/theme";
 import { AppShell } from "@/components/shell";
-import { Card, CardHeader, Button, Field, Input, ErrorNote } from "@/components/ui";
+import { Card, CardHeader, Button, Field, Input, ErrorNote, Segmented, confirmAction } from "@/components/ui";
 import { NotificationSettingsCard } from "@/components/notification-settings";
 
 interface Me {
@@ -31,18 +31,18 @@ export default function SettingsPage() {
     <AppShell title="Settings">
       {/* Two balanced columns so everything fits one screen on desktop. */}
       <div className="md:min-h-0 md:flex-1 md:overflow-y-auto md:pb-2">
-        <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-2">
-          <div className="space-y-4">
+        <div className="grid grid-cols-1 items-start gap-3 lg:grid-cols-2">
+          <div className="space-y-3">
             <ProfileCard me={me} onSaved={setSavedMe} />
             <AppearanceCard />
-            <Card className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
-              <p className="font-medium">Log out</p>
+            <Card className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5">
+              <p className="text-row font-medium">{me ? <>Signed in as <span className="font-semibold">@{me.username}</span></> : "Account"}</p>
               <Button variant="danger" onClick={logout}>
                 <LogOut className="h-4 w-4" /> Log out
               </Button>
             </Card>
           </div>
-          <div className="space-y-4">
+          <div className="space-y-3">
             <NotificationSettingsCard />
             <PasswordCard />
             <RecoveryCard />
@@ -59,12 +59,17 @@ function AppearanceCard() {
   return (
     <Card>
       <CardHeader title={<span className="flex items-center gap-2"><Palette className="h-4 w-4" /> Appearance</span>} />
-      <div className="flex flex-wrap items-center justify-between gap-3 p-4">
-        <p className="font-medium">Dark mode</p>
-        <Button variant="secondary" onClick={toggle}>
-          {dark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-          {dark ? "Switch to light" : "Switch to dark"}
-        </Button>
+      <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+        <p className="text-row font-medium">Theme</p>
+        <Segmented
+          label="Theme"
+          value={dark ? "dark" : "light"}
+          onChange={(value) => { if ((value === "dark") !== dark) toggle(); }}
+          options={[
+            { value: "light", label: <span className="flex items-center gap-1.5"><Sun className="h-4 w-4" /> Light</span> },
+            { value: "dark", label: <span className="flex items-center gap-1.5"><Moon className="h-4 w-4" /> Dark</span> },
+          ]}
+        />
       </div>
     </Card>
   );
@@ -99,7 +104,7 @@ function ProfileCard({ me, onSaved }: { me: Me | null; onSaved: (m: Me) => void 
   return (
     <Card>
       <CardHeader title={<span className="flex items-center gap-2"><UserCog className="h-4 w-4" /> Profile</span>} />
-      <form onSubmit={submit} className="space-y-3 p-4">
+      <form onSubmit={submit} className="space-y-3 px-4 py-3">
         <Field label="Display name">
           <Input value={displayName} onChange={(e) => setDisplayName(e.target.value)} required maxLength={50} disabled={!me} />
         </Field>
@@ -109,7 +114,7 @@ function ProfileCard({ me, onSaved }: { me: Me | null; onSaved: (m: Me) => void 
         <ErrorNote message={error} />
         <div className="flex items-center gap-3">
           <Button type="submit" busy={busy} disabled={!me}>Save profile</Button>
-          {done && <span className="flex items-center gap-1 text-sm text-owed"><Check className="h-4 w-4" /> Saved</span>}
+          {done && <span role="status" className="flex items-center gap-1 text-body text-owed"><Check className="h-4 w-4" /> Saved</span>}
         </div>
       </form>
     </Card>
@@ -138,11 +143,11 @@ function PasswordCard() {
   return (
     <Card>
       <CardHeader title={<span className="flex items-center gap-2"><KeyRound className="h-4 w-4" /> Password</span>} />
-      <form onSubmit={submit} className="space-y-3 p-4">
+      <form onSubmit={submit} className="space-y-3 px-4 py-3">
         <Field label="Current password">
           <Input type="password" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} required autoComplete="current-password" />
         </Field>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Field label="New password">
             <Input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} required autoComplete="new-password" />
           </Field>
@@ -153,7 +158,7 @@ function PasswordCard() {
         <ErrorNote message={error} />
         <div className="flex items-center gap-3">
           <Button type="submit" busy={busy}>Change password</Button>
-          {done && <span className="flex items-center gap-1 text-sm text-owed"><Check className="h-4 w-4" /> Password changed</span>}
+          {done && <span role="status" className="flex items-center gap-1 text-body text-owed"><Check className="h-4 w-4" /> Password changed</span>}
         </div>
       </form>
     </Card>
@@ -169,12 +174,19 @@ function RecoveryCard() {
   const { error, busy, run } = useFormState();
 
   function regenerate() {
-    if (codes && !window.confirm("Generate new recovery codes? Your old codes will stop working.")) return;
-    run(async () => {
+    void (async () => {
+      if (codes && !(await confirmAction({
+        title: "Generate new codes?",
+        message: "Your old recovery codes will stop working.",
+        confirmLabel: "Generate new codes",
+        danger: true,
+      }))) return;
+      run(async () => {
       const r = await api<{ codes: string[] }>("/api/me/recovery-codes", { method: "POST" });
       setCodes(r.codes);
       setGeneratedRemaining(r.codes.length);
-    }, "Could not generate recovery codes");
+      }, "Could not generate recovery codes");
+    })();
   }
 
   function copyCodes() {
@@ -188,24 +200,24 @@ function RecoveryCard() {
   return (
     <Card>
       <CardHeader title={<span className="flex items-center gap-2"><ShieldCheck className="h-4 w-4" /> Account recovery</span>} />
-      <div className="space-y-3 p-4">
-        <p className="text-sm text-ink-soft">
+      <div className="space-y-3 px-4 py-3">
+        <p className="text-body text-ink-soft">
           Recovery codes let you reset your password if you forget it. Store them somewhere safe — each code works once.
         </p>
         {codes ? (
           <div className="rounded-lg border border-line bg-subtle p-3">
-            <div className="grid grid-cols-2 gap-x-6 gap-y-1 font-mono text-sm">
+            <div className="grid grid-cols-2 gap-x-6 gap-y-1 font-mono text-body">
               {codes.map((c) => <span key={c}>{c}</span>)}
             </div>
             <div className="mt-3 flex items-center gap-3">
               <Button variant="secondary" onClick={copyCodes}>
                 {copied ? <Check className="h-4 w-4 text-owed" /> : <Copy className="h-4 w-4" />} Copy codes
               </Button>
-              <span className="text-xs text-ink-faint">These won&apos;t be shown again.</span>
+              <span className="text-meta text-ink-faint">These won&apos;t be shown again.</span>
             </div>
           </div>
         ) : (
-          <p className="text-sm text-ink-faint">
+          <p className="text-body text-ink-faint">
             {remaining === null ? "Checking…" : remaining > 0
               ? `You have ${remaining} unused recovery ${remaining === 1 ? "code" : "codes"}.`
               : "You have no recovery codes yet."}

@@ -10,7 +10,7 @@ export interface ActivitySummaryData {
 
 export function ActivitySummary({ activity }: { activity: ActivitySummaryData }) {
   return (
-    <p className="text-sm leading-snug">
+    <p className="text-body leading-snug">
       <Link href={`/people/${activity.actorId}`} className="font-medium hover:text-accent-dark hover:underline">
         {activity.actorName}
       </Link>

@@ -8,7 +8,11 @@ export interface UiTokenViolation {
   match: string;
 }
 
-const RULES: { name: string; pattern: RegExp; componentsOnly?: boolean }[] = [
+// The shared primitives own the raw ramp (inputs need 16px on phones and 14px
+// from sm up to stop iOS zooming). Everything else names a type role.
+const PRIMITIVES = /(?:^|\/)components\/ui\.tsx$/;
+
+const RULES: { name: string; pattern: RegExp; componentsOnly?: boolean; skip?: RegExp }[] = [
   {
     name: "arbitrary pixel class",
     pattern: /\b[a-z-]+-\[[^\]]*\d+(?:\.\d+)?px[^\]]*\]/g,
@@ -34,6 +38,14 @@ const RULES: { name: string; pattern: RegExp; componentsOnly?: boolean }[] = [
     pattern: /\btext-lg\b/g,
     componentsOnly: true,
   },
+  {
+    // Screens use type roles (meta, body, row, section, title, amount,
+    // amount-lg, hero) so the same job always gets the same size.
+    name: "raw type size (use a type role)",
+    pattern: /\btext-(?:xs|sm|base|xl|2xl|3xl|4xl)\b/g,
+    componentsOnly: true,
+    skip: PRIMITIVES,
+  },
 ];
 
 export function findUiTokenViolations(source: string, file = "component.tsx"): UiTokenViolation[] {
@@ -41,6 +53,7 @@ export function findUiTokenViolations(source: string, file = "component.tsx"): U
   const violations: UiTokenViolation[] = [];
   for (const rule of RULES) {
     if (rule.componentsOnly && !isComponent) continue;
+    if (rule.skip?.test(file)) continue;
     for (const match of source.matchAll(rule.pattern)) {
       const index = match.index ?? 0;
       const lineStart = source.lastIndexOf("\n", index) + 1;
@@ -52,6 +65,24 @@ export function findUiTokenViolations(source: string, file = "component.tsx"): U
         line: source.slice(0, index).split("\n").length,
         rule: rule.name,
         match: match[0],
+      });
+    }
+  }
+  if (isComponent) {
+    // A grid with no base column template sizes its one implicit column to
+    // content, so a long truncated name pushes the page sideways on a phone.
+    for (const match of source.matchAll(/className=(?:"([^"]*)"|\{`([^`]*)`\})/g)) {
+      const classes = match[1] ?? match[2] ?? "";
+      if (!/(?:^|\s)grid(?:\s|$)/.test(classes) || /(?:^|\s)grid-cols-/.test(classes)) continue;
+      const index = match.index ?? 0;
+      const lineStart = source.lastIndexOf("\n", index) + 1;
+      const lineEnd = source.indexOf("\n", index);
+      if (source.slice(lineStart, lineEnd === -1 ? source.length : lineEnd).includes("ui-token-allow")) continue;
+      violations.push({
+        file,
+        line: source.slice(0, index).split("\n").length,
+        rule: "grid without a base column template",
+        match: classes.slice(0, 60),
       });
     }
   }

@@ -2,12 +2,17 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Copy, Check, MessageSquare, UserPlus, UserMinus, HandCoins, Scale, Receipt, Bell, X, Search, UserRound } from "lucide-react";
-import { api, ApiClientError, fmtMoney, fmtTime, useApiData, useFormState, useMe } from "@/lib/client";
+import { useRouter } from "next/navigation";
+import { Copy, MessageSquare, UserPlus, UserMinus, HandCoins, Scale, Receipt, Bell, X, Search, UserRound } from "lucide-react";
+import { api, ApiClientError, fmtTime, useApiData, useFormState, useMe } from "@/lib/client";
 import { AppShell } from "@/components/shell";
-import { Card, CardHeader, EmptyState, Button, Avatar, Modal, Field, Input, ErrorNote, Menu, MenuItem } from "@/components/ui";
+import {
+  Card, CardHeader, EmptyState, Button, Avatar, Modal, Field, Input, ErrorNote, Menu, MenuItem, IconButton,
+  RowMeta, SectionLabel, toast, confirmAction,
+} from "@/components/ui";
 import { DirectPaymentsModal } from "@/components/direct-payments-modal";
 import { DirectSettleModal } from "@/components/direct-settle-modal";
+import { FriendBalanceRow, sortByUrgency, useRemind, type FriendWithBalances } from "@/components/friend-balances";
 import type { FriendObligation } from "@/lib/balances";
 
 interface Friend {
@@ -29,6 +34,7 @@ interface FriendRequest {
 
 interface Nudge {
   id: number;
+  fromId: number;
   fromName: string;
   groupName: string | null;
   note: string;
@@ -37,6 +43,7 @@ interface Nudge {
 }
 
 export default function BalancesPage() {
+  const router = useRouter();
   const { data, error: friendsError, reload } = useApiData<{
     friends: Friend[];
     incomingRequests: FriendRequest[];
@@ -47,16 +54,14 @@ export default function BalancesPage() {
   const incomingRequests = data?.incomingRequests ?? [];
   const outgoingRequests = data?.outgoingRequests ?? [];
   const inviteCode = data?.myInviteCode ?? "";
-  const [copied, setCopied] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
-  const [addNote, setAddNote] = useState<string | null>(null);
   const [code, setCode] = useState("");
-  const [settleChoice, setSettleChoice] = useState<{ friendId: number; preferredSign: -1 | 1 } | null>(null);
+  const [settle, setSettle] = useState<{ friendId: number; key?: string; sign: -1 | 1 } | null>(null);
   const [historyFriend, setHistoryFriend] = useState<Friend | null>(null);
-  const [nudgedId, setNudgedId] = useState<number | null>(null);
   const [query, setQuery] = useState("");
   const me = useMe();
   const { error, setError, busy, run } = useFormState();
+  const { remind, sentTo } = useRemind();
 
   const { data: nudgeData, reload: reloadNudges } =
     useApiData<{ nudges: Nudge[] }>("/api/nudges");
@@ -65,26 +70,17 @@ export default function BalancesPage() {
     const q = query.trim().toLowerCase();
     return !q || f.displayName.toLowerCase().includes(q) || f.username.toLowerCase().includes(q);
   });
-  const activeFriends = filteredFriends.filter((f) => f.obligations.length > 0);
+  const activeFriends = sortByUrgency(filteredFriends.filter((f) => f.obligations.length > 0));
   const settledFriends = filteredFriends.filter((f) => f.obligations.length === 0);
-  const settleFriend = friends?.find((friend) => friend.id === settleChoice?.friendId) ?? null;
-
-  async function nudge(f: Friend) {
-    try {
-      await api("/api/nudges", { body: { toId: f.id } });
-      setNudgedId(f.id);
-      setTimeout(() => setNudgedId((v) => (v === f.id ? null : v)), 2000);
-    } catch (err) {
-      window.alert(err instanceof ApiClientError ? err.message : "Could not send nudge");
-    }
-  }
+  const settleFriend = friends?.find((friend) => friend.id === settle?.friendId) ?? null;
+  const attention = incomingRequests.length + outgoingRequests.length + reminders.length;
 
   async function dismissReminder(id: number) {
     try {
       await api(`/api/nudges/${id}`, { method: "DELETE" });
       reloadNudges();
     } catch {
-      // ignore
+      // The reminder stays; the next refresh shows it again.
     }
   }
 
@@ -93,123 +89,149 @@ export default function BalancesPage() {
     run(async () => {
       const r = await api<{ status: string; displayName: string }>("/api/friends", { body: { code } });
       setCode(""); setAddOpen(false);
-      setAddNote(
-        r.status === "accepted"
-          ? `You and ${r.displayName} are now friends.`
-          : `Friend request sent to ${r.displayName}.`
-      );
-      setTimeout(() => setAddNote(null), 4000);
+      toast(r.status === "accepted" ? `You and ${r.displayName} are now friends` : `Friend request sent to ${r.displayName}`);
       reload();
     }, "Could not add friend");
   }
 
-  async function respondRequest(id: number, action: "accept" | "decline" | "cancel") {
+  async function respondRequest(request: FriendRequest, action: "accept" | "decline" | "cancel") {
     try {
-      await api("/api/friends/requests", { body: { requestId: id, action } });
+      await api("/api/friends/requests", { body: { requestId: request.id, action } });
+      if (action === "accept") toast(`You and ${request.displayName} are now friends`);
       reload();
     } catch (err) {
-      window.alert(err instanceof ApiClientError ? err.message : "Could not update request");
+      toast(err instanceof ApiClientError ? err.message : "Could not update request", { tone: "error" });
     }
   }
 
   function copyInviteLink() {
     const link = `${window.location.origin}/signup?invite=${inviteCode}`;
-    navigator.clipboard.writeText(link).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1800);
-    });
+    navigator.clipboard.writeText(link)
+      .then(() => toast("Invite link copied. Anyone who signs up with it becomes your friend."))
+      .catch(() => toast("Could not copy the invite link. Try again.", { tone: "error" }));
   }
 
   async function removeFriend(f: Friend) {
-    if (!window.confirm(`Remove ${f.displayName} from your friends? You'll need an invite code to reconnect.`)) return;
+    if (!(await confirmAction({
+      title: `Remove ${f.displayName}?`,
+      message: "You will need an invite code to reconnect.",
+      confirmLabel: "Remove friend",
+      danger: true,
+    }))) return;
     try {
       await api("/api/friends", { method: "DELETE", body: { friendId: f.id } });
+      toast(`${f.displayName} removed from friends`);
       reload();
     } catch (err) {
-      window.alert(err instanceof ApiClientError ? err.message : "Could not remove friend");
+      toast(err instanceof ApiClientError ? err.message : "Could not remove friend", { tone: "error" });
     }
   }
 
+  const friendMenu = (f: Friend) => {
+    const theyOweMe = f.obligations.some((item) => item.netCents > 0);
+    return (
+      <Menu label={`More actions for ${f.displayName}`} size="sm">
+        {theyOweMe && (
+          <MenuItem icon={<HandCoins className="h-4 w-4" />} onClick={() => setSettle({ friendId: f.id, sign: 1 })}>Record payment received</MenuItem>
+        )}
+        <MenuItem icon={<Receipt className="h-4 w-4" />} onClick={() => setHistoryFriend(f)}>Payment history</MenuItem>
+        <MenuItem icon={<MessageSquare className="h-4 w-4" />} onClick={() => router.push(`/chat?dm=${f.id}`)}>Chat</MenuItem>
+        <MenuItem icon={<UserRound className="h-4 w-4" />} onClick={() => router.push(`/people/${f.id}`)}>View profile</MenuItem>
+        {f.canRemoveFriend && (
+          <MenuItem icon={<UserMinus className="h-4 w-4" />} danger onClick={() => removeFriend(f)}>Remove friend</MenuItem>
+        )}
+      </Menu>
+    );
+  };
+
+  const renderRows = (list: Friend[]) => list.map((f) => (
+    <FriendBalanceRow
+      key={f.id}
+      friend={f}
+      showUsername
+      onSettle={(friend: FriendWithBalances, key) => setSettle({ friendId: friend.id, key, sign: -1 })}
+      onRemind={remind}
+      reminded={sentTo === f.id}
+      menu={friendMenu(f)}
+    />
+  ));
+
   return (
     <AppShell title="Balances">
-      {/* Invite — a shareable link, never a raw code on screen. */}
-      <Card className="mb-3 flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 md:shrink-0">
-        <p className="text-sm font-medium">Invite a friend</p>
-        <div className="flex gap-2">
-          <Button variant="secondary" onClick={copyInviteLink} disabled={!inviteCode}>
-            {copied ? <><Check className="h-4 w-4 text-owed" /> Copied</> : <><Copy className="h-4 w-4" /> Copy link</>}
-          </Button>
-          <Button onClick={() => { setAddOpen(true); setError(null); }}>
-            <UserPlus className="h-4 w-4" /> Add friend
-          </Button>
+      <div className="mb-3 flex flex-wrap items-center gap-2 md:shrink-0">
+        <div className="relative min-w-0 basis-full sm:basis-0 sm:flex-1">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-faint" />
+          <Input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search friends"
+            aria-label="Search friends"
+            className="pl-8"
+          />
         </div>
-      </Card>
+        <Button className="flex-1 sm:flex-none" onClick={() => { setAddOpen(true); setError(null); }}>
+          <UserPlus className="h-4 w-4" /> Add friend
+        </Button>
+        <Button variant="secondary" className="flex-1 sm:flex-none" onClick={copyInviteLink} disabled={!inviteCode}>
+          <Copy className="h-4 w-4" /> Copy invite link
+        </Button>
+      </div>
 
-      {addNote && (
-        <div className="mb-4 rounded-lg bg-owed-soft px-3 py-2 text-sm text-owed md:shrink-0">{addNote}</div>
-      )}
-
-      {(incomingRequests.length > 0 || outgoingRequests.length > 0) && (
-        <Card className="mb-4 md:shrink-0">
-          <CardHeader title={<span className="flex items-center gap-2"><UserPlus className="h-4 w-4 text-accent" /> Friend requests</span>} />
+      {attention > 0 && (
+        <Card className="mb-3 md:shrink-0">
+          <CardHeader title="Requests and reminders" meta={attention} />
           <ul className="divide-y divide-line">
             {incomingRequests.map((r) => (
-              <li key={`in-${r.id}`} className="flex flex-wrap items-center gap-3 px-4 py-2.5">
-                <Link href={`/people/${r.userId}`} aria-label={`Open ${r.displayName}'s profile`}>
-                  <Avatar name={r.displayName} size="sm" />
-                </Link>
-                <span className="min-w-0 flex-1 text-sm">
-                  <Link href={`/people/${r.userId}`} className="font-semibold hover:text-accent-dark hover:underline">
-                    {r.displayName}
-                  </Link>{" "}
-                  <span className="text-ink-faint">@{r.username}</span> wants to be friends
+              <li key={`in-${r.id}`} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2">
+                <Avatar name={r.displayName} />
+                <span className="min-w-0 flex-1 basis-48">
+                  <span className="block text-body">
+                    <Link href={`/people/${r.userId}`} className="font-semibold hover:text-accent-dark hover:underline">{r.displayName}</Link> wants to be friends
+                  </span>
+                  <RowMeta>@{r.username}</RowMeta>
                 </span>
-                <div className="flex gap-1.5">
-                  <Button onClick={() => respondRequest(r.id, "accept")}>Accept</Button>
-                  <Button variant="secondary" onClick={() => respondRequest(r.id, "decline")}>Decline</Button>
+                <div className="ml-auto flex gap-2">
+                  <Button size="sm" onClick={() => respondRequest(r, "accept")}>Accept</Button>
+                  <Button size="sm" variant="secondary" onClick={() => respondRequest(r, "decline")}>Decline</Button>
                 </div>
               </li>
             ))}
-            {outgoingRequests.map((r) => (
-              <li key={`out-${r.id}`} className="flex flex-wrap items-center gap-3 px-4 py-2.5">
-                <Link href={`/people/${r.userId}`} aria-label={`Open ${r.displayName}'s profile`}>
-                  <Avatar name={r.displayName} size="sm" />
-                </Link>
-                <span className="min-w-0 flex-1 text-sm">
-                  Request sent to{" "}
-                  <Link href={`/people/${r.userId}`} className="font-semibold hover:text-accent-dark hover:underline">
-                    {r.displayName}
-                  </Link>{" "}
-                  <span className="text-ink-faint">@{r.username}</span>
-                </span>
-                <Button variant="secondary" onClick={() => respondRequest(r.id, "cancel")}>Cancel</Button>
-              </li>
-            ))}
-          </ul>
-        </Card>
-      )}
-
-      {reminders.length > 0 && (
-        <Card className="mb-4 md:shrink-0">
-          <CardHeader title={<span className="flex items-center gap-2"><Bell className="h-4 w-4 text-accent" /> Reminders</span>} />
-          <ul className="divide-y divide-line">
-            {reminders.map((n) => (
-              <li key={n.id} className="flex items-center gap-3 px-4 py-2.5 text-sm">
-                <span className="min-w-0 flex-1">
-                  <span className="block">
-                    <strong>{n.fromName}</strong> nudged you to settle up
-                    {n.groupName ? <span className="text-ink-faint"> in {n.groupName}</span> : ""}.
+            {reminders.map((n) => {
+              const from = friends?.find((f) => f.id === n.fromId);
+              const iOwe = from?.obligations.some((o) => o.netCents < 0);
+              return (
+                <li key={`n-${n.id}`} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent-soft text-accent-dark"><Bell className="h-4 w-4" /></span>
+                  <span className="min-w-0 flex-1 basis-48">
+                    <span className="block text-body">
+                      <strong>{n.fromName}</strong> reminded you to settle up{n.groupName ? <span className="text-ink-faint"> in {n.groupName}</span> : ""}
+                    </span>
+                    {n.note && <span className="block text-body text-ink-soft">“{n.note}”</span>}
+                    <RowMeta>{fmtTime(n.createdAt)}</RowMeta>
                   </span>
-                  {n.note && <span className="block text-xs text-ink-soft">“{n.note}”</span>}
-                  <span className="block text-xs text-ink-faint">{fmtTime(n.createdAt)}</span>
+                  <span className="ml-auto flex items-center gap-1">
+                    {iOwe && from && (
+                      <Button size="sm" variant="secondary" onClick={() => setSettle({ friendId: from.id, sign: -1 })}>
+                        <HandCoins className="h-4 w-4" /> Settle up
+                      </Button>
+                    )}
+                    <IconButton size="sm" label="Dismiss reminder" onClick={() => dismissReminder(n.id)}>
+                      <X className="h-4 w-4" />
+                    </IconButton>
+                  </span>
+                </li>
+              );
+            })}
+            {outgoingRequests.map((r) => (
+              <li key={`out-${r.id}`} className="flex items-center gap-3 px-4 py-2">
+                <Avatar name={r.displayName} />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-body">
+                    Request sent to <Link href={`/people/${r.userId}`} className="font-semibold hover:text-accent-dark hover:underline">{r.displayName}</Link>
+                  </span>
+                  <RowMeta>@{r.username} · waiting for them to accept</RowMeta>
                 </span>
-                <button
-                  onClick={() => dismissReminder(n.id)}
-                  aria-label="Dismiss reminder"
-                  className="rounded-lg p-1.5 text-ink-faint hover:bg-subtle hover:text-ink"
-                >
-                  <X className="h-4 w-4" />
-                </button>
+                <Button size="sm" variant="secondary" onClick={() => respondRequest(r, "cancel")}>Cancel</Button>
               </li>
             ))}
           </ul>
@@ -217,71 +239,53 @@ export default function BalancesPage() {
       )}
 
       <Card className="flex flex-col md:min-h-0 md:flex-1">
-        <CardHeader title="Friends" />
-        <div className="border-b border-line p-3">
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-faint" />
-            <Input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search friends"
-              aria-label="Search friends"
-              className="pl-8"
-            />
-          </div>
-        </div>
+        <CardHeader title="Friends" meta={friends ? friends.length : undefined} />
         <div className="md:min-h-0 md:flex-1 md:overflow-y-auto">
         {friendsError && friends === null ? (
           <EmptyState
-            icon={<Scale className="h-7 w-7" />}
+            icon={<Scale className="h-6 w-6" />}
             title="Could not load friends"
             hint={friendsError}
-            action={<Button variant="secondary" onClick={reload}>Retry</Button>}
+            action={<Button variant="secondary" onClick={reload}>Try again</Button>}
           />
         ) : friends === null ? (
           <div className="space-y-2 p-3">{[...Array(3)].map((_, i) => <div key={i} className="skeleton h-12 w-full" />)}</div>
         ) : friends.length === 0 ? (
           <EmptyState
-            icon={<Scale className="h-7 w-7" />}
+            icon={<Scale className="h-6 w-6" />}
             title="No friends yet"
             hint="Copy your invite link, or add a friend with their code."
             action={<Button variant="secondary" onClick={() => setAddOpen(true)}><UserPlus className="h-4 w-4" /> Add friend</Button>}
           />
         ) : filteredFriends.length === 0 ? (
           <EmptyState
-            icon={<Search className="h-7 w-7" />}
+            icon={<Search className="h-6 w-6" />}
             title="No matching friends"
             hint="Try a different name or username."
           />
         ) : (
           <div>
-            <FriendSection
-              title="Active balances"
-              friends={activeFriends}
-              nudgedId={nudgedId}
-              onSettle={(friend, preferredSign) => setSettleChoice({ friendId: friend.id, preferredSign })}
-              onHistory={setHistoryFriend}
-              onNudge={nudge}
-              onRemove={removeFriend}
-            />
-            <FriendSection
-              title="Settled up"
-              friends={settledFriends}
-              nudgedId={nudgedId}
-              onSettle={(friend, preferredSign) => setSettleChoice({ friendId: friend.id, preferredSign })}
-              onHistory={setHistoryFriend}
-              onNudge={nudge}
-              onRemove={removeFriend}
-            />
+            {activeFriends.length > 0 && (
+              <section aria-label="Active balances">
+                <SectionLabel className="border-b border-line bg-subtle px-4 py-1.5">Active balances</SectionLabel>
+                <ul className="divide-y divide-line">{renderRows(activeFriends)}</ul>
+              </section>
+            )}
+            {settledFriends.length > 0 && (
+              <section aria-label="Settled up">
+                <SectionLabel className="border-y border-line bg-subtle px-4 py-1.5">Settled up</SectionLabel>
+                <ul className="divide-y divide-line">{renderRows(settledFriends)}</ul>
+              </section>
+            )}
           </div>
         )}
         </div>
       </Card>
 
       <Modal open={addOpen} onClose={() => setAddOpen(false)} title="Add a friend">
-        <form onSubmit={addFriend} className="space-y-4">
-          <Field label="Friend's invite code">
-            <Input value={code} onChange={(e) => setCode(e.target.value)} required autoFocus />
+        <form onSubmit={addFriend} className="space-y-3">
+          <Field label="Friend's invite code" hint="They can find it by tapping Copy invite link on their Balances page.">
+            <Input value={code} onChange={(e) => setCode(e.target.value)} required data-autofocus autoCapitalize="off" autoCorrect="off" spellCheck={false} />
           </Field>
           <ErrorNote message={error} />
           <div className="flex justify-end gap-2">
@@ -293,9 +297,10 @@ export default function BalancesPage() {
 
       <DirectSettleModal
         friend={settleFriend}
-        preferredSign={settleChoice?.preferredSign}
-        onClose={() => setSettleChoice(null)}
-        onSaved={reload}
+        preferredSign={settle?.sign}
+        initialKey={settle?.key}
+        onClose={() => setSettle(null)}
+        onSaved={() => { reload(); reloadNudges(); }}
       />
 
       {me && (
@@ -307,99 +312,5 @@ export default function BalancesPage() {
         />
       )}
     </AppShell>
-  );
-}
-
-function FriendSection({
-  title,
-  friends,
-  nudgedId,
-  onSettle,
-  onHistory,
-  onNudge,
-  onRemove,
-}: {
-  title: string;
-  friends: Friend[];
-  nudgedId: number | null;
-  onSettle: (friend: Friend, preferredSign: -1 | 1) => void;
-  onHistory: (friend: Friend) => void;
-  onNudge: (friend: Friend) => void;
-  onRemove: (friend: Friend) => void;
-}) {
-  if (friends.length === 0) return null;
-  return (
-    <section>
-      <div className="border-b border-line bg-subtle px-4 py-1.5 text-xs font-semibold uppercase tracking-wider text-ink-faint">
-        {title}
-      </div>
-      <ul className="divide-y divide-line">
-        {friends.map((f) => {
-          const entries = f.obligations;
-          const theyOweMe = entries.some((item) => item.netCents > 0);
-          const iOweThem = entries.some((item) => item.netCents < 0);
-          const hasBalance = entries.length > 0;
-          return (
-            <li key={f.id} className="flex min-h-[var(--row-h)] items-center gap-3 px-4 py-2.5 hover:bg-subtle">
-              <Link href={`/people/${f.id}`} className="flex min-w-0 flex-1 items-center gap-3" aria-label={`Open ${f.displayName}'s profile`}>
-                <Avatar name={f.displayName} />
-                <div className="min-w-0">
-                  <span className="block truncate font-medium">{f.displayName}</span>
-                  <span className="hidden text-xs text-ink-faint sm:block">@{f.username}</span>
-                  {/* Mobile: balance lives under the name (the right column is hidden). */}
-                  <span className="block text-xs sm:hidden">
-                    {!hasBalance ? (
-                      <span className="text-ink-faint">settled up</span>
-                    ) : (
-                      entries.map((item, index) => (
-                        <span key={`${item.groupId ?? "direct"}:${item.currency}:${index}`} className={`block ${item.netCents > 0 ? "text-owed" : "text-owe"}`}>
-                          {item.groupName ? `${item.groupName}: ` : "Direct: "}{item.netCents > 0 ? "owes you " : "you owe "}
-                          <span className="tnum font-semibold">{fmtMoney(Math.abs(item.netCents), item.currency)}</span>
-                        </span>
-                      ))
-                    )}
-                  </span>
-                </div>
-              </Link>
-              <div className="hidden text-right text-sm sm:block">
-                {!hasBalance ? (
-                  <span className="text-ink-faint">settled up</span>
-                ) : (
-                  entries.map((item, index) => (
-                    <p key={`${item.groupId ?? "direct"}:${item.currency}:${index}`} className={item.netCents > 0 ? "text-owed" : "text-owe"}>
-                      <span className="text-xs text-ink-faint">{item.groupName ?? "Direct"} · </span>
-                      {item.netCents > 0 ? "owes you" : "you owe"}{" "}
-                      <span className="tnum font-semibold">{fmtMoney(Math.abs(item.netCents), item.currency)}</span>
-                    </p>
-                  ))
-                )}
-              </div>
-              <div className="flex items-center gap-1.5">
-                {theyOweMe ? (
-                  <Button variant="secondary" onClick={() => onNudge(f)} aria-label={`Remind ${f.displayName} to settle up`}>
-                    {nudgedId === f.id ? <><Check className="h-4 w-4 text-owed" /> Reminded</> : <><Bell className="h-4 w-4" /> Remind</>}
-                  </Button>
-                ) : iOweThem ? (
-                  <Button variant="secondary" onClick={() => onSettle(f, -1)}>
-                    <HandCoins className="h-4 w-4" /> Settle up
-                  </Button>
-                ) : null}
-                <Menu label={`More actions for ${f.displayName}`}>
-                  {hasBalance && theyOweMe && (
-                    <MenuItem icon={<HandCoins className="h-4 w-4" />} onClick={() => onSettle(f, 1)}>Record incoming payment</MenuItem>
-                  )}
-                  <MenuItem icon={<UserRound className="h-4 w-4" />} onClick={() => { window.location.href = `/people/${f.id}`; }}>View profile</MenuItem>
-                  <MenuItem icon={<Receipt className="h-4 w-4" />} onClick={() => onHistory(f)}>Payment history</MenuItem>
-                  <MenuItem icon={<MessageSquare className="h-4 w-4" />} onClick={() => { window.location.href = `/chat?dm=${f.id}`; }}>Chat</MenuItem>
-                  {f.canRemoveFriend && (
-                    <MenuItem icon={<UserMinus className="h-4 w-4" />} danger onClick={() => onRemove(f)}>Remove friend</MenuItem>
-                  )}
-                </Menu>
-              </div>
-            </li>
-          );
-        })}
-      </ul>
-    </section>
   );
 }

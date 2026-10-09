@@ -205,12 +205,12 @@ export function GroupBalanceForm({ groupId, groupName, currency, members, meId, 
   function renderSide(name: "owes" | "receives", side: Side, setSide: React.Dispatch<React.SetStateAction<Side>>) {
     return (
       <section className="space-y-3 rounded-xl border border-line p-3" aria-label={name === "owes" ? "Who owes" : "Who should receive"}>
-        <h3 className="text-sm font-semibold">{name === "owes" ? "Who owes" : "Who should receive"}</h3>
+        <h3 className="text-body font-semibold">{name === "owes" ? "Who owes" : "Who should receive"}</h3>
         <div className="flex flex-wrap gap-2" role="radiogroup" aria-label={`${name} split method`}>
           {methods.map((method) => (
             <button key={method} type="button" role="radio" aria-checked={side.method === method}
               onClick={() => setSide((s) => ({ ...s, method }))}
-              className={`min-h-11 rounded-lg border px-3 py-1.5 text-sm font-medium sm:min-h-[var(--control-h)] ${
+              className={`min-h-[var(--control-h-sm)] rounded-lg border px-2.5 py-1 text-body font-medium ${
                 side.method === method ? "border-accent bg-accent-soft text-accent-dark" : "border-line text-ink-soft hover:border-line-strong"
               }`}>{METHOD_LABELS[method]}</button>
           ))}
@@ -277,17 +277,17 @@ export function GroupBalanceForm({ groupId, groupName, currency, members, meId, 
     <Modal open={open} onClose={dismiss} title={existing ? "Edit group balance" : "Add group balance"} closeDisabled={busy} wide>
       <form onSubmit={submit} className="space-y-4">
         <div className={`group-choice group-hue-${groupId % 6} flex items-center gap-2 rounded-xl bg-[var(--group-soft)] px-3 py-2 text-[var(--group-ink)]`}>
-          <Users className="h-4 w-4" /> <span className="text-sm font-semibold">{groupName} · {currency}</span>
+          <Users className="h-4 w-4" /> <span className="text-body font-semibold">{groupName} · {currency}</span>
         </div>
         {recordConflict && <ErrorNote message={error} />}
         {!recordConflict && checkError && <div className="flex items-center gap-2">
           <ErrorNote message="Could not verify this group balance" />
           <Button type="button" variant="secondary" onClick={checkEditedRecord}>Try again</Button>
         </div>}
-        {!recordConflict && unverified && !checkError && <p role="status" className="text-sm text-ink-soft">Checking group balance changes…</p>}
+        {!recordConflict && unverified && !checkError && <p role="status" className="text-body text-ink-soft">Checking group balance changes…</p>}
         <Field label="Total to settle">
           <Input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="0.00" required
-            className="!min-h-14 !text-3xl !font-semibold tracking-tight tnum" />
+            data-autofocus className="!min-h-14 !text-amount-lg !font-semibold tracking-tight tnum" />
         </Field>
         <Field label="Description">
           <Input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={120} required
@@ -297,28 +297,28 @@ export function GroupBalanceForm({ groupId, groupName, currency, members, meId, 
         {renderSide("receives", receives, setReceives)}
         {preview.body && preview.delta ? (
           <div className="space-y-3 rounded-xl border border-line p-3" aria-label="Balance preview">
-            <h3 className="text-sm font-semibold">Preview</h3>
-            <p className="text-xs text-ink-faint">{existing ? "This replaces obligations." : "This adds obligations."} It does not record a payment.</p>
+            <h3 className="text-body font-semibold">Preview</h3>
+            <p className="text-meta text-ink-faint">{existing ? "This replaces obligations." : "This adds obligations."} It does not record a payment.</p>
             <ul className="divide-y divide-line rounded-lg border border-line">
               {members.filter((m) => preview.affected?.has(m.id)).map((m) => {
                 const net = preview.delta?.get(m.id) ?? 0;
-                return <li key={m.id} className="flex justify-between gap-3 px-3 py-2 text-sm">
+                return <li key={m.id} className="flex justify-between gap-3 px-3 py-2 text-body">
                   <span className="truncate">{m.displayName}</span>
                   <span className="tnum font-medium">{net > 0 ? `receives ${fmtMoney(net, currency)}` : net < 0 ? `owes ${fmtMoney(-net, currency)}` : "no net change"}</span>
                 </li>;
               })}
             </ul>
-            <p className="text-xs font-semibold text-ink-soft">Resulting group debts</p>
-            {preview.suggestions?.length ? <ul className="space-y-1 text-sm">
+            <p className="text-meta font-semibold text-ink-soft">Resulting group debts</p>
+            {preview.suggestions?.length ? <ul className="space-y-1 text-body">
               {preview.suggestions.map((s, i) => <li key={i}>
                 {members.find((m) => m.id === s.from)?.displayName} owes {members.find((m) => m.id === s.to)?.displayName} {fmtMoney(s.amountCents, currency)}
               </li>)}
-            </ul> : <p className="text-sm text-ink-faint">All settled up</p>}
+            </ul> : <p className="text-body text-ink-faint">All settled up</p>}
           </div>
-        ) : amount && !recordConflict && <p role="status" className="flex items-center gap-1.5 rounded-lg bg-owe-soft px-3 py-2 text-sm text-owe">
+        ) : amount && !recordConflict && <p role="status" className="flex items-center gap-1.5 rounded-lg bg-owe-soft px-3 py-2 text-body text-owe">
           <AlertCircle className="h-4 w-4 shrink-0" /> {preview.error}
         </p>}
-        {preview.body && <p role="status" className="flex items-center gap-1.5 rounded-lg bg-owed-soft px-3 py-2 text-sm text-owed">
+        {preview.body && <p role="status" className="flex items-center gap-1.5 rounded-lg bg-owed-soft px-3 py-2 text-body text-owed">
           <Check className="h-4 w-4 shrink-0" /> Both sides match {fmtMoney(preview.body.amountCents, currency)}
         </p>}
         {!recordConflict && <ErrorNote message={error} />}

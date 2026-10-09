@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { api, useFormState, amountInputToCents, localDateStr } from "@/lib/client";
-import { Button, Field, Input, Select, Modal, ErrorNote } from "./ui";
+import { Button, Field, Input, Select, Modal, ErrorNote, toast } from "./ui";
 import { Member } from "./expense-form";
 
 export interface ExistingRecurring {
@@ -79,15 +79,15 @@ export function RecurringModal({
           },
         });
       }
-      onSaved(); onClose();
+      onSaved(); toast(existing ? "Recurring expense updated" : "Recurring expense added"); onClose();
     }, existing ? "Could not update recurring expense" : "Could not create recurring expense");
   }
 
   return (
     <Modal open={open} onClose={onClose} title={existing ? "Edit recurring expense" : "Add recurring expense"}>
-      <form onSubmit={submit} className="space-y-4">
+      <form onSubmit={submit} className="space-y-3">
         <Field label="Title">
-          <Input value={title} onChange={(e) => setTitle(e.target.value)} required maxLength={120} placeholder="Rent" autoFocus />
+          <Input value={title} onChange={(e) => setTitle(e.target.value)} required maxLength={120} placeholder="Rent" data-autofocus />
         </Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label={`Amount (${defaultCurrency})`}>
@@ -108,13 +108,13 @@ export function RecurringModal({
             <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} required />
           </Field>
         </div>
-        <p className="rounded-lg bg-subtle px-3 py-2 text-xs text-ink-soft">
+        <p className="text-meta text-ink-faint">
           Splits equally among all current group members each time it runs.
         </p>
         <ErrorNote message={error} />
         <div className="flex justify-end gap-2">
           <Button type="button" variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button type="submit" busy={busy}>{existing ? "Save changes" : "Create"}</Button>
+          <Button type="submit" busy={busy}>{existing ? "Save changes" : "Add recurring"}</Button>
         </div>
       </form>
     </Modal>

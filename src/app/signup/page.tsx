@@ -38,8 +38,8 @@ export default function SignupPage() {
 
   return (
     <AuthFrame>
-      <h1 className="text-2xl font-semibold tracking-tight">Create your account</h1>
-      <p className="mt-1 text-sm text-ink-soft">Private expense tracking for your friend group.</p>
+      <h1 className="text-title font-semibold tracking-tight">Create your account</h1>
+      <p className="mt-1 text-body text-ink-soft">Private expense tracking for your friend group.</p>
       <form onSubmit={submit} className="mt-6 space-y-3">
         <Field label="Display name">
           <Input value={form.displayName} onChange={set("displayName")} placeholder="Alex Rivera" autoFocus required maxLength={50} />
@@ -76,7 +76,7 @@ export default function SignupPage() {
           Create account
         </Button>
       </form>
-      <p className="mt-4 text-center text-sm text-ink-soft">
+      <p className="mt-4 text-center text-body text-ink-soft">
         Already have an account?{" "}
         <Link href="/login" className="font-semibold text-accent hover:text-accent-dark">
           Log in

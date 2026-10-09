@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Paperclip, Plus, Check, AlertCircle, Users, ChevronDown } from "lucide-react";
+import { Paperclip, Plus, Check, AlertCircle, Users, ChevronDown, X } from "lucide-react";
 import { api, ApiClientError, fmtMoney, todayStr, CURRENCIES, amountInputToCents, useApiData } from "@/lib/client";
-import { Button, Field, Input, Select, Textarea, Modal, ErrorNote } from "./ui";
+import { rememberExpenseGroup } from "@/lib/last-group";
+import { Button, Field, Input, Select, Textarea, Modal, ErrorNote, toast, confirmAction } from "./ui";
 import { ParticipantSplit, ItemizedSplit, Method, METHOD_LABELS, ItemRow } from "./expense-splits";
 
 const CALIFORNIA_TAX_RATE = "7.25";
@@ -57,7 +58,12 @@ export function ExpenseForm({
   open,
   onClose,
   onSaved,
+  onCreated,
   onCategoryAdded,
+  groupOptions,
+  selectedGroupId,
+  groupSwitching = false,
+  onGroupChange,
 }: {
   groupId: number;
   groupName: string;
@@ -68,7 +74,14 @@ export function ExpenseForm({
   open: boolean;
   onClose: () => void;
   onSaved: () => void;
+  /** Called after a new expense saves; replaces the default confirmation. */
+  onCreated?: (info: { id: number; title: string }) => void;
   onCategoryAdded?: () => void;
+  /** When present, the group is a choice inside the form (Add from outside a group). */
+  groupOptions?: { id: number; name: string; currency: string }[];
+  selectedGroupId?: number;
+  groupSwitching?: boolean;
+  onGroupChange?: (groupId: number) => void;
 }) {
   const [title, setTitle] = useState("");
   const [amount, setAmount] = useState("");
@@ -170,6 +183,21 @@ export function ExpenseForm({
     // sync replaces members/categories references and must not wipe live input.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, existing?.id]);
+
+  useEffect(() => {
+    if (!open || existing) return;
+    // A different group has different members and currency. Keep what was
+    // typed; restart the payer and split for the new members.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setCurrency(groupCurrency);
+    setPayerId(meId);
+    setMethod("solo");
+    setSelected(new Set([defaultSoloId]));
+    setValues({});
+    setItems([]);
+    // Runs only when the group itself changes; member list refreshes must not.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groupId]);
 
   const amountCents = useMemo(() => {
     return amountToCents(amount);
@@ -308,6 +336,7 @@ export function ExpenseForm({
       expectedUpdatedAt: existing?.updatedAt,
     };
 
+    if (groupSwitching) return;
     setBusy(true);
     try {
       let expenseId: number;
@@ -330,9 +359,10 @@ export function ExpenseForm({
           ? "You are offline. Reconnect and try again."
           : err instanceof ApiClientError ? err.message : "Receipt upload failed";
         onSaved();
+        rememberExpenseGroup(groupId);
         if (createdNewExpense) {
           onClose();
-          window.alert(`Expense saved, but receipt upload failed: ${message}`);
+          toast(`Expense saved, but receipt upload failed: ${message}`, { tone: "error" });
           return;
         }
         setError(`Expense saved, but receipt upload failed: ${message}`);
@@ -340,6 +370,9 @@ export function ExpenseForm({
         return;
       }
       onSaved();
+      rememberExpenseGroup(groupId);
+      if (createdNewExpense && onCreated) onCreated({ id: expenseId, title: body.title });
+      else toast(createdNewExpense ? "Expense added" : "Expense updated");
       onClose();
     } catch (err) {
       setError(
@@ -351,18 +384,32 @@ export function ExpenseForm({
     }
   }
 
+  const sectionCls = "space-y-3 rounded-xl border border-line p-3";
   return (
     <Modal open={open} onClose={onClose} title={existing ? "Edit expense" : "Add expense"} wide>
-      <form onSubmit={submit} className="space-y-4">
-        <div className={`group-choice group-hue-${groupId % 6} flex items-center gap-2 rounded-xl bg-[var(--group-soft)] px-3 py-2 text-[var(--group-ink)]`}>
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-card/60">
-            <Users className="h-4 w-4" />
-          </span>
-          <span className="min-w-0">
-            <span className="block text-xs font-medium text-[var(--group-muted)]">Group</span>
-            <span className="block truncate text-sm font-semibold">{groupName} · {groupCurrency}</span>
-          </span>
-        </div>
+      <form onSubmit={submit} className="space-y-3">
+        {groupOptions && groupOptions.length > 1 && !existing ? (
+          <div className={`group-choice group-hue-${(selectedGroupId ?? groupId) % 6} flex items-center gap-2 rounded-xl bg-[var(--group-soft)] py-1.5 pl-3 pr-1.5 text-[var(--group-ink)]`}>
+            <Users className="h-4 w-4 shrink-0" aria-hidden />
+            <label htmlFor="expense-group" className="shrink-0 text-body font-medium">Group</label>
+            <Select
+              id="expense-group"
+              value={selectedGroupId ?? groupId}
+              onChange={(e) => onGroupChange?.(Number(e.target.value))}
+              className="!border-transparent !bg-card/70 font-semibold"
+            >
+              {groupOptions.map((g) => <option key={g.id} value={g.id}>{g.name} · {g.currency}</option>)}
+            </Select>
+          </div>
+        ) : (
+          <p className={`group-choice group-hue-${groupId % 6} flex min-h-[var(--control-h-sm)] items-center gap-2 rounded-xl bg-[var(--group-soft)] px-3 py-1.5 text-body text-[var(--group-ink)]`}>
+            <Users className="h-4 w-4 shrink-0" aria-hidden />
+            <span className="sr-only">Group: </span>
+            <span className="truncate font-semibold">{groupName}</span>
+            <span className="shrink-0 text-[var(--group-muted)]">· {groupCurrency}</span>
+          </p>
+        )}
+
         <div className="grid grid-cols-[minmax(0,1fr)_6rem] gap-2">
           <Field label={method === "itemized" ? "Total" : "Amount"}>
             <Input
@@ -371,10 +418,17 @@ export function ExpenseForm({
               enterKeyHint="next"
               value={displayedAmount}
               onChange={(e) => setAmount(e.target.value)}
+              onKeyDown={(e) => {
+                // Return moves on to the description instead of submitting a half-filled form.
+                if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
+                e.preventDefault();
+                document.getElementById("expense-title")?.focus();
+              }}
               required={method !== "itemized"}
               readOnly={method === "itemized" && itemSubtotalCents > 0}
               placeholder="0.00"
-              className="!min-h-14 !text-3xl !font-semibold tracking-tight tnum"
+              data-autofocus
+              className="!min-h-14 !text-amount-lg !font-semibold tracking-tight tnum"
             />
           </Field>
           <Field label="Currency">
@@ -387,21 +441,21 @@ export function ExpenseForm({
         </div>
 
         <Field label="Description">
-          <Input value={title} onChange={(e) => setTitle(e.target.value)} enterKeyHint="next" required maxLength={120} placeholder="Dinner, groceries, tickets…" />
+          <Input id="expense-title" value={title} onChange={(e) => setTitle(e.target.value)} enterKeyHint="done" required maxLength={120} placeholder="Dinner, groceries, tickets…" />
         </Field>
 
-        <div className="grid grid-cols-1 gap-3 rounded-xl border border-line p-3 min-[22rem]:grid-cols-2 sm:grid-cols-3">
+        <div className="grid grid-cols-2 gap-x-3 gap-y-2 sm:grid-cols-3">
           <Field label="Paid by">
             <Select value={payerId} onChange={(e) => setPayerId(Number(e.target.value))}>
               {members.map((m) => (
-                <option key={m.id} value={m.id}>{m.displayName}</option>
+                <option key={m.id} value={m.id}>{m.id === meId ? `${m.displayName} (you)` : m.displayName}</option>
               ))}
             </Select>
           </Field>
           <Field label="Date">
             <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
           </Field>
-          <div className="col-span-1 min-[22rem]:col-span-2 sm:col-span-1">
+          <div className="col-span-2 sm:col-span-1">
             <Field label="Category">
               <Select
                 id="expense-category"
@@ -418,16 +472,16 @@ export function ExpenseForm({
           </div>
 
           {categoriesError && (
-            <div className="col-span-1 flex flex-wrap items-center gap-1 text-xs text-danger min-[22rem]:col-span-2 sm:col-span-3">
+            <div className="col-span-2 flex flex-wrap items-center gap-1 text-meta text-danger sm:col-span-3">
               <p id="expense-category-error" role="alert">Categories could not load.</p>
-              <button type="button" onClick={reloadCategories} className="min-h-[var(--control-h)] font-semibold underline">
+              <button type="button" onClick={reloadCategories} className="min-h-[var(--control-h-sm)] px-1 font-semibold underline">
                 Try again
               </button>
             </div>
           )}
 
           {addingCat ? (
-            <div className="col-span-1 flex gap-2 min-[22rem]:col-span-2 sm:col-span-3">
+            <div className="col-span-2 flex gap-2 sm:col-span-3">
               <Input
                 value={newCategory}
                 onChange={(e) => setNewCategory(e.target.value)}
@@ -460,16 +514,16 @@ export function ExpenseForm({
               type="button"
               id="expense-new-category"
               onClick={() => setAddingCat(true)}
-              className="col-span-1 inline-flex min-h-[var(--control-h)] items-center gap-1 justify-self-start text-xs font-medium text-accent hover:underline min-[22rem]:col-span-2 sm:col-span-3"
+              className="col-span-2 inline-flex min-h-[var(--control-h-sm)] items-center gap-1 justify-self-start rounded-lg px-1 text-body font-medium text-accent hover:bg-accent-soft sm:col-span-3"
             >
-              <Plus className="h-3.5 w-3.5" /> New category
+              <Plus className="h-4 w-4" /> New category
             </button>
           )}
         </div>
 
-        <fieldset className="rounded-xl border border-line p-3">
-          <legend className="mb-1 block text-sm font-medium text-ink-soft">Split method</legend>
-          <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Split method">
+        <fieldset className={sectionCls}>
+          <legend className="sr-only">Split</legend>
+          <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Split method">
             {(Object.keys(METHOD_LABELS) as Method[]).map((m) => (
               <button
                 key={m}
@@ -481,82 +535,87 @@ export function ExpenseForm({
                   setMethod(m);
                   if (m === "solo") setSelected(new Set([selected.values().next().value ?? defaultSoloId]));
                 }}
-                className={`min-h-11 rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors sm:min-h-[var(--control-h)] ${
+                className={`min-h-[var(--control-h-sm)] rounded-lg border px-2.5 py-1 text-body font-medium transition-colors ${
                   method === m
                     ? "border-accent bg-accent-soft text-accent-dark"
-                    : "border-line text-ink-soft hover:border-line-strong"
+                    : "border-line text-ink-soft hover:border-line-strong hover:text-ink"
                 }`}
               >
                 {METHOD_LABELS[m]}
               </button>
             ))}
           </div>
+
+          {method !== "itemized" ? (
+            <ParticipantSplit
+              members={members}
+              selected={selected}
+              method={method}
+              values={values}
+              amountCents={amountCents}
+              currency={currency}
+              participantCount={participantList.length}
+              onToggle={toggleMember}
+              onValue={(id, value) => setValues((v) => ({ ...v, [id]: value }))}
+            />
+          ) : (
+            <ItemizedSplit
+              members={members}
+              items={items}
+              setItems={setItems}
+              currency={currency}
+              subtotalCents={itemSubtotalCents}
+              taxEnabled={taxEnabled}
+              taxRate={taxRate}
+              taxCents={taxCents}
+              tipEnabled={tipEnabled}
+              tipRate={tipRate}
+              tipCents={tipCents}
+              totalCents={itemizedTotalCents}
+              onTaxEnabled={setTaxEnabled}
+              onTaxRate={setTaxRate}
+              onTipEnabled={setTipEnabled}
+              onTipRate={setTipRate}
+            />
+          )}
+
+          {splitStatus && (
+            <p
+              className={`flex items-center gap-1.5 rounded-lg px-3 py-2 text-body ${splitStatus.ok ? "bg-owed-soft text-owed" : "bg-owe-soft text-owe"}`}
+              role="status"
+            >
+              {/* Icon so the valid/incomplete state isn't conveyed by color alone. */}
+              {splitStatus.ok ? <Check className="h-4 w-4 shrink-0" /> : <AlertCircle className="h-4 w-4 shrink-0" />}
+              {splitStatus.msg}
+            </p>
+          )}
         </fieldset>
-
-        {method !== "itemized" ? (
-          <ParticipantSplit
-            members={members}
-            selected={selected}
-            method={method}
-            values={values}
-            amountCents={amountCents}
-            currency={currency}
-            participantCount={participantList.length}
-            onToggle={toggleMember}
-            onValue={(id, value) => setValues((v) => ({ ...v, [id]: value }))}
-          />
-        ) : (
-          <ItemizedSplit
-            members={members}
-            items={items}
-            setItems={setItems}
-            currency={currency}
-            subtotalCents={itemSubtotalCents}
-            taxEnabled={taxEnabled}
-            taxRate={taxRate}
-            taxCents={taxCents}
-            tipEnabled={tipEnabled}
-            tipRate={tipRate}
-            tipCents={tipCents}
-            totalCents={itemizedTotalCents}
-            onTaxEnabled={setTaxEnabled}
-            onTaxRate={setTaxRate}
-            onTipEnabled={setTipEnabled}
-            onTipRate={setTipRate}
-          />
-        )}
-
-        {splitStatus && (
-          <p
-            className={`flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm ${splitStatus.ok ? "bg-owed-soft text-owed" : "bg-owe-soft text-owe"}`}
-            role="status"
-          >
-            {/* Icon so the valid/incomplete state isn't conveyed by color alone. */}
-            {splitStatus.ok ? <Check className="h-4 w-4 shrink-0" /> : <AlertCircle className="h-4 w-4 shrink-0" />}
-            {splitStatus.msg}
-          </p>
-        )}
 
         <div className="rounded-xl border border-line">
           <button
             type="button"
             onClick={() => setShowDetails((shown) => !shown)}
             aria-expanded={showDetails}
-            className="flex min-h-[var(--control-h)] w-full items-center gap-2 px-3 py-2.5 text-left text-sm font-medium text-ink-soft hover:bg-subtle"
+            className="flex min-h-[var(--control-h)] w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-body font-medium text-ink-soft hover:bg-subtle"
           >
             <Paperclip className="h-4 w-4" />
             <span className="flex-1">{showDetails ? "Note and receipts" : "Add note or receipt"}</span>
+            {(notes.trim() || files.length > 0 || savedAttachments.length > 0) && !showDetails && (
+              <span className="text-meta text-ink-faint">
+                {[notes.trim() && "note", (files.length + savedAttachments.length) > 0 && `${files.length + savedAttachments.length} receipt${files.length + savedAttachments.length === 1 ? "" : "s"}`].filter(Boolean).join(" · ")}
+              </span>
+            )}
             <ChevronDown className={`h-4 w-4 transition-transform ${showDetails ? "rotate-180" : ""}`} />
           </button>
           {showDetails && (
-            <div className="space-y-4 border-t border-line p-3">
+            <div className="space-y-3 border-t border-line p-3">
               <Field label="Notes">
                 <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} maxLength={2000} />
               </Field>
 
               <Field label="Receipts" hint="Images or PDF, up to 4 MB each">
                 <div className="flex flex-wrap items-center gap-2">
-                  <label className="inline-flex min-h-[var(--control-h)] cursor-pointer items-center gap-1.5 rounded-lg border border-line px-3 py-2 text-sm font-medium text-ink-soft hover:bg-subtle hover:text-ink">
+                  <label className="inline-flex min-h-[var(--control-h)] cursor-pointer items-center gap-1.5 rounded-lg border border-line px-3 py-2 text-body font-medium text-ink-soft hover:bg-subtle hover:text-ink">
                     <Paperclip className="h-4 w-4" /> Attach file
                     <input
                       type="file"
@@ -570,17 +629,17 @@ export function ExpenseForm({
                     />
                   </label>
                   {files.map((f, i) => (
-                    <span key={i} className="inline-flex max-w-full items-center gap-1 rounded-full bg-accent-soft px-2.5 py-1 text-xs text-accent-dark">
+                    <span key={i} className="inline-flex max-w-full items-center gap-1 rounded-full bg-accent-soft pl-2.5 text-meta text-accent-dark">
                       <span className="truncate">{f.name}</span>
-                      <button type="button" className="-mr-2 inline-flex h-[var(--control-h)] w-[var(--control-h)] items-center justify-center" aria-label={`Remove ${f.name}`} onClick={() => setFiles((fs) => fs.filter((_, j) => j !== i))}>
-                        ×
+                      <button type="button" className="inline-flex h-[var(--control-h-sm)] w-[var(--control-h-sm)] items-center justify-center rounded-full hover:bg-card/60" aria-label={`Remove ${f.name}`} onClick={() => setFiles((fs) => fs.filter((_, j) => j !== i))}>
+                        <X className="h-3.5 w-3.5" />
                       </button>
                     </span>
                   ))}
                   {savedAttachments.map((a) => (
                     <span
                       key={a.id}
-                      className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-subtle px-2.5 py-1 text-xs text-ink-soft"
+                      className="inline-flex max-w-full items-center gap-1 rounded-full bg-subtle pl-2.5 text-meta text-ink-soft"
                     >
                       <a href={`/api/attachments/${a.id}`} target="_blank" className="truncate underline">
                         {a.filename}
@@ -588,9 +647,9 @@ export function ExpenseForm({
                       <button
                         type="button"
                         aria-label={`Remove ${a.filename}`}
-                        className="-mr-2 inline-flex h-[var(--control-h)] w-[var(--control-h)] items-center justify-center text-ink-faint hover:text-danger"
+                        className="inline-flex h-[var(--control-h-sm)] w-[var(--control-h-sm)] items-center justify-center rounded-full text-ink-faint hover:bg-danger-soft hover:text-danger"
                         onClick={async () => {
-                          if (!window.confirm(`Remove the receipt "${a.filename}"?`)) return;
+                          if (!(await confirmAction({ title: "Remove receipt?", message: `Remove “${a.filename}” from this expense?`, confirmLabel: "Remove receipt", danger: true }))) return;
                           try {
                             await api(`/api/attachments/${a.id}`, { method: "DELETE" });
                             setSavedAttachments((xs) => xs.filter((x) => x.id !== a.id));
@@ -600,7 +659,7 @@ export function ExpenseForm({
                           }
                         }}
                       >
-                        ×
+                        <X className="h-3.5 w-3.5" />
                       </button>
                     </span>
                   ))}
@@ -617,8 +676,8 @@ export function ExpenseForm({
           <Button type="button" variant="secondary" onClick={onClose}>
             Cancel
           </Button>
-          <Button type="submit" busy={busy} disabled={splitStatus ? !splitStatus.ok : false}>
-            {busy ? existing ? "Saving changes…" : "Creating expense…" : existing ? "Save expense changes" : "Create expense"}
+          <Button type="submit" busy={busy} disabled={groupSwitching || (splitStatus ? !splitStatus.ok : false)}>
+            {busy ? "Saving…" : existing ? "Save changes" : "Add expense"}
           </Button>
         </div>
       </form>

@@ -41,16 +41,26 @@ ornament. Consistency beats novelty; these decisions compound — follow them.
   don't reflow as values change.
 - Ramp: `xs` 12/16, `sm` 14/20, `base` 16/24, `xl` 20/28,
   `2xl` 24/32, `3xl` 32/36, `4xl` 40/44. The 18px `lg` step is disabled.
-- Roles: card and dialog headers use `text-xl font-semibold tracking-tight`.
-- Row titles use `text-sm/base font-medium`. Unread rows can use semibold.
-- Metadata uses `text-xs text-ink-faint`. Balance money uses `text-2xl/3xl/4xl font-semibold tnum`.
-- Form labels use `text-sm font-medium text-ink-soft` and sentence case.
+- **Screens use type roles, not ramp sizes.** Each role names a job:
+  `text-meta` 12/16 (timestamps, counts, helper text), `text-body` 14/20 (secondary
+  text, labels, buttons), `text-row` (row titles: 16/20 on phones, 14/20 from 768px),
+  `text-section` 16/24 (card and section headings), `text-title` 20/28 (a group,
+  person, or dialog name), `text-amount` 24/32 (a balance), `text-amount-lg` 32/36
+  (the amount field, Home currency tiles), `text-hero` 40/44 (the one Home balance).
+  Only `ui.tsx` uses the raw ramp (inputs need 16px on phones so iOS does not zoom).
+- Card headers use `CardHeader` (`text-section font-semibold`, optional count). Dialog
+  titles use `text-title`. Group-inside-card labels use `SectionLabel` (uppercase meta).
+- Row titles use `RowTitle` (`text-row font-medium`); metadata uses `RowMeta`
+  (`text-meta text-ink-faint`). Unread rows can use semibold.
+- Form labels use `text-body font-medium text-ink-soft` and sentence case.
 
 ## Spacing & density
 
 4px base; a calm-but-efficient scale: **4 · 8 · 12 · 16 · 24 · 32 · 48**.
 Control metrics are tokens: `--control-h` 40px desktop / 44px mobile,
-`--control-h-sm` 32px (compact desktop), `--row-h` 48px desktop / 52px mobile.
+`--control-h-sm` 32px (compact desktop) / 44px mobile, `--row-h` 48px desktop / 52px
+mobile. On any touch-first screen (`pointer: coarse`, e.g. an iPad showing the desktop
+layout) both control heights and sidebar rows are 44px.
 Common roles: card padding `p-4`/`px-4 py-3`, row padding `px-4 py-2.5`, section gap
 `gap-4`/`space-y-4`, grid gaps `gap-4`. 8–12px between related items, 16–24px between
 groups. **No "no-scroll" mandate** — let content size to content and pages scroll;
@@ -67,22 +77,38 @@ Never introduce other radius values.
 
 ## Component patterns (`src/components/ui.tsx` is the source of truth)
 
-- **Button**: `min-h-[var(--control-h)]`, `px-3.5`, `text-sm font-semibold`, variants
-  primary / secondary / ghost / danger. **One primary per surface** — destructive uses
-  `danger` and is never visually dominant. Secondary actions collapse into an
-  `IconButton` group or a `Menu` (overflow `⋯`), never a row of 4–5 equal buttons.
+- **Button**: `min-h-[var(--control-h)]`, `px-3.5`, `text-body font-semibold`, variants
+  primary / secondary / ghost / danger; `size="sm"` uses `--control-h-sm` for row
+  actions. **One primary per surface** — destructive uses `danger` and is never
+  visually dominant. Secondary actions collapse into an `IconButton` group or a `Menu`
+  (overflow `⋯`), never a row of 4–5 equal buttons.
 - **IconButton / Menu**: icon-only actions carry an `aria-label` and tooltip.
-  Their hit area uses `--control-h`. Menus support arrows, Home, End, Escape, and focus return.
+  Their hit area uses `--control-h` (`size="sm"`: `--control-h-sm`). Never hand-roll
+  `p-1.5` icon buttons. Menus support arrows, Home, End, Escape, and focus return.
+  A menu item that needs data still loading is disabled, never a silent no-op.
+- **Segmented**: one row of exclusive choices (inbox filter, theme).
+- **Actions live where the number is.** A balance you owe carries its own Settle up;
+  a friend who owes you carries Remind; a row's edit/delete sit on the row. Do not send
+  the user to another page to act on something already on screen.
+- **Toast** (`toast()`): every add, change, delete, copy, and reminder confirms in a
+  toast above the mobile nav (`role="status"`). Errors use the error tone. No
+  `window.alert`.
+- **Confirm** (`confirmAction()`): destructive confirmations use the in-app dialog,
+  never `window.confirm` (which shows the site origin in an installed web app).
 - **Input / Select / Textarea**: `--control-h`; `bg-card`; focus = `border-accent` +
   3px `ring-accent-soft`. `Select` renders a custom chevron (no raw native arrow).
 - **Card**: `border-line` + `shadow-card`, content-sized (never full-height filler).
   `CardHeader` `min-h-11`, sentence-case header, optional single action link.
 - **Modal**: bottom sheet on mobile and centered on `sm+`. The mobile panel includes the bottom safe area.
-- Modal focus skips hidden and disabled controls. Escape closes and focus returns to the opener.
+- Modal focus skips hidden and disabled controls. Escape closes the top dialog only and focus returns to the opener.
+- With a mouse or keyboard, a dialog focuses its `data-autofocus` field (the amount, a
+  name, the confirm button). On touch screens the panel takes focus instead.
 - Long forms keep their actions in a sticky footer.
 - **Expense form**: keep Paid by, Date, and Category visible after the core fields.
 - Default payer to the current user. Use local today and no category as the other defaults.
-- Keep split method, notes, and receipts in separate disclosures.
+- Split methods sit in one chip row (One person, Equal, Exact amounts, Percentages,
+  Shares, Itemized bill); notes and receipts stay in a disclosure.
+- Outside a group, the form opens in place with the group as its first field.
 - **Avatar**: deterministic `hsl(hash 52% 45%)`, initials, sizes sm 24 / md 32 / lg 40.
   The current user is colored like everyone else (never a black/empty circle).
 - **Money**: `tnum`; when signed, pair color **and** an explicit `+ / −` and, in
@@ -107,10 +133,16 @@ Never introduce other radius values.
 - Mobile: locked app frame and bottom navigation with safe-area padding.
 - The content region scrolls. Chat keeps its own message-list scroll.
 - Primary actions stay thumb-reachable. Modal actions include the bottom safe area.
-- Master-detail (Messages): left list pane (`md:w-80`) + detail in one Card; desktop
-  auto-selects the most recent conversation; mobile shows list, then full-screen thread.
+- Master-detail (Messages): left list pane (`lg:w-80`) + detail in one Card from 1024px;
+  wide screens auto-select the most recent conversation; phones and tablets show the
+  list, then the full-width thread.
 - Switchers, not back-outs: group title is a switcher dropdown.
+- A group shows all five sections (Expenses, Balances, Chat, Activity, Insights) as tabs
+  on every width. The members rail appears from 1024px; below that, member nets live
+  in the Balances tab.
 - Group tabs and switchers support arrow keys. Menus also support Home, End, and Escape.
+- Dense two-column layouts (members rail, profile, settings, chat split) start at
+  `lg` (1024px); at 768px they squeezed rows to unreadable widths.
 
 ## Content & copy rules
 
@@ -131,4 +163,7 @@ this file deliberately when a new pattern is genuinely needed.
 
 Run `pnpm verify:ui-tokens` before each UI commit. Components cannot use arbitrary
 pixel classes, numeric text or radius classes, or hard-coded hex colors. Structural
-viewport, percentage, `calc()`, and CSS-variable values remain valid.
+viewport, percentage, `calc()`, and CSS-variable values remain valid. Outside `ui.tsx`,
+raw ramp sizes (`text-xs` … `text-4xl`) are rejected in favor of type roles, and every
+`grid` must declare a base `grid-cols-*` (an implicit column grows to its content and
+pushes the page sideways on phones).

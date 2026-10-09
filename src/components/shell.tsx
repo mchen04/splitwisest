@@ -10,7 +10,9 @@ import {
 import { api, useApiData, useMe, useUnread, type Unread } from "@/lib/client";
 import { useTheme } from "@/lib/theme";
 import { syncExistingPush } from "@/lib/push-client";
-import { Avatar, Button, IconButton, Modal } from "./ui";
+import { defaultExpenseGroup, readExpenseGroup } from "@/lib/last-group";
+import { Avatar, ConfirmHost, IconButton, ToastRegion } from "./ui";
+import { QuickAddExpense } from "./quick-add-expense";
 
 interface GroupRef {
   id: number;
@@ -43,9 +45,34 @@ const MOBILE_NAV: { href: string; label: string; icon: typeof LayoutDashboard; b
 function Badge({ count }: { count: number }) {
   if (count <= 0) return null;
   return (
-    <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1 text-xs font-bold leading-none text-on-accent">
+    <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1 text-meta font-bold leading-none text-on-accent">
       {count > 9 ? "9+" : count}
     </span>
+  );
+}
+
+function MobileNavLink({ href, label, icon: Icon, badge, active, count }: {
+  href: string; label: string; icon: typeof LayoutDashboard; badge?: BadgeKey; active: boolean; count: number;
+}) {
+  return (
+    <Link
+      href={href}
+      aria-current={active ? "page" : undefined}
+      aria-label={badge && count > 0 ? `${label}, ${count > 9 ? "9+" : count} new` : label}
+      className={`relative flex min-h-[var(--control-h)] flex-col items-center justify-center gap-0.5 py-1.5 text-meta font-medium ${
+        active ? "text-accent" : "text-ink-faint"
+      }`}
+    >
+      <span className="relative">
+        <Icon className="h-5 w-5" aria-hidden />
+        {badge && count > 0 && (
+          <span aria-hidden className="absolute -right-2.5 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-meta font-bold leading-none text-on-accent">
+            {count > 9 ? "9+" : count}
+          </span>
+        )}
+      </span>
+      <span aria-hidden>{label}</span>
+    </Link>
   );
 }
 
@@ -63,7 +90,7 @@ export function AppShell({ title, children }: { title?: string; children: ReactN
   const groups = groupsData?.groups ?? [];
   const currentGroupId = pathname.match(/^\/groups\/(\d+)/)?.[1];
   const isChatPage = pathname === "/chat";
-  const [expensePickerOpen, setExpensePickerOpen] = useState(false);
+  const [quickAdd, setQuickAdd] = useState<{ step: "closed" | "pick" | "form"; groupId: number | null }>({ step: "closed", groupId: null });
 
   useEffect(() => {
     if (!me) return;
@@ -91,35 +118,40 @@ export function AppShell({ title, children }: { title?: string; children: ReactN
     router.push("/login");
   }
 
+  function openForGroups(list: GroupRef[]) {
+    if (list.length === 0) {
+      setQuickAdd({ step: "closed", groupId: null });
+      router.push("/groups");
+      return;
+    }
+    const groupId = defaultExpenseGroup(list.map((group) => group.id), readExpenseGroup());
+    setQuickAdd(groupId === null ? { step: "pick", groupId: null } : { step: "form", groupId });
+  }
+
   function launchExpense() {
     if (currentGroupId) {
       router.push(`/groups/${currentGroupId}?add=1`);
       return;
     }
     if (groupsData === null) {
-      setExpensePickerOpen(true);
+      setQuickAdd({ step: "pick", groupId: null });
       return;
     }
-    if (groups.length === 1) {
-      router.push(`/groups/${groups[0].id}?add=1`);
-      return;
-    }
-    if (groups.length === 0) {
-      router.push("/groups");
-      return;
-    }
-    setExpensePickerOpen(true);
+    openForGroups(groups);
   }
 
   useEffect(() => {
     const resolvedGroups = groupsData?.groups;
-    if (!expensePickerOpen || !resolvedGroups || resolvedGroups.length > 1) return;
+    if (quickAdd.step !== "pick" || quickAdd.groupId !== null || !resolvedGroups) return;
     // A quick tap can open the picker before groups load. Apply the same
-    // zero/one-group shortcut as soon as that request resolves.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setExpensePickerOpen(false);
-    router.push(resolvedGroups.length === 1 ? `/groups/${resolvedGroups[0].id}?add=1` : "/groups");
-  }, [expensePickerOpen, groupsData, router]);
+    // remembered-group and zero/one-group shortcuts once that request resolves.
+    const groupId = defaultExpenseGroup(resolvedGroups.map((group) => group.id), readExpenseGroup());
+    if (resolvedGroups.length === 0 || groupId !== null) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      openForGroups(resolvedGroups);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quickAdd.step, groupsData]);
 
   const isActive = (href: string) =>
     href === "/" ? pathname === "/" : pathname.startsWith(href);
@@ -132,13 +164,13 @@ export function AppShell({ title, children }: { title?: string; children: ReactN
           <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-accent text-on-accent">
             <Wallet className="h-4 w-4" />
           </span>
-          <span className="font-wordmark text-xl font-semibold tracking-tight">SplitWisest</span>
+          <span className="font-wordmark text-title font-semibold tracking-tight">SplitWisest</span>
         </Link>
         <div className="px-3 pb-2">
           <button
             type="button"
             onClick={launchExpense}
-            className="flex min-h-[var(--control-h)] w-full items-center justify-center gap-1.5 rounded-lg bg-accent px-2.5 py-1.5 text-sm font-semibold text-on-accent transition-colors hover:bg-accent-dark focus-visible:outline-none focus-visible:ring-[var(--focus-ring)] focus-visible:ring-accent-soft"
+            className="flex min-h-[var(--control-h)] w-full items-center justify-center gap-1.5 rounded-lg bg-accent px-2.5 py-1.5 text-body font-semibold text-on-accent transition-colors hover:bg-accent-dark focus-visible:outline-none focus-visible:ring-[var(--focus-ring)] focus-visible:ring-accent-soft"
           >
             <Plus className="h-4 w-4" /> Add expense
           </button>
@@ -153,20 +185,21 @@ export function AppShell({ title, children }: { title?: string; children: ReactN
                     : "text-ink-soft hover:bg-subtle hover:text-ink"
                 }`}
               >
-                <Link href={href} aria-current={isActive(href) ? "page" : undefined} className="flex min-w-0 flex-1 items-center gap-2.5 px-2.5 py-2 text-sm font-medium">
+                <Link href={href} aria-current={isActive(href) ? "page" : undefined} className="flex min-h-[var(--nav-h)] min-w-0 flex-1 items-center gap-2.5 px-2.5 py-1.5 text-body font-medium">
                   <Icon className="h-4 w-4 shrink-0" />
                   <span className="flex-1 truncate">{label}</span>
                   {badge && <Badge count={unread[badge]} />}
                 </Link>
                 {href === "/groups" && (groupsData?.groups?.length ?? 0) > 0 && (
-                  <button
+                  <IconButton
+                    size="sm"
                     onClick={() => toggleGroups()}
-                    aria-label={groupsOpen ? "Collapse group list" : "Expand group list"}
+                    label={groupsOpen ? "Collapse group list" : "Expand group list"}
                     aria-expanded={groupsOpen}
-                    className="mr-1 rounded-lg p-1 text-ink-faint hover:bg-accent-soft hover:text-accent-dark"
+                    className="mr-0.5"
                   >
                     <ChevronDown className={`h-3.5 w-3.5 transition-transform ${groupsOpen ? "rotate-180" : ""}`} />
-                  </button>
+                  </IconButton>
                 )}
               </div>
               {href === "/groups" && groupsOpen && (
@@ -175,7 +208,7 @@ export function AppShell({ title, children }: { title?: string; children: ReactN
                     <Link
                       key={g.id}
                       href={`/groups/${g.id}`}
-                      className={`group-hue-${g.id % 6} flex items-center gap-2 rounded-lg py-1.5 pl-7 pr-2.5 text-sm transition-colors ${
+                      className={`group-hue-${g.id % 6} flex min-h-[var(--nav-h)] items-center gap-2 rounded-lg py-1 pl-7 pr-2.5 text-body transition-colors ${
                         pathname === `/groups/${g.id}`
                           ? "bg-accent-soft font-medium text-accent-dark"
                           : "text-ink-soft hover:bg-subtle hover:text-ink"
@@ -194,18 +227,18 @@ export function AppShell({ title, children }: { title?: string; children: ReactN
         <div className="border-t border-line p-2.5">
           <button
             onClick={toggle}
-            className="mb-1 flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium text-ink-soft hover:bg-subtle hover:text-ink"
+            className="mb-1 flex min-h-[var(--nav-h)] w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-body font-medium text-ink-soft hover:bg-subtle hover:text-ink"
           >
             {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             <span className="flex-1 text-left">{theme === "dark" ? "Light mode" : "Dark mode"}</span>
           </button>
           {me && (
             <div className="flex items-center gap-1.5">
-              <Link href="/settings" className="flex min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-subtle" title="Account settings">
+              <Link href="/settings" className="flex min-h-[var(--control-h)] min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2 py-1 hover:bg-subtle" title="Account settings">
                 <Avatar name={me.displayName} size="sm" />
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium leading-tight" title={me.displayName}>{me.displayName}</p>
-                  <p className="truncate text-xs text-ink-faint leading-tight" title={`@${me.username}`}>@{me.username}</p>
+                  <p className="truncate text-body font-medium" title={me.displayName}>{me.displayName}</p>
+                  <p className="truncate text-meta text-ink-faint" title={`@${me.username}`}>@{me.username}</p>
                 </div>
               </Link>
               <IconButton label="Log out" variant="danger" onClick={logout}>
@@ -227,97 +260,37 @@ export function AppShell({ title, children }: { title?: string; children: ReactN
       </main>
 
       {/* Mobile bottom nav */}
-      <nav className="mobile-nav relative z-40 grid grid-cols-5 border-t border-line bg-card md:hidden">
-        {MOBILE_NAV.slice(0, 2).map(({ href, label, icon: Icon, badge }) => (
-          <Link
-            key={href}
-            href={href}
-            aria-current={isActive(href) ? "page" : undefined}
-            className={`relative flex flex-col items-center gap-0.5 py-2 text-xs font-medium ${
-              isActive(href) ? "text-accent" : "text-ink-faint"
-            }`}
-          >
-            <span className="relative">
-              <Icon className="h-5 w-5" />
-              {badge && unread[badge] > 0 && (
-                <span className="absolute -right-2 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-0.5 text-xs font-bold leading-none text-on-accent">
-                  {unread[badge] > 9 ? "9+" : unread[badge]}
-                </span>
-              )}
-            </span>
-            {label}
-          </Link>
+      <nav aria-label="Main" className="mobile-nav relative z-40 grid grid-cols-5 border-t border-line bg-card md:hidden">
+        {MOBILE_NAV.slice(0, 2).map((item) => (
+          <MobileNavLink key={item.href} {...item} active={isActive(item.href)} count={item.badge ? unread[item.badge] : 0} />
         ))}
         <button
           type="button"
           onClick={launchExpense}
           aria-label="Add expense"
-          className="relative flex flex-col items-center gap-0.5 py-2 text-xs font-semibold text-accent"
+          className="relative flex flex-col items-center gap-0.5 py-1.5 text-meta font-semibold text-accent"
         >
           <span className="-mt-5 flex h-11 w-11 items-center justify-center rounded-full border-4 border-paper bg-accent text-on-accent shadow-pop">
             <Plus className="h-5 w-5" />
           </span>
           Add
         </button>
-        {MOBILE_NAV.slice(2).map(({ href, label, icon: Icon, badge }) => (
-          <Link
-            key={href}
-            href={href}
-            aria-current={isActive(href) ? "page" : undefined}
-            className={`relative flex flex-col items-center gap-0.5 py-2 text-xs font-medium ${
-              isActive(href) ? "text-accent" : "text-ink-faint"
-            }`}
-          >
-            <span className="relative">
-              <Icon className="h-5 w-5" />
-              {badge && unread[badge] > 0 && (
-                <span className="absolute -right-2 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-0.5 text-xs font-bold leading-none text-on-accent">
-                  {unread[badge] > 9 ? "9+" : unread[badge]}
-                </span>
-              )}
-            </span>
-            {label}
-          </Link>
+        {MOBILE_NAV.slice(2).map((item) => (
+          <MobileNavLink key={item.href} {...item} active={isActive(item.href)} count={item.badge ? unread[item.badge] : 0} />
         ))}
       </nav>
 
-      <Modal open={expensePickerOpen} onClose={() => setExpensePickerOpen(false)} title="Add expense to">
-        {groupsData === null ? (
-          groupsError ? (
-            <div role="alert" className="space-y-3 rounded-xl bg-danger-soft p-3 text-sm text-danger">
-              <p>{groupsError}</p>
-              <Button type="button" variant="secondary" onClick={reloadGroups}>Try again</Button>
-            </div>
-          ) : (
-            <p role="status" className="py-5 text-center text-sm text-ink-faint">Loading your groups…</p>
-          )
-        ) : (
-          <>
-            <p className="mb-3 text-sm text-ink-soft">Choose the group for this expense.</p>
-            <div className="space-y-1.5">
-              {groups.map((group) => (
-                <button
-                  key={group.id}
-                  type="button"
-                  onClick={() => {
-                    setExpensePickerOpen(false);
-                    router.push(`/groups/${group.id}?add=1`);
-                  }}
-                  className={`group-choice group-hue-${group.id % 6} flex w-full items-center gap-3 rounded-xl border border-line px-3 py-2.5 text-left hover:bg-subtle`}
-                >
-                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--group-soft)] text-[var(--group-ink)]">
-                    <Users className="h-4.5 w-4.5" />
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-semibold">{group.name}</span>
-                    <span className="block text-xs text-ink-faint">{group.memberCount} {group.memberCount === 1 ? "member" : "members"} · {group.currency}</span>
-                  </span>
-                </button>
-              ))}
-            </div>
-          </>
-        )}
-      </Modal>
+      <QuickAddExpense
+        step={quickAdd.step}
+        groupId={quickAdd.groupId}
+        groups={groupsData?.groups ?? null}
+        groupsError={groupsError}
+        onRetryGroups={reloadGroups}
+        onPick={(groupId) => setQuickAdd({ step: "form", groupId })}
+        onClose={() => setQuickAdd({ step: "closed", groupId: null })}
+      />
+      <ConfirmHost />
+      <ToastRegion />
     </div>
   );
 }

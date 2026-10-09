@@ -1,12 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import Link from "next/link";
 import { Bell, Smartphone } from "lucide-react";
 import { api, fmtTime, useMe } from "@/lib/client";
 import { NOTIFICATION_CATEGORIES, type NotificationPreferences, type NotificationSettings } from "@/lib/notification-types";
 import { devicePushStatus, disablePush, enablePush, type DevicePushStatus } from "@/lib/push-client";
-import { Button, Card, CardHeader, ErrorNote } from "./ui";
+import { Button, Card, CardHeader, ErrorNote, HeaderLink } from "./ui";
 
 const STATUS_TEXT: Record<DevicePushStatus, string> = {
   on: "Notifications are on for this device.", off: "Notifications are off for this device.",
@@ -76,11 +75,11 @@ export function NotificationSettingsCard() {
 
   return <section id="notifications"><Card>
     <CardHeader title={<span className="flex items-center gap-2"><Bell className="h-4 w-4" /> Notifications</span>}
-      action={<Link href="/notifications" className="text-sm font-medium text-accent">Open inbox</Link>} />
-    <div className="space-y-4 p-4">
+      action={<HeaderLink href="/notifications">Open inbox</HeaderLink>} />
+    <div className="space-y-3 px-4 py-3">
       <div className="space-y-3">
-        <p className="text-sm text-ink-soft" role="status">{device ? STATUS_TEXT[device.status] : "Checking this device…"}</p>
-        <p className="text-xs text-ink-faint">Alerts hide names, messages, and amounts. Open SplitWisest to see the details.</p>
+        <p className="text-body text-ink-soft" role="status">{device ? STATUS_TEXT[device.status] : "Checking this device…"}</p>
+        <p className="text-meta text-ink-faint">Alerts hide names, messages, and amounts. Open SplitWisest to see the details.</p>
         {device?.status === "off" && data?.publicKey && me && <Button disabled={busy} onClick={() => {
           // act calls work synchronously, so Safari still sees the user's tap.
           void act(() => enablePush(data.publicKey!, me.id), "Notifications are on for this device.");
@@ -93,13 +92,13 @@ export function NotificationSettingsCard() {
       </div>
       {data && <fieldset className="space-y-1 border-t border-line pt-3" disabled={busy}>
         <legend className="sr-only">Phone alert preferences</legend>
-        <label className="flex min-h-11 items-center justify-between gap-3 text-sm font-semibold">
+        <label className="flex min-h-11 items-center justify-between gap-3 text-body font-semibold">
           Phone alerts on all devices
           <input type="checkbox" className="h-5 w-5 shrink-0 accent-accent" checked={data.preferences.pushEnabled}
             onChange={(e) => preference({ pushEnabled: e.target.checked })} />
         </label>
-        <p className="pb-2 text-xs text-ink-faint">Choose which alerts reach your devices. All activity stays in your notification inbox for 90 days.</p>
-        {Object.entries(NOTIFICATION_CATEGORIES).map(([key, label]) => <label key={key} className="flex min-h-11 items-center justify-between gap-3 text-sm text-ink-soft">
+        <p className="pb-2 text-meta text-ink-faint">Choose which alerts reach your devices. All activity stays in your notification inbox for 90 days.</p>
+        {Object.entries(NOTIFICATION_CATEGORIES).map(([key, label]) => <label key={key} className="flex min-h-11 items-center justify-between gap-3 text-body text-ink-soft">
           {label}
           <input type="checkbox" className="h-5 w-5 shrink-0 accent-accent" disabled={!data.preferences.pushEnabled}
             checked={data.preferences.categories[key as keyof typeof NOTIFICATION_CATEGORIES]}
@@ -107,10 +106,10 @@ export function NotificationSettingsCard() {
         </label>)}
       </fieldset>}
       {!!data?.devices.length && <div className="space-y-2 border-t border-line pt-3">
-        <p className="text-sm font-semibold">Your devices</p>
-        {data.devices.map((d) => <div key={d.id} className="flex items-center gap-2 text-sm">
+        <p className="text-body font-semibold">Your devices</p>
+        {data.devices.map((d) => <div key={d.id} className="flex items-center gap-2 text-body">
           <Smartphone className="h-4 w-4 shrink-0 text-ink-faint" />
-          <div className="min-w-0 flex-1"><p>{d.label}{d.id === device?.id ? " · This device" : ""}</p><p className="text-xs text-ink-faint">Last connected {fmtTime(d.updatedAt)}</p></div>
+          <div className="min-w-0 flex-1"><p>{d.label}{d.id === device?.id ? " · This device" : ""}</p><p className="text-meta text-ink-faint">Last connected {fmtTime(d.updatedAt)}</p></div>
           <Button variant="ghost" disabled={busy} aria-label={`Remove ${d.label}${d.id === device?.id ? " on this device" : " device"}`}
             onClick={() => void act(() => d.id === device?.id ? disablePush(d.id)
               : api("/api/push/subscriptions", { method: "DELETE", body: { id: d.id } }), "Device removed.")}>Remove</Button>
@@ -118,7 +117,7 @@ export function NotificationSettingsCard() {
       </div>}
       <ErrorNote message={error} />
       {error && <Button variant="secondary" disabled={busy} onClick={() => void act(reload, "Settings refreshed.")}>Try again</Button>}
-      {notice && <p role="status" className="text-sm text-accent">{notice}</p>}
+      {notice && <p role="status" className="text-body text-accent">{notice}</p>}
     </div>
   </Card></section>;
 }

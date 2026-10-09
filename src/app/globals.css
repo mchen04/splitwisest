@@ -78,6 +78,35 @@
   --text-4xl: 2.5rem;            /* 40 / 44 */
   --text-4xl--line-height: 2.75rem;
 
+  /* ─── Type roles — what components use. Each role names a job, not a size,
+     so every screen sets the same thing the same way. `pnpm verify:ui-tokens`
+     rejects raw ramp sizes outside ui.tsx.
+
+       meta        timestamps, counts, helper text, badges
+       body        secondary text, labels, buttons, compact rows
+       row         the primary text of a list row (16 on phones, 14 on desktop)
+       section     card and section headings
+       title       page-level names: a group, a person, a dialog
+       amount      a balance for a group, person, or dialog
+       amount-lg   the amount field and Home currency tiles
+       hero        the one net balance on Home ─── */
+  --text-meta: 0.75rem;
+  --text-meta--line-height: 1rem;
+  --text-body: 0.875rem;
+  --text-body--line-height: 1.25rem;
+  --text-row: 0.875rem;
+  --text-row--line-height: 1.25rem;
+  --text-section: 1rem;
+  --text-section--line-height: 1.5rem;
+  --text-title: 1.25rem;
+  --text-title--line-height: 1.75rem;
+  --text-amount: 1.5rem;
+  --text-amount--line-height: 2rem;
+  --text-amount-lg: 2rem;
+  --text-amount-lg--line-height: 2.25rem;
+  --text-hero: 2.5rem;
+  --text-hero--line-height: 2.75rem;
+
   /* ─── Control metrics — single source for interactive sizing ─── */
   --control-h: 2.5rem;           /* 40 — standard controls */
   --control-h-sm: 2rem;          /* 32 — compact desktop controls */
@@ -123,6 +152,17 @@
   color-scheme: light;
   --safe-area-bottom: env(safe-area-inset-bottom, 0px);
   --mobile-nav-lift: 0.25rem;
+  --nav-h: 2.25rem;              /* 36 — sidebar rows with a mouse */
+}
+
+/* Touch-first screens get thumb-sized controls at any width (an iPad shows the
+   desktop layout but is still driven by a finger). */
+@media (pointer: coarse) {
+  :root {
+    --control-h: 2.75rem;
+    --control-h-sm: 2.75rem;
+    --nav-h: 2.75rem;
+  }
 }
 [data-theme="dark"] { color-scheme: dark; }
 
@@ -150,7 +190,10 @@ body {
 @media (max-width: 47.999rem) {
   :root {
     --control-h: 2.75rem;        /* 44 — thumb-safe mobile controls */
+    --control-h-sm: 2.75rem;     /* compact desktop controls stay 44 on touch screens */
     --row-h: 3.25rem;            /* 52 — readable mobile ledger rows */
+    --text-row: 1rem;            /* row titles match the 16px mobile control text */
+    --text-row--line-height: 1.25rem;
   }
 
   /* The mobile app is a locked frame, not a scrolling document. The frame owns
@@ -209,6 +252,31 @@ body {
 
   body:has(.chat-composer-input:focus) .mobile-nav {
     display: none !important;
+  }
+}
+
+/* Confirmations float above everything, and on phones above the bottom
+   navigation and the home indicator, so they never cover the next tap. */
+.toast-region {
+  position: fixed;
+  z-index: 60;
+  left: 0;
+  right: 0;
+  bottom: calc(var(--safe-area-bottom) + 5rem);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0 1rem;
+  pointer-events: none;
+}
+
+@media (min-width: 48rem) {
+  .toast-region {
+    left: auto;
+    bottom: 1.5rem;
+    right: 1.5rem;
+    align-items: flex-end;
   }
 }
 

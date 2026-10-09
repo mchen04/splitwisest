@@ -3,9 +3,9 @@
 import { Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Bell, CheckCheck, Settings } from "lucide-react";
+import { Bell, Check, CheckCheck, CircleDot, Settings } from "lucide-react";
 import { AppShell } from "@/components/shell";
-import { Button, Card, EmptyState, ErrorNote } from "@/components/ui";
+import { Button, Card, EmptyState, ErrorNote, IconButton, Segmented } from "@/components/ui";
 import { api, fmtTime, useSync } from "@/lib/client";
 import type { NotificationItem } from "@/lib/notification-types";
 
@@ -45,36 +45,45 @@ function InboxPage() {
   }, [reload]);
 
   return <AppShell title="Notifications">
-    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-      <div className="flex gap-1" role="group" aria-label="Notification filter">
-        <Button variant={!unreadOnly ? "primary" : "secondary"} aria-pressed={!unreadOnly}
-          onClick={() => { setUnreadOnly(false); setBefore(null); }}>All</Button>
-        <Button variant={unreadOnly ? "primary" : "secondary"} aria-pressed={unreadOnly}
-          onClick={() => { setUnreadOnly(true); setBefore(null); }}>Unread{data ? ` (${data.unreadCount})` : ""}</Button>
+    <div className="mb-3 flex items-center gap-2">
+      <Segmented
+        label="Notification filter"
+        value={unreadOnly ? "unread" : "all"}
+        onChange={(value) => { setUnreadOnly(value === "unread"); setBefore(null); }}
+        options={[{ value: "all", label: "All" }, { value: "unread", label: `Unread${data ? ` (${data.unreadCount})` : ""}` }]}
+      />
+      <div className="ml-auto flex items-center gap-1">
+        {data && data.unreadCount > 0 && !before && data.notifications[0] && (
+          <Button size="sm" variant="ghost" disabled={busy} onClick={() => void mark({ throughId: data.notifications[0].id, read: true })}>
+            <CheckCheck className="h-4 w-4" /> Mark all read
+          </Button>
+        )}
+        <Link href="/settings#notifications" aria-label="Notification settings" title="Notification settings"
+          className="inline-flex h-[var(--control-h)] w-[var(--control-h)] items-center justify-center rounded-lg text-ink-soft hover:bg-subtle hover:text-ink">
+          <Settings className="h-4.5 w-4.5" />
+        </Link>
       </div>
-      <Link href="/settings#notifications" className="flex min-h-11 items-center gap-2 text-sm font-medium text-accent"><Settings className="h-4 w-4" /> Settings</Link>
     </div>
-    {params.get("test") === "opened" && <p role="status" className="mb-3 rounded-xl bg-accent-soft p-3 text-sm text-accent-dark">Test notification opened.</p>}
+    {params.get("test") === "opened" && <p role="status" className="mb-3 rounded-xl bg-accent-soft p-3 text-body text-accent-dark">Test notification opened.</p>}
     <ErrorNote message={actionError ?? error} />
-    {!data && !error && <p role="status" className="py-6 text-sm text-ink-faint">Loading notifications…</p>}
-    {error && <Button variant="secondary" onClick={reload}>Try again</Button>}
+    {!data && !error && <div role="status" className="space-y-2"><span className="sr-only">Loading notifications…</span>{[...Array(4)].map((_, i) => <div key={i} className="skeleton h-16 w-full" />)}</div>}
+    {error && <Button className="mt-2" variant="secondary" onClick={reload}>Try again</Button>}
     {data && <>
-      {data.unreadCount > 0 && !before && data.notifications[0] && <div className="mb-3 flex justify-end">
-        <Button variant="ghost" disabled={busy} onClick={() => void mark({ throughId: data.notifications[0].id, read: true })}><CheckCheck className="h-4 w-4" /> Mark all read</Button>
-      </div>}
-      {data.notifications.length === 0 ? <EmptyState icon={<Bell className="h-6 w-6" />} title={unreadOnly ? "You’re all caught up" : "No notifications yet"}
-        hint={unreadOnly ? "New activity appears here." : "Messages, expenses, and other activity from your friends appear here."} />
+      {data.notifications.length === 0 ? <Card><EmptyState icon={<Bell className="h-6 w-6" />} title={unreadOnly ? "You’re all caught up" : "No notifications yet"}
+        hint={unreadOnly ? "New activity appears here." : "Messages, expenses, and other activity from your friends appear here."} /></Card>
         : <Card className="shrink-0 divide-y divide-line overflow-hidden">
-          {data.notifications.map((n) => <div key={n.id} className={`flex items-start gap-2 px-3 py-3 sm:px-4 ${n.readAt ? "" : "bg-accent-soft"}`}>
-            <span className={`mt-2 h-2 w-2 shrink-0 rounded-full ${n.readAt ? "bg-line" : "bg-accent"}`} aria-hidden="true" />
+          {data.notifications.map((n) => <div key={n.id} className="flex items-start gap-2 py-2 pl-3 pr-1.5 sm:pl-4">
+            <span className={`mt-2 h-2 w-2 shrink-0 rounded-full ${n.readAt ? "bg-transparent" : "bg-accent"}`} aria-hidden="true" />
             <Link href={`/notifications/${n.id}`} className="min-w-0 flex-1 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
               <span className="sr-only">{n.readAt ? "Read" : "Unread"}</span>
-              <p className="text-sm font-semibold">{n.title}</p>
-              <p className="mt-0.5 break-words text-sm text-ink-soft">{n.body}</p>
-              <p className="mt-1 text-xs text-ink-faint">{fmtTime(n.createdAt)}</p>
+              <p className={`text-row ${n.readAt ? "font-medium text-ink-soft" : "font-semibold text-ink"}`}>{n.title}</p>
+              <p className="break-words text-body text-ink-soft">{n.body}</p>
+              <p className="mt-0.5 text-meta text-ink-faint">{fmtTime(n.createdAt)}</p>
             </Link>
-            <Button variant="ghost" disabled={busy} className="shrink-0" aria-label={`Mark ${n.title.toLowerCase()} ${n.readAt ? "unread" : "read"}`}
-              onClick={() => void mark({ id: n.id, read: !n.readAt })}>{n.readAt ? "Unread" : "Read"}</Button>
+            <IconButton variant={n.readAt ? "ghost" : "accent"} disabled={busy} label={`Mark ${n.title.toLowerCase()} ${n.readAt ? "unread" : "read"}`}
+              onClick={() => void mark({ id: n.id, read: !n.readAt })}>
+              {n.readAt ? <CircleDot className="h-4 w-4" /> : <Check className="h-4 w-4" />}
+            </IconButton>
           </div>)}
         </Card>}
       <div className="mt-3 flex gap-2">

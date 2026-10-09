@@ -14,13 +14,17 @@ scroll than on routes that fit in one screen.
 - The document never scrolls. `document.scrollHeight` equals `window.innerHeight`.
 - Bottom navigation includes the iPhone bottom inset and a small lift.
 - Mobile modal sheets include the bottom inset.
+- Confirmation toasts sit above the bottom navigation and the inset.
 - Bottom navigation sits at the same y on every route.
 - No route carries a page title row.
 - Chat fills the visible viewport without page scrolling.
 - The message list keeps its own vertical scroll.
 - Search, the composer, Send, and navigation stay visible.
 - Sending clears the draft without moving the page.
-- Shared mobile controls use a 44 px minimum height.
+- Shared mobile controls use a 44 px minimum height, and so does every control on a
+  touch-first screen (`pointer: coarse`) at any width.
+- Tapping Send keeps focus in the message field, so the navigation does not
+  reappear mid-tap and move Send out from under the finger.
 
 ## Local checks
 

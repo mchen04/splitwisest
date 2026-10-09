@@ -30,8 +30,8 @@ export default function LoginPage() {
 
   return (
     <AuthFrame>
-      <h1 className="text-2xl font-semibold tracking-tight">Welcome back</h1>
-      <p className="mt-1 text-sm text-ink-soft">Log in to pick up where your group left off.</p>
+      <h1 className="text-title font-semibold tracking-tight">Welcome back</h1>
+      <p className="mt-1 text-body text-ink-soft">Log in to pick up where your group left off.</p>
       <form onSubmit={submit} className="mt-6 space-y-4">
         <Field label="Username">
           <Input
@@ -56,7 +56,7 @@ export default function LoginPage() {
           Log in
         </Button>
       </form>
-      <div className="mt-4 flex items-center justify-between text-sm">
+      <div className="mt-4 flex items-center justify-between text-body">
         <Link href="/recover" className="whitespace-nowrap text-ink-soft hover:text-accent">
           Forgot password?
         </Link>

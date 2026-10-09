@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { ScrollText } from "lucide-react";
 import { fmtTime, markRead, useApiData, useSync } from "@/lib/client";
 import { AppShell } from "@/components/shell";
-import { Card, EmptyState, Button } from "@/components/ui";
+import { Card, EmptyState, Button, SectionLabel } from "@/components/ui";
 import { ActivitySummary } from "@/components/activity-summary";
 
 // Calendar-day bucket for the feed, so events scan by day instead of as one wall.
@@ -19,6 +20,10 @@ function dayLabel(iso: string): string {
     weekday: "short", month: "short", day: "numeric",
     year: d.getFullYear() === today.getFullYear() ? undefined : "numeric",
   });
+}
+
+function timeOnly(iso: string): string {
+  return new Date(iso).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 }
 
 interface Activity {
@@ -55,7 +60,7 @@ export default function ActivityPage() {
           {activity === null ? (
             <div className="space-y-2 p-3">{[...Array(6)].map((_, i) => <div key={i} className="skeleton h-8 w-full" />)}</div>
           ) : activity.length === 0 ? (
-            <EmptyState icon={<ScrollText className="h-8 w-8" />} title="Nothing yet" hint="Expenses, settlements, and group changes will show up here." />
+            <EmptyState icon={<ScrollText className="h-6 w-6" />} title="Nothing yet" hint="Expenses, payments, and group changes will show up here." />
           ) : (
             <ul>
               {activity.map((a, i) => {
@@ -63,15 +68,16 @@ export default function ActivityPage() {
                 return (
                   <li key={a.id} className="border-b border-line last:border-0">
                     {showDay && (
-                      <p className="bg-subtle px-4 py-1.5 text-xs font-semibold uppercase tracking-wider text-ink-faint">
-                        {dayLabel(a.createdAt)}
-                      </p>
+                      <SectionLabel className="border-b border-line bg-subtle px-4 py-1">{dayLabel(a.createdAt)}</SectionLabel>
                     )}
-                    <div className="px-4 py-2.5">
+                    <div className="px-4 py-2">
                       <ActivitySummary activity={a} />
-                      <p className="mt-0.5 text-xs text-ink-faint">
-                        {a.groupName ? `${a.groupName} · ` : ""}
-                        {fmtTime(a.createdAt)}
+                      <p className="text-meta text-ink-faint">
+                        {/* The group opens on its own activity, where this event sits in context. */}
+                        {a.groupName && a.groupId ? (
+                          <><Link href={`/groups/${a.groupId}?tab=activity`} className="font-medium text-ink-soft hover:text-accent-dark hover:underline">{a.groupName}</Link>{" · "}</>
+                        ) : a.groupName ? `${a.groupName} · ` : ""}
+                        <time dateTime={a.createdAt} title={fmtTime(a.createdAt)}>{timeOnly(a.createdAt)}</time>
                       </p>
                     </div>
                   </li>
