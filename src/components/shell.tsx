@@ -53,6 +53,14 @@ const MOBILE_NAV: { href: string; label: string; icon: typeof LayoutDashboard; b
   { href: "/chat", label: "Chat", icon: MessageSquare, badge: "messages" },
 ];
 
+// What a nav badge counts, for screen readers ("Home, 3 unread notifications").
+const BADGE_WORDS: Partial<Record<BadgeKey, string>> = {
+  notifications: "unread notifications",
+  messages: "unread messages",
+  balances: "need attention",
+  activity: "new",
+};
+
 function Badge({ count }: { count: number }) {
   if (count <= 0) return null;
   return (
@@ -69,7 +77,7 @@ function MobileNavLink({ href, label, icon: Icon, badge, active, count }: {
     <Link
       href={href}
       aria-current={active ? "page" : undefined}
-      aria-label={badge && count > 0 ? `${label}, ${count > 9 ? "9+" : count} new` : label}
+      aria-label={badge && count > 0 ? `${label}, ${count > 9 ? "9+" : count} ${BADGE_WORDS[badge]}` : label}
       className={`relative flex min-h-[var(--control-h)] flex-col items-center justify-center gap-0.5 py-1.5 text-meta font-medium ${
         active ? "text-accent" : "text-ink-faint"
       }`}
