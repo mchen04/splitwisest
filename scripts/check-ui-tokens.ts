@@ -86,6 +86,25 @@ export function findUiTokenViolations(source: string, file = "component.tsx"): U
       });
     }
   }
+  if (isComponent) {
+    // Button radios must behave like native ones: one Tab stop and arrow keys
+    // (radioGroupKeyDown on the group, radioTabIndex on each option).
+    const required: Record<string, string> = { radiogroup: "radioGroupKeyDown", radio: "radioTabIndex" };
+    for (const match of source.matchAll(/role="(radiogroup|radio)"/g)) {
+      const index = match.index ?? 0;
+      const tagStart = source.lastIndexOf("<", index);
+      const rest = source.slice(index);
+      const tagEnd = index + (rest.search(/[^=]>/) + 1 || rest.length);
+      const tag = source.slice(tagStart, tagEnd);
+      if (tag.includes(required[match[1]]) || tag.includes("ui-token-allow")) continue;
+      violations.push({
+        file,
+        line: source.slice(0, index).split("\n").length,
+        rule: `${match[1]} without ${required[match[1]]}`,
+        match: match[0],
+      });
+    }
+  }
   return violations;
 }
 

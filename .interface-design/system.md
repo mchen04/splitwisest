@@ -87,6 +87,10 @@ Never introduce other radius values.
   `p-1.5` icon buttons. Menus support arrows, Home, End, Escape, and focus return.
   A menu item that needs data still loading is disabled, never a silent no-op.
 - **Segmented**: one row of exclusive choices (inbox filter, theme).
+- **Button radios** (Segmented, split-method chips, the One person chooser, group-balance
+  methods) behave like native radios: `radioGroupKeyDown` on the `radiogroup` and
+  `radioTabIndex` on each option. The group is one Tab stop (the checked option) and
+  the arrow keys move to and select the next option. A new chip row must use both.
 - **Actions live where the number is.** A balance you owe carries its own Settle up;
   a friend who owes you carries Remind; a row's edit/delete sit on the row. Do not send
   the user to another page to act on something already on screen.
@@ -114,6 +118,15 @@ Never introduce other radius values.
 - **Money**: `tnum`; when signed, pair color **and** an explicit `+ / −` and, in
   balances, the word ("you're owed" / "you owe") — never color alone.
 - **Empty / loading / error**: `EmptyState`, `.skeleton` shimmer, `ErrorNote`.
+- Keep the three apart. A read that failed is never an empty list, a skeleton, or a
+  guessed count: show `LoadError` (with **Try again**) for a list or sheet, or a small
+  inline alert for one value (comments, the recovery-code count).
+- A failed action shows `ActionError` next to the control that started it: what failed,
+  the reason (`failureReason`: the server's message, or the connection), and **Try
+  again**. Keep what the user typed. When no reply came back, a retry first checks
+  whether the write landed (chat, comments) so it never posts twice.
+- A row that was just edited and is being re-read shows **Updating…** in place of its
+  amount, and its Delete waits for the new row (the API refuses an old version).
 
 ## Interaction states
 

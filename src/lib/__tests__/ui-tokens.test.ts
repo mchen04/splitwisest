@@ -36,6 +36,14 @@ describe("UI token enforcement", () => {
     expect(findUiTokenViolations('<ul className="hidden md:grid md:grid-cols-5" />', "src/app/page.tsx")).toEqual([]);
   });
 
+  it("requires button radios to take arrow keys and one Tab stop", () => {
+    const bare = '<div role="radiogroup" aria-label="Pick"><button type="button" role="radio" aria-checked={on} onClick={() => pick(1)}>One</button></div>';
+    expect(findUiTokenViolations(bare, "src/app/page.tsx").map((item) => item.rule))
+      .toEqual(["radiogroup without radioGroupKeyDown", "radio without radioTabIndex"]);
+    const keyed = '<div role="radiogroup" aria-label="Pick" onKeyDown={radioGroupKeyDown}><button type="button" role="radio" aria-checked={on} tabIndex={radioTabIndex(on, 0, true)} onClick={() => pick(1)}>One</button></div>';
+    expect(findUiTokenViolations(keyed, "src/app/page.tsx")).toEqual([]);
+  });
+
   it("defines every type role on the 4px baseline", () => {
     const css = readFileSync(join(process.cwd(), "src/app/globals.css"), "utf8");
     for (const role of ["meta", "body", "row", "section", "title", "amount", "amount-lg", "hero"]) {

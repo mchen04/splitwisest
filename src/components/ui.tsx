@@ -282,7 +282,7 @@ export function Select({ className = "", ...props }: SelectHTMLAttributes<HTMLSe
 /* Button radios behave like native ones: the group is one Tab stop (the
    checked option), and the arrow keys move to and select the next option. */
 
-/** onKeyDown for any element with role="radiogroup" whose options are buttons with role="radio". */
+/** onKeyDown for a radiogroup whose options are radio-role buttons. */
 export function radioGroupKeyDown(e: ReactKeyboardEvent<HTMLElement>) {
   const step = e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 0;
   if (step === 0 || e.altKey || e.ctrlKey || e.metaKey) return;
