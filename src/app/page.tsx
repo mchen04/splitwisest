@@ -36,6 +36,7 @@ interface Activity {
   actorId: number;
   actorName: string;
   actionText: string;
+  type: string;
   summary: string;
   createdAt: string;
 }

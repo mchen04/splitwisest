@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { api, fmtMoney, todayStr, useFormState, amountInputToCents, useMe } from "@/lib/client";
 import { Button, ErrorNote, Field, Modal, Select, toast } from "./ui";
 import { SettleFields } from "./settle-fields";
@@ -143,6 +144,16 @@ function DirectSettleForm({
             <p className={`tnum text-amount font-semibold tracking-tight ${obligation.netCents < 0 ? "text-owe" : "text-owed"}`}>
               {fmtMoney(Math.abs(obligation.netCents), obligation.currency)}
             </p>
+            {/* This records the whole balance. Paying part of a group balance is
+                the group's own Settle up form, opened with the same two people. */}
+            {!existing && obligation.groupId !== null && me && (
+              <Link
+                href={`/groups/${obligation.groupId}?settle=partial&payer=${obligation.netCents < 0 ? me.id : friend.id}&recipient=${obligation.netCents < 0 ? friend.id : me.id}`}
+                className="-ml-1 mt-0.5 inline-flex min-h-[var(--control-h-sm)] items-center rounded-lg px-1 text-body font-medium text-accent hover:bg-accent-soft"
+              >
+                Record a partial payment in {obligation.groupName ?? "the group"}
+              </Link>
+            )}
           </div>
         )}
         {!existing && obligations.length > 1 && (

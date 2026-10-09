@@ -2,9 +2,9 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Search, SendHorizonal } from "lucide-react";
-import { api, fmtTime, markRead, useApiData } from "@/lib/client";
+import { api, ApiClientError, fmtTime, markRead, useApiData } from "@/lib/client";
 import { startsMessageBurst } from "@/lib/chat";
-import { Avatar, Input } from "./ui";
+import { ActionError, Avatar, Input, LoadError, toast } from "./ui";
 
 interface Message {
   id: number;
@@ -56,7 +56,7 @@ export function ChatPane({
   readScope?: string; // e.g. msg:group:1 — marks the conversation read on view
   fill?: boolean; // fill the parent's height instead of the fixed mobile height
 }) {
-  const { data: initialData, reload: reloadInitial } = useApiData<{ messages: Message[]; hasMore?: boolean }>(
+  const { data: initialData, error: initialError, reload: reloadInitial } = useApiData<{ messages: Message[]; hasMore?: boolean }>(
     endpoint, 0, { sync: false }
   );
   const [messages, setMessages] = useState<Message[] | null>(null);
@@ -64,12 +64,18 @@ export function ChatPane({
   const [query, setQuery] = useState("");
   const [searching, setSearching] = useState(false);
   const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState<{ endpoint: string; message: string | null } | null>(null);
+  const [searchError, setSearchError] = useState<string | null>(null);
   const [hasMoreOlder, setHasMoreOlder] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
   const lastId = useRef(0);
   const inflight = useRef<Promise<void> | null>(null);
   const searchSeq = useRef(0);
+  // A send that got no reply may still have been saved. Before sending the same
+  // text again, look for it after the newest message seen then, so a retry never
+  // posts it twice.
+  const unconfirmed = useRef<{ endpoint: string; body: string; afterId: number } | null>(null);
 
   useLayoutEffect(() => {
     // Reset on a conversation change. A persistent result replaces the old
@@ -99,6 +105,8 @@ export function ChatPane({
       requestAnimationFrame(() => {
         if (scrollEl) scrollEl.scrollTop += scrollEl.scrollHeight - prevHeight;
       });
+    } catch {
+      toast("Could not load earlier messages. Try again.", { tone: "error" });
     } finally {
       setLoadingOlder(false);
     }
@@ -147,29 +155,52 @@ export function ChatPane({
     searchTimer.current = setTimeout(async () => {
       if (!q.trim()) {
         setSearching(false);
+        setSearchError(null);
         reloadInitial();
         return;
       }
       setSearching(true);
       const seq = ++searchSeq.current;
-      const r = await api<{ messages: Message[] }>(`${endpoint}?q=${encodeURIComponent(q.trim())}`);
-      if (seq === searchSeq.current) setMessages(r.messages);
+      try {
+        const r = await api<{ messages: Message[] }>(`${endpoint}?q=${encodeURIComponent(q.trim())}`);
+        if (seq === searchSeq.current) {
+          setSearchError(null);
+          setMessages(r.messages);
+        }
+      } catch (err) {
+        if (seq === searchSeq.current) setSearchError(err instanceof ApiClientError ? err.message : "Could not load data");
+      }
     }, 250);
   }
 
-  async function send(e: React.FormEvent) {
-    e.preventDefault();
+  async function send(e?: React.FormEvent) {
+    e?.preventDefault();
     const body = draft.trim();
     if (!body || sending) return;
     setSending(true);
+    setSendError(null);
     try {
-      await api(endpoint, { body: { body } });
+      const pending = unconfirmed.current;
+      const alreadySent = pending?.endpoint === endpoint && pending.body === body &&
+        (await api<{ messages: Message[] }>(`${endpoint}?since=${pending.afterId}`)).messages
+          .some((m) => m.senderId === meId && m.body === body);
+      if (!alreadySent) await api(endpoint, { body: { body } });
+      unconfirmed.current = null;
       setDraft("");
-      await loadNew();
+    } catch (err) {
+      // A server reply means the message was refused; no reply leaves it unknown.
+      const pending = unconfirmed.current;
+      if (!(err instanceof ApiClientError) && !(pending?.endpoint === endpoint && pending.body === body)) {
+        unconfirmed.current = { endpoint, body, afterId: lastId.current };
+      }
+      setSendError({ endpoint, message: err instanceof ApiClientError ? err.message : null });
+      return;
     } finally {
       setSending(false);
     }
+    await loadNew().catch(() => {});
   }
+  const sendFailure = sendError?.endpoint === endpoint ? sendError : null;
 
   return (
     <div className={`flex flex-col md:h-full md:min-h-0 ${fill ? "min-h-0 flex-1" : "h-[28rem]"}`}>
@@ -197,12 +228,19 @@ export function ChatPane({
             </button>
           </div>
         )}
-        {messages === null ? (
-          <div className="space-y-3">
-            {[...Array(4)].map((_, i) => (
-              <div key={i} className="skeleton h-10 w-2/3" />
-            ))}
-          </div>
+        {searching && searchError ? (
+          <LoadError what="search results" message={searchError} onRetry={() => runSearch(query)} />
+        ) : messages === null ? (
+          initialError ? (
+            <LoadError what="messages" message={initialError} onRetry={reloadInitial} />
+          ) : (
+            <div role="status" className="space-y-3">
+              <span className="sr-only">Loading messages…</span>
+              {[...Array(4)].map((_, i) => (
+                <div key={i} className="skeleton h-10 w-2/3" />
+              ))}
+            </div>
+          )
         ) : messages.length === 0 ? (
           <p className="py-10 text-center text-body text-ink-faint">{searching ? "No messages match." : emptyHint}</p>
         ) : (
@@ -230,6 +268,11 @@ export function ChatPane({
           })
         )}
       </div>
+      {sendFailure && !sending && (
+        <div className="border-t border-line px-3 pt-1.5">
+          <ActionError title="Message not sent. Your text is kept." message={sendFailure.message} onRetry={() => void send()} />
+        </div>
+      )}
       <form onSubmit={send} className="flex items-center gap-2 border-t border-line px-3 py-1.5">
         <Input
           value={draft}

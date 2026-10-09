@@ -6,7 +6,7 @@ import { Copy, Check, KeyRound, LogOut, ShieldCheck, UserCog, Palette, Moon, Sun
 import { api, useApiData, useFormState } from "@/lib/client";
 import { useTheme } from "@/lib/theme";
 import { AppShell } from "@/components/shell";
-import { Card, CardHeader, Button, Field, Input, ErrorNote, Segmented, confirmAction } from "@/components/ui";
+import { Card, CardHeader, Button, Field, Input, ErrorNote, Segmented, confirmAction, failureReason } from "@/components/ui";
 import { NotificationSettingsCard } from "@/components/notification-settings";
 
 interface Me {
@@ -166,8 +166,9 @@ function PasswordCard() {
 }
 
 function RecoveryCard() {
-  const { data } = useApiData<{ remaining: number }>("/api/me/recovery-codes", 0, { sync: false });
+  const { data, error: countError, reload: reloadCount } = useApiData<{ remaining: number }>("/api/me/recovery-codes", 0, { sync: false });
   const [generatedRemaining, setGeneratedRemaining] = useState<number | null>(null);
+  // null while checking, and after a failed check: the count is unknown, not zero.
   const remaining = generatedRemaining ?? data?.remaining ?? null;
   const [codes, setCodes] = useState<string[] | null>(null);
   const [copied, setCopied] = useState(false);
@@ -175,9 +176,9 @@ function RecoveryCard() {
 
   function regenerate() {
     void (async () => {
-      if (codes && !(await confirmAction({
+      if ((codes || remaining === null) && !(await confirmAction({
         title: "Generate new codes?",
-        message: "Your old recovery codes will stop working.",
+        message: codes ? "Your old recovery codes will stop working." : "Any recovery codes you already have will stop working.",
         confirmLabel: "Generate new codes",
         danger: true,
       }))) return;
@@ -216,16 +217,21 @@ function RecoveryCard() {
               <span className="text-meta text-ink-faint">These won&apos;t be shown again.</span>
             </div>
           </div>
+        ) : remaining === null && countError ? (
+          <div role="alert" className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg bg-danger-soft px-3 py-2 text-body text-danger">
+            <p className="min-w-0 flex-1">Could not check how many codes you have left. {failureReason(countError)}</p>
+            <Button type="button" size="sm" variant="secondary" onClick={reloadCount}>Try again</Button>
+          </div>
         ) : (
-          <p className="text-body text-ink-faint">
-            {remaining === null ? "Checking…" : remaining > 0
+          <p role={remaining === null ? "status" : undefined} className="text-body text-ink-faint">
+            {remaining === null ? "Checking your recovery codes…" : remaining > 0
               ? `You have ${remaining} unused recovery ${remaining === 1 ? "code" : "codes"}.`
               : "You have no recovery codes yet."}
           </p>
         )}
         <ErrorNote message={error} />
-        <Button variant={remaining ? "secondary" : "primary"} onClick={regenerate} busy={busy}>
-          {remaining ? "Regenerate codes" : "Generate recovery codes"}
+        <Button variant={remaining === 0 ? "primary" : "secondary"} onClick={regenerate} busy={busy}>
+          {remaining === 0 ? "Generate recovery codes" : remaining === null ? "Generate new codes" : "Regenerate codes"}
         </Button>
       </div>
     </Card>

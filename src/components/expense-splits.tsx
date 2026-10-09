@@ -4,7 +4,7 @@ import { Dispatch, SetStateAction } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { fmtMoney } from "@/lib/client";
 import { currencySymbol } from "@/lib/currencies";
-import { Button, IconButton, Input } from "./ui";
+import { Button, IconButton, Input, radioGroupKeyDown, radioTabIndex } from "./ui";
 import { Member } from "./expense-form";
 
 export type Method = "solo" | "equal" | "exact" | "percentage" | "shares" | "itemized";
@@ -46,8 +46,8 @@ export function ParticipantSplit({
     return (
       <fieldset>
         <legend className={LEGEND}>Who owes the full amount?</legend>
-        <div className="grid grid-cols-2 gap-2" role="radiogroup">
-          {members.map((member) => {
+        <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Who owes the full amount?" onKeyDown={radioGroupKeyDown}>
+          {members.map((member, index) => {
             const checked = selected.has(member.id);
             return (
               <button
@@ -55,6 +55,7 @@ export function ParticipantSplit({
                 type="button"
                 role="radio"
                 aria-checked={checked}
+                tabIndex={radioTabIndex(checked, index, members.some((m) => selected.has(m.id)))}
                 onClick={() => onToggle(member.id)}
                 className={`min-h-[var(--control-h)] min-w-0 rounded-lg border px-2.5 py-1.5 text-left ${checked ? "border-accent bg-accent-soft" : "border-line bg-card hover:border-line-strong"}`}
               >

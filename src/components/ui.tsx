@@ -2,7 +2,7 @@
 
 import {
   cloneElement, isValidElement, ReactNode, useEffect, useRef, useState, useSyncExternalStore,
-  ButtonHTMLAttributes, InputHTMLAttributes, SelectHTMLAttributes, TextareaHTMLAttributes,
+  ButtonHTMLAttributes, InputHTMLAttributes, KeyboardEvent as ReactKeyboardEvent, SelectHTMLAttributes, TextareaHTMLAttributes,
 } from "react";
 import Link from "next/link";
 import { X, Loader2, Inbox, ChevronDown, MoreHorizontal, Check, AlertCircle } from "lucide-react";
@@ -279,6 +279,27 @@ export function Select({ className = "", ...props }: SelectHTMLAttributes<HTMLSe
   );
 }
 
+/* Button radios behave like native ones: the group is one Tab stop (the
+   checked option), and the arrow keys move to and select the next option. */
+
+/** onKeyDown for any element with role="radiogroup" whose options are buttons with role="radio". */
+export function radioGroupKeyDown(e: ReactKeyboardEvent<HTMLElement>) {
+  const step = e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 0;
+  if (step === 0 || e.altKey || e.ctrlKey || e.metaKey) return;
+  const radios = [...e.currentTarget.querySelectorAll<HTMLElement>('[role="radio"]:not(:disabled)')];
+  const from = radios.indexOf(document.activeElement as HTMLElement);
+  if (from === -1) return;
+  e.preventDefault();
+  const next = radios[(from + step + radios.length) % radios.length];
+  next.focus();
+  next.click();
+}
+
+/** tabIndex for option `index`: the checked option, or the first when none is checked. */
+export function radioTabIndex(checked: boolean, index: number, anyChecked: boolean): 0 | -1 {
+  return checked || (!anyChecked && index === 0) ? 0 : -1;
+}
+
 /** One row of mutually exclusive choices (filters, split methods, theme). */
 export function Segmented<T extends string>({
   value,
@@ -294,13 +315,14 @@ export function Segmented<T extends string>({
   className?: string;
 }) {
   return (
-    <div role="radiogroup" aria-label={label} className={`inline-flex max-w-full gap-1 overflow-x-auto rounded-xl border border-line bg-card p-1 ${className}`}>
-      {options.map((option) => (
+    <div role="radiogroup" aria-label={label} onKeyDown={radioGroupKeyDown} className={`inline-flex max-w-full gap-1 overflow-x-auto rounded-xl border border-line bg-card p-1 ${className}`}>
+      {options.map((option, index) => (
         <button
           key={option.value}
           type="button"
           role="radio"
           aria-checked={value === option.value}
+          tabIndex={radioTabIndex(value === option.value, index, options.some((o) => o.value === value))}
           onClick={() => onChange(option.value)}
           className={`min-h-[var(--control-h-sm)] min-w-[var(--control-h-sm)] shrink-0 whitespace-nowrap rounded-lg px-3 text-body font-medium transition-colors focus-visible:outline-none focus-visible:ring-[var(--focus-ring)] focus-visible:ring-accent-soft ${
             value === option.value ? "bg-accent-soft text-accent-dark" : "text-ink-soft hover:bg-subtle hover:text-ink"
@@ -414,7 +436,8 @@ export function Modal({
     const previouslyFocused = document.activeElement as HTMLElement | null;
     const focusables = () =>
       [...(panelRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? [])]
-        .filter((element) => element.getClientRects().length > 0);
+        // Unchecked radios (tabIndex -1) are not Tab stops.
+        .filter((element) => element.tabIndex >= 0 && element.getClientRects().length > 0);
     // With a mouse or keyboard, start in the field the dialog exists for. On a
     // touch screen a programmatic focus cannot raise the keyboard, so the panel
     // takes focus and the first Tab still lands on the first control.
@@ -539,17 +562,44 @@ export function EmptyState({ icon, title, hint, action }: { icon?: ReactNode; ti
   );
 }
 
+/** What to tell the user about a failed request: the server's reason, or the connection. */
+export function failureReason(message?: string | null): string {
+  if (typeof navigator !== "undefined" && navigator.onLine === false) return "You are offline. Reconnect, then try again.";
+  // useApiData reports a failed request (no server reply) with this generic text.
+  if (!message || message === "Could not load data" || message === "Failed to fetch" || message === "Load failed") {
+    return "Check your connection and try again.";
+  }
+  return message;
+}
+
 /** A list that could not load: says so, and offers the retry in place. */
 export function LoadError({ what, message, onRetry }: { what: string; message?: string | null; onRetry: () => void }) {
-  const offline = typeof navigator !== "undefined" && navigator.onLine === false;
-  // useApiData reports a failed request (no server reply) with this generic text.
-  const networkFailure = !message || message === "Could not load data";
   return (
     <div role="alert" className="flex flex-col items-center gap-1.5 px-6 py-8 text-center">
       <AlertCircle className="h-6 w-6 text-danger" aria-hidden />
       <p className="text-row font-medium">Could not load {what}</p>
-      <p className="max-w-sm text-body text-ink-faint">{offline ? "You are offline. Reconnect, then try again." : networkFailure ? "Check your connection and try again." : message}</p>
+      <p className="max-w-sm text-body text-ink-faint">{failureReason(message)}</p>
       <Button className="mt-2" variant="secondary" onClick={onRetry}>Try again</Button>
+    </div>
+  );
+}
+
+/** A failed action next to the control that started it, with a way to try again. */
+export function ActionError({ title, message, onRetry, children }: {
+  title: string;
+  message?: string | null;
+  onRetry: () => void;
+  children?: ReactNode;
+}) {
+  return (
+    <div role="alert" className="space-y-2 rounded-xl bg-danger-soft px-3 py-2 text-body text-danger">
+      <p><span className="font-semibold">{title}</span> {failureReason(message)}</p>
+      <div className="flex flex-wrap gap-2">
+        {/* Focus stays in the field the user was in: on a phone, leaving the chat
+            composer brings the navigation back and moves this button mid-tap. */}
+        <Button type="button" size="sm" variant="secondary" onMouseDown={(e) => e.preventDefault()} onClick={onRetry}>Try again</Button>
+        {children}
+      </div>
     </div>
   );
 }

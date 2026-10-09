@@ -128,6 +128,7 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
   const [editing, setEditing] = useState<Parameters<typeof ExpenseForm>[0]["existing"]>(null);
   const [settleOpen, setSettleOpen] = useState(false);
   const [settlePrefill, setSettlePrefill] = useState<{ payerId: number; recipientId: number; amountCents: number } | null>(null);
+  const [settleStart, setSettleStart] = useState<{ payerId: number; recipientId: number } | null>(null);
   const [settleChooserOpen, setSettleChooserOpen] = useState(false);
   const [detailId, setDetailId] = useState<number | null>(null);
   const [recurringOpen, setRecurringOpen] = useState(false);
@@ -166,7 +167,20 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
       setTab("expenses");
       setDetailId(expenseId);
     }
-    if (searchParams.get("add") === "1" || t || expenseId > 0) {
+    // "Record a partial payment" from Home or a profile: the settle form with
+    // who pays whom already set and the amount left to type.
+    const payer = Number(searchParams.get("payer"));
+    const recipient = Number(searchParams.get("recipient"));
+    const partial = searchParams.get("settle") === "partial" && Number.isInteger(payer) && payer > 0 &&
+      Number.isInteger(recipient) && recipient > 0;
+    if (partial) {
+      setTab("balances");
+      setSettleChooserOpen(false);
+      setSettlePrefill(null);
+      setSettleStart({ payerId: payer, recipientId: recipient });
+      setSettleOpen(true);
+    }
+    if (searchParams.get("add") === "1" || t || expenseId > 0 || partial) {
       window.history.replaceState(null, "", window.location.pathname);
     }
   }, []);
@@ -229,6 +243,16 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
     reloadGroupBalanceList();
     refreshGroupBalanceMutation();
   }
+
+  // An edit gives the row a new version, but the save does not return it. Until
+  // the list is read again, that row still carries the old one, and deleting it
+  // would be refused as a conflicting change. Its Delete waits for the new row.
+  const [editedGroupBalance, setEditedGroupBalance] = useState<{ id: number; list: GroupBalancePage | null } | null>(null);
+  const groupBalanceUpdating = (id: number) =>
+    editedGroupBalance?.id === id && editedGroupBalance.list === groupBalancesData;
+  // Recorded payments carry a version the same way.
+  const [editedPayment, setEditedPayment] = useState<{ id: number; list: Settlement[] | null } | null>(null);
+  const paymentUpdating = (id: number) => editedPayment?.id === id && editedPayment.list === settlements;
 
   async function removeGroupBalance(row: GroupBalanceSummary) {
     if (!(await confirmAction({
@@ -727,14 +751,19 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
             <p className="px-4 py-3 text-body text-ink-faint">No group balances yet. Add obligations without recording a payment.</p>
           ) : <>
             <ul className="divide-y divide-line">
-              {[...groupBalancesData.balances, ...(activeExtraGroupBalancePage?.balances ?? [])].map((row) => <li key={row.id} className="flex min-h-[var(--row-h)] items-center gap-2 px-4 py-1.5">
+              {[...groupBalancesData.balances, ...(activeExtraGroupBalancePage?.balances ?? [])].map((row) => {
+                const updating = groupBalanceUpdating(row.id);
+                return <li key={row.id} aria-busy={updating} className="flex min-h-[var(--row-h)] items-center gap-2 px-4 py-1.5">
                 <button type="button" onClick={() => openGroupBalance(row.id)} className="min-h-[var(--control-h)] min-w-0 flex-1 truncate rounded-lg text-left text-row font-medium hover:text-accent-dark">
                   {row.title}
                 </button>
-                <span className="tnum shrink-0 text-body font-semibold">{fmtMoney(row.amountCents, detail.group.currency)}</span>
+                {updating
+                  ? <span role="status" className="shrink-0 text-meta text-ink-faint">Updating…</span>
+                  : <span className="tnum shrink-0 text-body font-semibold">{fmtMoney(row.amountCents, detail.group.currency)}</span>}
                 <IconButton size="sm" variant="accent" label={`Edit ${row.title}`} onClick={() => openGroupBalance(row.id)}><Pencil className="h-4 w-4" /></IconButton>
-                <IconButton size="sm" variant="danger" label={`Delete ${row.title}`} onClick={() => removeGroupBalance(row)}><Trash2 className="h-4 w-4" /></IconButton>
-              </li>)}
+                <IconButton size="sm" variant="danger" label={`Delete ${row.title}`} disabled={updating} onClick={() => removeGroupBalance(row)}><Trash2 className="h-4 w-4" /></IconButton>
+              </li>;
+              })}
             </ul>
             {(activeExtraGroupBalancePage?.hasMore ?? groupBalancesData.hasMore) && <div className="border-t border-line p-3 text-center"><Button variant="secondary" busy={loadingGroupBalances} onClick={loadMoreGroupBalances}>Load more</Button></div>}
           </>}
@@ -748,8 +777,10 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
             <p className="px-4 py-3 text-body text-ink-faint">No payments recorded yet. When someone settles up offline, record it here so balances stay accurate.</p>
           ) : (
             <ul className="divide-y divide-line">
-              {settlements.map((s) => (
-                <li key={s.id} className="flex min-h-[var(--row-h)] items-center gap-2 px-4 py-1.5">
+              {settlements.map((s) => {
+                const updating = paymentUpdating(s.id);
+                return (
+                <li key={s.id} aria-busy={updating} className="flex min-h-[var(--row-h)] items-center gap-2 px-4 py-1.5">
                   <HandCoins className="h-4 w-4 shrink-0 text-owed" />
                   <span className="min-w-0 flex-1">
                     <span className="block text-body">
@@ -763,15 +794,18 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
                       {s.currency !== detail.group.currency ? ` · ${fmtMoney(s.amountCents, s.currency)}` : ""}
                     </RowMeta>
                   </span>
-                  <span className="tnum shrink-0 text-body font-semibold">{fmtMoney(s.amountCents, s.currency)}</span>
+                  {updating
+                    ? <span role="status" className="shrink-0 text-meta text-ink-faint">Updating…</span>
+                    : <span className="tnum shrink-0 text-body font-semibold">{fmtMoney(s.amountCents, s.currency)}</span>}
                   <IconButton size="sm" variant="accent" label="Edit payment" onClick={() => setEditingSettlement(s)}>
                     <Pencil className="h-4 w-4" />
                   </IconButton>
-                  <IconButton size="sm" variant="danger" label="Delete payment" onClick={() => deletePayment(s)}>
+                  <IconButton size="sm" variant="danger" label="Delete payment" disabled={updating} onClick={() => deletePayment(s)}>
                     <Trash2 className="h-4 w-4" />
                   </IconButton>
                 </li>
-              ))}
+                );
+              })}
             </ul>
           )}
           {settlements && settlements.length > 0 && hasMoreSettlements && (
@@ -909,24 +943,31 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
             balanceListCursor={groupBalancesData?.changeCursor ?? null}
             existing={editingGroupBalance} open={groupBalanceOpen}
             onClose={() => setGroupBalanceOpen(false)}
-            onSaved={afterGroupBalanceMutation}
+            onSaved={() => {
+              if (editingGroupBalance) setEditedGroupBalance({ id: editingGroupBalance.id, list: groupBalancesData });
+              afterGroupBalanceMutation();
+            }}
             onRefresh={() => { reloadGroupBalanceList(); refreshBalancePreview(); }}
           />
           <SettleModal
             open={settleOpen}
-            onClose={() => setSettleOpen(false)}
+            onClose={() => { setSettleOpen(false); setSettleStart(null); }}
             onSaved={refreshAll}
             groupId={groupId}
             members={detail.members}
             meId={me.id}
             defaultCurrency={detail.group.currency}
             prefill={settlePrefill}
+            start={settleStart}
             onCustom={settleCustom}
           />
           <SettleModal
             open={!!editingSettlement}
             onClose={() => setEditingSettlement(null)}
-            onSaved={refreshAll}
+            onSaved={() => {
+              if (editingSettlement) setEditedPayment({ id: editingSettlement.id, list: settlements });
+              refreshAll();
+            }}
             groupId={groupId}
             members={detail.members}
             meId={me.id}

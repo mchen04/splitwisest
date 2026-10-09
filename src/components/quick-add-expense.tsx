@@ -43,6 +43,8 @@ export function QuickAddExpense({
     `/api/groups/${groupId ?? 0}`, 0, { sync: false, enabled: formOpen });
   // Switching groups inside the form keeps the form (and what was typed) on
   // screen with the previous members until the new group's members arrive.
+  // If they never arrive, the form says so and offers Try again or going back;
+  // Save stays off, so nothing is written to either group by mistake.
   const [shown, setShown] = useState<GroupDetail | null>(null);
   if (formOpen && detail && detail.group.id === groupId && shown !== detail) setShown(detail);
   if (!formOpen && shown !== null) setShown(null);
@@ -116,6 +118,8 @@ export function QuickAddExpense({
           groupOptions={groups ?? undefined}
           selectedGroupId={groupId ?? shown.group.id}
           groupSwitching={switching}
+          groupSwitchError={switching ? detailError : null}
+          onRetryGroupSwitch={reload}
           onGroupChange={onPick}
         />
       )}

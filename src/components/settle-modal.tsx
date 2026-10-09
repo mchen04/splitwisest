@@ -16,6 +16,7 @@ export function SettleModal({
   meId,
   defaultCurrency,
   prefill,
+  start,
   existing,
   onCustom,
 }: {
@@ -27,6 +28,8 @@ export function SettleModal({
   meId: number;
   defaultCurrency: string;
   prefill?: { payerId: number; recipientId: number; amountCents: number } | null;
+  /** Who pays whom, with the amount left editable (a partial payment opened from another page). */
+  start?: { payerId: number; recipientId: number } | null;
   existing?: { id: number; payerId: number; recipientId: number; amountCents: number; currency: string; date: string; note: string; updatedAt: string } | null;
   /** Unlocks a suggested payment so the user can change who or how much. */
   onCustom?: () => void;
@@ -56,10 +59,15 @@ export function SettleModal({
       setDate(todayStr());
       setNote("");
       setCurrency(defaultCurrency);
+      const startOk = start && members.some((m) => m.id === start.payerId) && members.some((m) => m.id === start.recipientId);
       if (prefill) {
         setPayerId(prefill.payerId);
         setRecipientId(prefill.recipientId);
         setAmount((prefill.amountCents / 100).toFixed(2));
+      } else if (start && startOk) {
+        setPayerId(start.payerId);
+        setRecipientId(start.recipientId);
+        setAmount("");
       } else {
         setPayerId(meId);
         setRecipientId(members.find((m) => m.id !== meId)?.id ?? 0);

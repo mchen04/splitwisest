@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Paperclip, Plus, Check, AlertCircle, Users, ChevronDown, X } from "lucide-react";
 import { api, ApiClientError, fmtMoney, todayStr, CURRENCIES, amountInputToCents, useApiData } from "@/lib/client";
 import { rememberExpenseGroup } from "@/lib/last-group";
-import { Button, Field, Input, Select, Textarea, Modal, ErrorNote, toast, confirmAction } from "./ui";
+import { ActionError, Button, Field, Input, Select, Textarea, Modal, ErrorNote, toast, confirmAction, radioGroupKeyDown, radioTabIndex } from "./ui";
 import { ParticipantSplit, ItemizedSplit, Method, METHOD_LABELS, ItemRow } from "./expense-splits";
 
 const CALIFORNIA_TAX_RATE = "7.25";
@@ -63,6 +63,8 @@ export function ExpenseForm({
   groupOptions,
   selectedGroupId,
   groupSwitching = false,
+  groupSwitchError = null,
+  onRetryGroupSwitch,
   onGroupChange,
 }: {
   groupId: number;
@@ -80,7 +82,11 @@ export function ExpenseForm({
   /** When present, the group is a choice inside the form (Add from outside a group). */
   groupOptions?: { id: number; name: string; currency: string }[];
   selectedGroupId?: number;
+  /** True while the picked group's members load; payer and split still show `groupId`'s members. */
   groupSwitching?: boolean;
+  /** Why the picked group could not load; the form stays on `groupId` and keeps what was typed. */
+  groupSwitchError?: string | null;
+  onRetryGroupSwitch?: () => void;
   onGroupChange?: (groupId: number) => void;
 }) {
   const [title, setTitle] = useState("");
@@ -385,10 +391,12 @@ export function ExpenseForm({
   }
 
   const sectionCls = "space-y-3 rounded-xl border border-line p-3";
+  const pickedGroupName = groupOptions?.find((g) => g.id === selectedGroupId)?.name ?? "that group";
   return (
     <Modal open={open} onClose={onClose} title={existing ? "Edit expense" : "Add expense"} wide>
       <form onSubmit={submit} className="space-y-3">
         {groupOptions && groupOptions.length > 1 && !existing ? (
+          <div className="space-y-2">
           <div className={`group-choice group-hue-${(selectedGroupId ?? groupId) % 6} flex items-center gap-2 rounded-xl bg-[var(--group-soft)] py-1.5 pl-3 pr-1.5 text-[var(--group-ink)]`}>
             <Users className="h-4 w-4 shrink-0" aria-hidden />
             <label htmlFor="expense-group" className="shrink-0 text-body font-medium">Group</label>
@@ -400,6 +408,14 @@ export function ExpenseForm({
             >
               {groupOptions.map((g) => <option key={g.id} value={g.id}>{g.name} · {g.currency}</option>)}
             </Select>
+          </div>
+          {groupSwitching && (groupSwitchError ? (
+            <ActionError title={`Could not load ${pickedGroupName}. What you typed is kept.`} message={groupSwitchError} onRetry={() => onRetryGroupSwitch?.()}>
+              <Button type="button" size="sm" variant="ghost" onClick={() => onGroupChange?.(groupId)}>Back to {groupName}</Button>
+            </ActionError>
+          ) : (
+            <p role="status" className="text-meta text-ink-faint">Loading {pickedGroupName}&apos;s members…</p>
+          ))}
           </div>
         ) : (
           <p className={`group-choice group-hue-${groupId % 6} flex min-h-[var(--control-h-sm)] items-center gap-2 rounded-xl bg-[var(--group-soft)] px-3 py-1.5 text-body text-[var(--group-ink)]`}>
@@ -446,7 +462,7 @@ export function ExpenseForm({
 
         <div className="grid grid-cols-2 gap-x-3 gap-y-2 sm:grid-cols-3">
           <Field label="Paid by">
-            <Select value={payerId} onChange={(e) => setPayerId(Number(e.target.value))}>
+            <Select value={payerId} onChange={(e) => setPayerId(Number(e.target.value))} disabled={groupSwitching}>
               {members.map((m) => (
                 <option key={m.id} value={m.id}>{m.id === meId ? `${m.displayName} (you)` : m.displayName}</option>
               ))}
@@ -521,15 +537,16 @@ export function ExpenseForm({
           )}
         </div>
 
-        <fieldset className={sectionCls}>
+        <fieldset className={`${sectionCls} ${groupSwitching ? "opacity-50" : ""}`} disabled={groupSwitching} aria-busy={groupSwitching}>
           <legend className="sr-only">Split</legend>
-          <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Split method">
-            {(Object.keys(METHOD_LABELS) as Method[]).map((m) => (
+          <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Split method" onKeyDown={radioGroupKeyDown}>
+            {(Object.keys(METHOD_LABELS) as Method[]).map((m, index) => (
               <button
                 key={m}
                 type="button"
                 role="radio"
                 aria-checked={method === m}
+                tabIndex={radioTabIndex(method === m, index, true)}
                 onClick={() => {
                   if (m === "equal" && method === "solo") setSelected(new Set(members.map((member) => member.id)));
                   setMethod(m);

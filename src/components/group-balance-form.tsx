@@ -6,7 +6,7 @@ import { api, ApiClientError, fmtMoney, useSync } from "@/lib/client";
 import { simplifyDebts } from "@/lib/money";
 import { computeGroupObligation, formatGroupWeight, groupObligationCreatePayload, groupObligationDelta, parseGroupMoney, parseGroupWeight, GROUP_BALANCE_RECORD_CONFLICT, type SavedGroupObligation } from "@/lib/group-obligation-math";
 import { currencyStep } from "@/lib/currencies";
-import { Button, ErrorNote, Field, Input, Modal } from "./ui";
+import { Button, ErrorNote, Field, Input, Modal, radioGroupKeyDown, radioTabIndex } from "./ui";
 import { METHOD_LABELS, ParticipantSplit } from "./expense-splits";
 import type { Member } from "./expense-form";
 
@@ -206,9 +206,10 @@ export function GroupBalanceForm({ groupId, groupName, currency, members, meId, 
     return (
       <section className="space-y-3 rounded-xl border border-line p-3" aria-label={name === "owes" ? "Who owes" : "Who should receive"}>
         <h3 className="text-body font-semibold">{name === "owes" ? "Who owes" : "Who should receive"}</h3>
-        <div className="flex flex-wrap gap-2" role="radiogroup" aria-label={`${name} split method`}>
-          {methods.map((method) => (
+        <div className="flex flex-wrap gap-2" role="radiogroup" aria-label={`${name} split method`} onKeyDown={radioGroupKeyDown}>
+          {methods.map((method, index) => (
             <button key={method} type="button" role="radio" aria-checked={side.method === method}
+              tabIndex={radioTabIndex(side.method === method, index, methods.includes(side.method))}
               onClick={() => setSide((s) => ({ ...s, method }))}
               className={`min-h-[var(--control-h-sm)] rounded-lg border px-2.5 py-1 text-body font-medium ${
                 side.method === method ? "border-accent bg-accent-soft text-accent-dark" : "border-line text-ink-soft hover:border-line-strong"
