@@ -558,7 +558,7 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
             </Button>
           </div>
           {(showFilters || filterCount > 0) && (
-            <div className="grid grid-cols-2 gap-2 border-b border-line p-2 md:shrink-0 lg:grid-cols-4">
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,11rem),1fr))] gap-2 border-b border-line p-2 md:shrink-0">
               <Select value={filters.cat} onChange={setFilter("cat")} aria-label="Filter by category">
                 <option value="">All categories</option>
                 {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -572,7 +572,7 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
               {filtersActive && (
                 <button
                   onClick={resetFilters}
-                  className="col-span-2 inline-flex min-h-[var(--control-h-sm)] items-center gap-1 justify-self-start rounded-lg px-1 text-body font-medium text-accent hover:bg-accent-soft lg:col-span-4"
+                  className="col-span-full inline-flex min-h-[var(--control-h-sm)] items-center gap-1 justify-self-start rounded-lg px-1 text-body font-medium text-accent hover:bg-accent-soft"
                 >
                   <X className="h-4 w-4" /> Clear filters
                 </button>

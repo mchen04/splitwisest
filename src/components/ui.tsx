@@ -223,11 +223,8 @@ const inputCls =
   "w-full min-h-[var(--control-h)] rounded-lg border border-line-strong bg-card py-1.5 text-base text-ink placeholder:text-ink-faint transition-colors focus:border-accent focus:outline-none focus:ring-[var(--focus-ring)] focus:ring-accent-soft disabled:bg-subtle disabled:text-ink-soft read-only:bg-subtle sm:text-sm";
 
 export function Input(props: InputHTMLAttributes<HTMLInputElement>) {
-  // A date field is laid out from fixed internal segments that never shrink, so
-  // it needs tighter padding than a text field — and min-w-0, because a grid
-  // item defaults to min-width:auto and would otherwise refuse to shrink below
-  // that intrinsic width and spill out of its column.
-  const dateCls = props.type === "date" ? "px-2 min-w-0" : "px-3";
+  // Constrain Safari's native date control without replacing its date picker.
+  const dateCls = props.type === "date" ? "px-2 min-w-0 max-w-full appearance-none" : "px-3";
   return <input {...props} className={`${inputCls} ${dateCls} ${props.className ?? ""}`} />;
 }
 

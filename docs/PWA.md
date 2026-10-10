@@ -139,3 +139,46 @@ force a named check red. The harness writes temporary data under `.pwa-harness`.
 
 Remove `.pwa-harness`, generated `public/sw.js`, and test screenshots after verification.
 See `docs/pwa-cache-ledger.md` for measured results.
+
+## Date and split overflow regression
+
+`scripts/verify-mobile-overflow.mjs` checks a real local app with synthetic accounts.
+It rejects non-loopback origins and keeps credentials, measurements, and screenshots outside git.
+It uses the installed `playwright-core` browser engines.
+
+Prepare a separate local database with both migrations above, then create three synthetic
+accounts and one shared USD group through the local signup, group, and join APIs.
+Keep the first account's generated username/password in `fixture-secrets.json` and the
+numeric group ID in `fixture.json` (`{"groupId": 1}`), in a private directory outside git.
+Never use production credentials or database rows. For `next start`, use local HTTPS:
+WebKit requires HTTPS for the production session cookie. Trust only the test certificate.
+
+```bash
+MOBILE_ORIGIN=https://127.0.0.1:3148 \
+MOBILE_FIXTURE_DIR=/absolute/path/to/local-fixture \
+MOBILE_EVIDENCE_DIR=/absolute/path/to/evidence/webkit \
+node scripts/verify-mobile-overflow.mjs
+# Repeat with MOBILE_ENGINE=chromium and a separate evidence directory.
+# To isolate layout from service-worker transport, use MOBILE_SERVICE_WORKERS=block.
+# Keep the default worker-enabled run and its failures as separate evidence.
+```
+
+The check edits and saves real expenses and creates custom categories in this disposable group.
+It checks native date width, control boundaries, scrolling above the footer, keyboard access,
+all split modes, recurring and settlement forms, filters, settings, and navigation.
+It opens Add expense on Home, uses the current One person option, and confirms date persistence.
+For horizontal scrolling controls, it measures reachability and selects the notification filter.
+The 150% text case fails on the current-main date layout (162px for 185px of native segments). Weighted splits with long names fail
+at 320px before the fieldset minimum-width fix. Screenshots alone do not prove reachability.
+The 200% text case also checks that amount and currency labels do not overlap.
+
+The phone profile and `navigator.standalone` emulate layout only. Reduced viewport height
+simulates available keyboard space; it does not open an iPhone keyboard or native date picker.
+The default run allows service workers and fails on browser runtime errors.
+Blocking workers is a diagnostic comparison, not proof of the installed PWA lifecycle.
+Desktop WebKit can report worker/RSC request errors during route changes.
+Keep those failed receipts even when every layout and persistence assertion passes.
+
+The same check presses Send in a reduced-height chat viewport and verifies its position.
+Navigation must stay hidden through the pointer press, then the real message must save.
+WebKit on macOS uses Option-Tab (`Alt+Tab`) to include buttons in keyboard navigation.
