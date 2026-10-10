@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, MessageSquare, Pin, PinOff, Search, Users } from "lucide-react";
 import { useApiData, useMe, useSync } from "@/lib/client";
 import { AppShell } from "@/components/shell";
-import { Card, EmptyState, Avatar, Button, Input } from "@/components/ui";
+import { Card, EmptyState, Avatar, Button, IconButton, Input } from "@/components/ui";
 import { ChatPane } from "@/components/chat";
 
 interface Conversation {
@@ -84,7 +84,7 @@ function ChatPageInner() {
   // landing on an empty pane. Mobile keeps the list-first view.
   useEffect(() => {
     if (selectedKey || !conversations || conversations.length === 0) return;
-    if (typeof window === "undefined" || !window.matchMedia("(min-width: 768px)").matches) return;
+    if (typeof window === "undefined" || !window.matchMedia("(min-width: 1024px)").matches) return;
     const top = [...conversations].sort((a, b) => b.lastId - a.lastId)[0];
     if (top) router.replace(top.kind === "group" ? `/chat?g=${top.id}` : `/chat?dm=${top.id}`, { scroll: false });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -129,8 +129,8 @@ function ChatPageInner() {
   }
 
   const listPane = (
-    <div className={`flex min-h-0 flex-col md:w-80 md:shrink-0 md:border-r md:border-line ${selectedKey ? "hidden md:flex" : "flex"}`}>
-      <div className="border-b border-line px-3 py-2">
+    <div className={`flex min-h-0 flex-col lg:w-80 lg:shrink-0 lg:border-r lg:border-line ${selectedKey ? "hidden lg:flex" : "flex"}`}>
+      <div className="border-b border-line px-3 py-1.5">
         <div className="relative">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-faint" />
           <Input
@@ -138,7 +138,7 @@ function ChatPageInner() {
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search chats"
             aria-label="Search chats"
-            className="!min-h-[var(--control-h-sm)] !py-1.5 pl-8"
+            className="!min-h-[var(--control-h-sm)] !py-1 pl-8"
           />
         </div>
       </div>
@@ -169,7 +169,7 @@ function ChatPageInner() {
                   <button
                     onClick={() => open(c)}
                     aria-current={active ? "true" : undefined}
-                    className={`flex w-full items-center gap-2.5 py-2 pl-3 pr-10 text-left transition-colors md:pr-3 ${
+                    className={`flex min-h-[var(--row-h)] w-full items-center gap-2.5 py-1.5 pl-3 pr-12 text-left transition-colors [@media(hover:hover)]:pr-3 ${
                       active ? "bg-accent-soft" : "hover:bg-subtle"
                     }`}
                   >
@@ -182,16 +182,16 @@ function ChatPageInner() {
                     )}
                     <span className="min-w-0 flex-1">
                       <span className="flex items-baseline justify-between gap-2">
-                        <span className={`truncate text-sm ${c.unread ? "font-bold" : "font-medium"}`}>{c.name}</span>
+                        <span className={`truncate text-row ${c.unread ? "font-semibold" : "font-medium"}`}>{c.name}</span>
                         {c.lastAt && (
-                          <span className="shrink-0 text-xs text-ink-faint transition-opacity group-hover/row:opacity-0">
+                          <span className="shrink-0 text-meta text-ink-faint transition-opacity [@media(hover:hover)]:group-hover/row:opacity-0">
                             {fmtRowTime(c.lastAt)}
                           </span>
                         )}
                       </span>
                       <span className="flex items-center gap-1.5">
                         {pinned && <Pin className="h-3 w-3 shrink-0 text-ink-faint" aria-label="Pinned" />}
-                        <span className={`truncate text-xs ${c.unread ? "font-semibold text-ink" : "text-ink-faint"}`}>
+                        <span className={`truncate text-body ${c.unread ? "font-medium text-ink" : "text-ink-faint"}`}>
                           {c.lastBody
                             ? c.kind === "dm" ? c.lastBody : `${c.lastSender}: ${c.lastBody}`
                             : c.subtitle}
@@ -202,14 +202,15 @@ function ChatPageInner() {
                       </span>
                     </span>
                   </button>
-                  <button
+                  <IconButton
+                    size="sm"
                     onClick={() => togglePin(c)}
-                    aria-label={pinned ? `Unpin ${c.name}` : `Pin ${c.name}`}
-                    title={pinned ? "Unpin" : "Pin"}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-1.5 text-ink-faint hover:bg-card hover:text-ink md:top-1.5 md:hidden md:translate-y-0 md:p-1 md:group-hover/row:block md:focus-visible:block"
+                    label={pinned ? `Unpin ${c.name}` : `Pin ${c.name}`}
+                    // Touch screens cannot hover, so the pin stays visible there; with a mouse it appears on hover or focus.
+                    className="absolute right-0.5 top-1/2 -translate-y-1/2 text-ink-faint [@media(hover:hover)]:right-1.5 [@media(hover:hover)]:top-1 [@media(hover:hover)]:hidden [@media(hover:hover)]:translate-y-0 [@media(hover:hover)]:group-hover/row:inline-flex [@media(hover:hover)]:focus-visible:inline-flex"
                   >
-                    {pinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
-                  </button>
+                    {pinned ? <PinOff className="h-4 w-4" /> : <Pin className="h-4 w-4" />}
+                  </IconButton>
                 </li>
               );
             })}
@@ -220,17 +221,17 @@ function ChatPageInner() {
   );
 
   const detailPane = (
-    <div className={`min-h-0 flex-1 flex-col ${selectedKey ? "flex" : "hidden md:flex"}`}>
+    <div className={`min-h-0 flex-1 flex-col ${selectedKey ? "flex" : "hidden lg:flex"}`}>
       {selected ? (
         <>
-          <div className="flex items-center gap-2.5 border-b border-line px-3 py-2">
-            <button
+          <div className="flex items-center gap-2 border-b border-line py-1 pl-1 pr-2 lg:pl-3">
+            <IconButton
               onClick={() => router.replace("/chat", { scroll: false })}
-              aria-label="Back to all chats"
-              className="rounded-lg p-1.5 text-ink-soft hover:bg-subtle md:hidden"
+              label="Back to all chats"
+              className="lg:hidden"
             >
               <ArrowLeft className="h-5 w-5" />
-            </button>
+            </IconButton>
             {selected.kind === "group" ? (
               <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent-soft text-accent-dark">
                 <Users className="h-4 w-4" />
@@ -238,18 +239,16 @@ function ChatPageInner() {
             ) : (
               <Avatar name={selected.name} size="sm" />
             )}
-            <div className="min-w-0 flex-1">
-              <Link
-                href={selected.kind === "group" ? `/groups/${selected.id}` : `/people/${selected.id}`}
-                className="block truncate text-sm font-semibold hover:text-accent-dark hover:underline"
-              >
-                {selected.name}
-              </Link>
-              <p className="truncate text-xs text-ink-faint">{selected.subtitle}</p>
-            </div>
             <Link
               href={selected.kind === "group" ? `/groups/${selected.id}` : `/people/${selected.id}`}
-              className="shrink-0 rounded-lg border border-line px-2.5 py-1.5 text-xs font-medium text-ink-soft hover:border-accent hover:text-accent-dark"
+              className="group/title flex min-h-[var(--control-h-sm)] min-w-0 flex-1 flex-col justify-center rounded-lg"
+            >
+              <span className="block truncate text-row font-semibold group-hover/title:text-accent-dark group-hover/title:underline">{selected.name}</span>
+              <span className="truncate text-meta text-ink-faint">{selected.subtitle}</span>
+            </Link>
+            <Link
+              href={selected.kind === "group" ? `/groups/${selected.id}` : `/people/${selected.id}`}
+              className="inline-flex min-h-[var(--control-h-sm)] shrink-0 items-center rounded-lg border border-line px-2.5 text-body font-medium text-ink-soft hover:border-accent hover:text-accent-dark"
             >
               {selected.kind === "group" ? "Open group" : "View profile"}
             </Link>
@@ -274,10 +273,10 @@ function ChatPageInner() {
         <div className="flex flex-1 items-center justify-center p-8 text-center">
           <div>
             <MessageSquare className="mx-auto h-8 w-8 text-ink-faint" />
-            <p className="mt-3 font-medium text-ink-soft">
+            <p className="mt-3 text-row font-medium text-ink-soft">
               {selectedKey ? "Conversation not found" : "Select a conversation"}
             </p>
-            <p className="mt-1 text-sm text-ink-faint">
+            <p className="mt-1 text-body text-ink-faint">
               {selectedKey ? "It may have been removed, or you no longer have access." : "Pick a group or friend on the left to start chatting."}
             </p>
           </div>
@@ -288,7 +287,7 @@ function ChatPageInner() {
 
   return (
     <AppShell title="Chat">
-      <Card className="flex min-h-0 flex-1 flex-col overflow-hidden md:flex-row">
+      <Card className="flex min-h-0 flex-1 flex-col overflow-hidden lg:flex-row">
         {listPane}
         {detailPane}
       </Card>

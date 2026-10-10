@@ -30,8 +30,8 @@ export default function RecoverPage() {
 
   return (
     <AuthFrame>
-      <h1 className="text-2xl font-semibold tracking-tight">Reset password</h1>
-      <p className="mt-1 text-sm text-ink-soft">Enter your username and a recovery code to set a new password.</p>
+      <h1 className="text-title font-semibold tracking-tight">Reset password</h1>
+      <p className="mt-1 text-body text-ink-soft">Enter your username and a recovery code to set a new password.</p>
       <form onSubmit={submit} className="mt-6 space-y-4">
         <Field label="Username">
           <Input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" autoFocus required />
@@ -45,7 +45,7 @@ export default function RecoverPage() {
         <ErrorNote message={error} />
         <Button type="submit" busy={busy} className="w-full">Reset password</Button>
       </form>
-      <p className="mt-4 text-center text-sm">
+      <p className="mt-4 text-center text-body">
         <Link href="/login" className="font-semibold text-accent hover:text-accent-dark">Back to log in</Link>
       </p>
     </AuthFrame>

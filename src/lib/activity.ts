@@ -20,3 +20,16 @@ export function activityActionText(row: { summary: string; actorName: string; da
   if (typeof data.actionText === "string") return data.actionText;
   return row.summary.startsWith(row.actorName) ? row.summary.slice(row.actorName.length).trimStart() : row.summary;
 }
+
+/** The words after the linked actor name in a feed line. A recorded payment's
+ *  text is already a whole sentence naming the payer ("Diego paid Maya $120"), so
+ *  the actor is named once: as the payer when they recorded it, otherwise as the
+ *  person who recorded it. */
+export function activityAfterActor(row: { actorName: string; actionText: string; type?: string }): string {
+  const { actorName, actionText } = row;
+  if (row.type !== "settlement.recorded") return ` ${actionText}`;
+  if (actionText.startsWith(`${actorName} paid `)) return actionText.slice(actorName.length);
+  // Rows from before payments stored their own sentence lost the payer's name.
+  if (actionText.startsWith("paid ")) return ` ${actionText}`;
+  return ` recorded that ${actionText}`;
+}

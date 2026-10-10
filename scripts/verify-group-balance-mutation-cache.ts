@@ -125,8 +125,10 @@ async function main() {
     });
 
     await checkMutation("delete", async () => {
-      page.once("dialog", (dialog) => dialog.accept());
       await page.getByRole("button", { name: "Delete Cached balance edited" }).click();
+      // Deletion confirms in the app's own dialog, not the browser's.
+      await page.getByRole("dialog", { name: "Delete group balance?" })
+        .getByRole("button", { name: "Delete group balance" }).click();
     }, async () => {
       await page.getByText("No group balances yet").waitFor();
       await page.getByText("All settled up").first().waitFor();

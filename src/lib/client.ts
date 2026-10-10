@@ -186,6 +186,50 @@ export function apiCached<T>(path: string, force = false): Promise<T> {
   return p as Promise<T>;
 }
 
+// Drops cached reads this client knows are wrong because it just changed or
+// deleted what they describe. Storage is rewritten at once, so a reload right
+// after cannot paint them either. A read still in flight may predate the
+// change, so it is no longer shared and cannot write its result back.
+export function forgetReads(paths: string[]) {
+  hydrateReadCache();
+  for (const path of paths) {
+    dataCache.delete(path);
+    cacheTimes.delete(path);
+    cacheStoredAt.delete(path);
+    inflight.delete(path);
+    requestGeneration.set(path, (requestGeneration.get(path) ?? 0) + 1);
+  }
+  persistReadCache();
+}
+
+// Expense details are read from these. The record carries the version an edit
+// or delete must send, so a copy from before this client's own edit would show
+// the old values and get that delete refused as a conflicting change.
+const expenseDetailReads = (id: number) => [`/api/expenses/${id}`, `/api/expenses/${id}/history`];
+
+/** After this client edits an expense: drop its cached details and read the saved ones. */
+export function refreshExpenseDetails(id: number) {
+  const paths = expenseDetailReads(id);
+  forgetReads(paths);
+  for (const path of paths) apiCached(path, true).catch(() => {});
+}
+
+/** After this client deletes an expense: nothing cached may show it again. */
+export function forgetExpenseDetails(id: number) {
+  forgetReads([...expenseDetailReads(id), `/api/expenses/${id}/comments`]);
+}
+
+interface ReadState<T> { path: string; data: T | null; error: string | null; status: number | null; settled: boolean }
+
+// What a read hook shows when it starts showing `path`: the cached payload,
+// painted while the fresh read runs. A hook that showed this path before keeps
+// its own state only while the cache still holds that same payload; a newer
+// read, or a forgotten one (see forgetReads), must not reappear from memory.
+export function stateOnShow<T>(current: ReadState<T>, path: string, cached: T | null): ReadState<T> {
+  if (current.path === path ? current.data === cached : cached === null) return current;
+  return { path, data: cached, error: null, status: null, settled: false };
+}
+
 // Money formatting lives in the framework-agnostic money lib so server routes
 // and client components share one implementation.
 export { fmtMoney, amountInputToCents } from "./money";
@@ -345,7 +389,7 @@ export function useApiData<T>(
   reloadFreshCoalesced: () => void } {
   const enabled = opts.enabled !== false;
   // `settled` turns true once a fetch for this path has finished, success or failure.
-  const [state, setState] = useState<{ path: string; data: T | null; error: string | null; status: number | null; settled: boolean }>({
+  const [state, setState] = useState<ReadState<T>>({
     path,
     data: null,
     error: null,
@@ -395,12 +439,9 @@ export function useApiData<T>(
   useLayoutEffect(() => {
     if (!enabled) return;
     hydrateReadCache();
-    const stale = cacheGet<T>(path);
-    if (stale === null) return;
+    const cached = cacheGet<T>(path);
     // A layout update replaces the server skeleton before the first paint.
-    setState((current) => current.path === path && current.data !== null
-      ? current
-      : { path, data: stale, error: null, status: null, settled: false });
+    setState((current) => stateOnShow(current, path, cached));
   }, [path, enabled]);
   useEffect(() => {
     if (!enabled) return;

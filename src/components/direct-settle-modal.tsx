@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { api, fmtMoney, todayStr, useFormState, amountInputToCents, useMe } from "@/lib/client";
-import { Button, ErrorNote, Field, Modal, Select } from "./ui";
+import { Button, ErrorNote, Field, Modal, Select, toast } from "./ui";
 import { SettleFields } from "./settle-fields";
 import type { FriendObligation } from "@/lib/balances";
 
@@ -13,7 +14,7 @@ export interface DirectSettleFriend {
   netByCurrency: Record<string, number>;
 }
 
-function obligationKey(obligation: FriendObligation): string {
+export function obligationKey(obligation: FriendObligation): string {
   const direction = obligation.netCents < 0 ? "pay" : "receive";
   return `${obligation.groupId ?? "direct"}:${obligation.currency}:${direction}`;
 }
@@ -24,22 +25,26 @@ export function DirectSettleModal({
   onSaved,
   existing,
   preferredSign,
+  initialKey,
 }: {
   friend: DirectSettleFriend | null;
   onClose: () => void;
   onSaved: () => void;
   existing?: { id: number; amountCents: number; currency: string; date: string; note: string; updatedAt: string } | null;
   preferredSign?: -1 | 1;
+  /** Preselects one balance (see obligationKey) when the user picked it from a list. */
+  initialKey?: string;
 }) {
   if (!friend) return null;
   return (
     <DirectSettleForm
-      key={`${friend.id}:${existing?.id ?? "new"}`}
+      key={`${friend.id}:${existing?.id ?? "new"}:${initialKey ?? ""}`}
       friend={friend}
       onClose={onClose}
       onSaved={onSaved}
       existing={existing}
       preferredSign={preferredSign}
+      initialKey={initialKey}
     />
   );
 }
@@ -50,16 +55,19 @@ function DirectSettleForm({
   onSaved,
   existing,
   preferredSign,
+  initialKey,
 }: {
   friend: DirectSettleFriend;
   onClose: () => void;
   onSaved: () => void;
   existing?: { id: number; amountCents: number; currency: string; date: string; note: string; updatedAt: string } | null;
   preferredSign?: -1 | 1;
+  initialKey?: string;
 }) {
   const me = useMe();
   const obligations = friend.obligations.filter((item) => item.netCents !== 0);
-  const initialIndex = Math.max(
+  const pickedIndex = initialKey ? obligations.findIndex((item) => obligationKey(item) === initialKey) : -1;
+  const initialIndex = pickedIndex >= 0 ? pickedIndex : Math.max(
     0,
     obligations.findIndex((item) =>
       preferredSign ? Math.sign(item.netCents) === preferredSign : item.netCents < 0
@@ -119,17 +127,36 @@ function DirectSettleForm({
         });
       }
       onSaved();
+      toast(existing ? "Payment updated" : `Payment of ${fmtMoney(amountCents, paymentCurrency)} recorded`);
       onClose();
     }, existing ? "Could not update settlement" : "Could not record settlement");
   }
 
   return (
     <Modal open onClose={onClose} title={existing ? `Edit payment with ${friend.displayName}` : `Settle with ${friend.displayName}`}>
-      <p className="mb-4 rounded-lg bg-subtle px-3 py-2 text-xs text-ink-soft">
-        Records an offline payment against the selected balance. SplitWisest never moves money.
-      </p>
-      <form onSubmit={submit} className="space-y-4">
-        {!existing && obligations.length > 0 && (
+      <form onSubmit={submit} className="space-y-3">
+        {obligation && (
+          <div className="rounded-xl bg-subtle px-3 py-2.5">
+            <p className="text-body text-ink-soft">
+              {obligation.netCents < 0 ? <>You pay <strong className="text-ink">{friend.displayName}</strong></> : <><strong className="text-ink">{friend.displayName}</strong> pays you</>}
+              {" · "}{obligation.groupName ?? "Direct balance"}
+            </p>
+            <p className={`tnum text-amount font-semibold tracking-tight ${obligation.netCents < 0 ? "text-owe" : "text-owed"}`}>
+              {fmtMoney(Math.abs(obligation.netCents), obligation.currency)}
+            </p>
+            {/* This records the whole balance. Paying part of a group balance is
+                the group's own Settle up form, opened with the same two people. */}
+            {!existing && obligation.groupId !== null && me && (
+              <Link
+                href={`/groups/${obligation.groupId}?settle=partial&payer=${obligation.netCents < 0 ? me.id : friend.id}&recipient=${obligation.netCents < 0 ? friend.id : me.id}`}
+                className="-ml-1 mt-0.5 inline-flex min-h-[var(--control-h-sm)] items-center rounded-lg px-1 text-body font-medium text-accent hover:bg-accent-soft"
+              >
+                Record a partial payment in {obligation.groupName ?? "the group"}
+              </Link>
+            )}
+          </div>
+        )}
+        {!existing && obligations.length > 1 && (
           <Field label="Balance">
             <Select value={selectedKey ?? ""} onChange={(e) => setSelectedKey(e.target.value)}>
               {obligations.map((item) => (
@@ -162,11 +189,13 @@ function DirectSettleForm({
           notePlaceholder="Paid offline"
           lockAmount={Boolean(obligation)}
           lockCurrency={Boolean(obligation)}
+          showAmount={!obligation}
         />
+        <p className="text-meta text-ink-faint">Records a payment made outside SplitWisest, such as cash or a bank transfer. No money moves.</p>
         <ErrorNote message={error} />
         <div className="flex justify-end gap-2">
           <Button type="button" variant="secondary" onClick={onClose}>Cancel</Button>
-          <Button type="submit" busy={busy}>
+          <Button type="submit" busy={busy} data-autofocus>
             {existing
               ? "Save changes"
               : shownAmount

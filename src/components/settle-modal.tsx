@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { api, todayStr, fmtMoney, useFormState, amountInputToCents } from "@/lib/client";
-import { Button, Field, Select, Modal, ErrorNote } from "./ui";
+import { Button, Field, Select, Modal, ErrorNote, toast } from "./ui";
 import { SettleFields } from "./settle-fields";
 import { Member } from "./expense-form";
 
@@ -16,7 +16,9 @@ export function SettleModal({
   meId,
   defaultCurrency,
   prefill,
+  start,
   existing,
+  onCustom,
 }: {
   open: boolean;
   onClose: () => void;
@@ -26,7 +28,11 @@ export function SettleModal({
   meId: number;
   defaultCurrency: string;
   prefill?: { payerId: number; recipientId: number; amountCents: number } | null;
+  /** Who pays whom, with the amount left editable (a partial payment opened from another page). */
+  start?: { payerId: number; recipientId: number } | null;
   existing?: { id: number; payerId: number; recipientId: number; amountCents: number; currency: string; date: string; note: string; updatedAt: string } | null;
+  /** Unlocks a suggested payment so the user can change who or how much. */
+  onCustom?: () => void;
 }) {
   const [payerId, setPayerId] = useState(meId);
   const [recipientId, setRecipientId] = useState(0);
@@ -35,6 +41,7 @@ export function SettleModal({
   const [date, setDate] = useState(todayStr());
   const [note, setNote] = useState("");
   const { error, setError, busy, run } = useFormState();
+  const nameOf = (id: number) => members.find((m) => m.id === id)?.displayName ?? "Someone";
 
   useEffect(() => {
     if (!open) return;
@@ -52,10 +59,15 @@ export function SettleModal({
       setDate(todayStr());
       setNote("");
       setCurrency(defaultCurrency);
+      const startOk = start && members.some((m) => m.id === start.payerId) && members.some((m) => m.id === start.recipientId);
       if (prefill) {
         setPayerId(prefill.payerId);
         setRecipientId(prefill.recipientId);
         setAmount((prefill.amountCents / 100).toFixed(2));
+      } else if (start && startOk) {
+        setPayerId(start.payerId);
+        setRecipientId(start.recipientId);
+        setAmount("");
       } else {
         setPayerId(meId);
         setRecipientId(members.find((m) => m.id !== meId)?.id ?? 0);
@@ -85,17 +97,33 @@ export function SettleModal({
         });
       }
       onSaved();
+      toast(existing ? "Payment updated" : `Payment of ${fmtMoney(amountCents, currency)} recorded`);
       onClose();
     }, existing ? "Could not update settlement" : "Could not record settlement");
   }
 
   return (
-    <Modal open={open} onClose={onClose} title={existing ? "Edit recorded payment" : "Record a settlement"}>
-      <p className="mb-4 rounded-lg bg-subtle px-3 py-2 text-xs text-ink-soft">
-        This records a payment that already happened offline (cash, bank transfer, etc.). SplitWisest never moves
-        money.
-      </p>
-      <form onSubmit={submit} className="space-y-4">
+    <Modal open={open} onClose={onClose} title={existing ? "Edit recorded payment" : "Settle up"}>
+      <form onSubmit={submit} className="space-y-3">
+        {prefill && !existing ? (
+          <div className="rounded-xl bg-subtle px-3 py-2.5">
+            {/* Read from the suggestion itself: the form fields fill in an effect,
+                so they would show the previous payment for one frame. */}
+            <p className="text-body text-ink-soft">
+              <strong className="text-ink">{prefill.payerId === meId ? "You" : nameOf(prefill.payerId)}</strong>
+              {prefill.payerId === meId ? " pay " : " pays "}
+              <strong className="text-ink">{prefill.recipientId === meId ? "you" : nameOf(prefill.recipientId)}</strong>
+            </p>
+            <p className={`tnum text-amount font-semibold tracking-tight ${prefill.payerId === meId ? "text-owe" : prefill.recipientId === meId ? "text-owed" : "text-ink"}`}>
+              {fmtMoney(prefill.amountCents, defaultCurrency)}
+            </p>
+            {onCustom && (
+              <button type="button" onClick={onCustom} className="-ml-1 mt-0.5 inline-flex min-h-[var(--control-h-sm)] items-center rounded-lg px-1 text-body font-medium text-accent hover:bg-accent-soft">
+                Change amount or people
+              </button>
+            )}
+          </div>
+        ) : (
         <div className="grid grid-cols-2 gap-3">
           <Field label="Who paid">
             <Select value={payerId} disabled={!!existing || !!prefill} onChange={(e) => setPayerId(Number(e.target.value))}>
@@ -116,6 +144,7 @@ export function SettleModal({
             </Select>
           </Field>
         </div>
+        )}
         <SettleFields
           amount={amount} setAmount={setAmount}
           currency={currency} setCurrency={setCurrency}
@@ -124,13 +153,15 @@ export function SettleModal({
           notePlaceholder="Paid in cash"
           lockAmount={Boolean(prefill && !existing)}
           lockCurrency={Boolean(prefill && !existing)}
+          showAmount={!(prefill && !existing)}
         />
+        <p className="text-meta text-ink-faint">Records a payment made outside SplitWisest, such as cash or a bank transfer. No money moves.</p>
         <ErrorNote message={error} />
         <div className="flex justify-end gap-2">
           <Button type="button" variant="secondary" onClick={onClose}>
             Cancel
           </Button>
-          <Button type="submit" busy={busy}>
+          <Button type="submit" busy={busy} data-autofocus>
             {existing ? "Save changes" : `Record ${amount ? fmtMoney(amountInputToCents(amount) ?? 0, currency) : ""}`}
           </Button>
         </div>

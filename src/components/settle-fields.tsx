@@ -17,6 +17,7 @@ export function SettleFields({
   notePlaceholder,
   lockAmount = false,
   lockCurrency = false,
+  showAmount = true,
 }: {
   amount: string;
   setAmount: (v: string) => void;
@@ -29,10 +30,12 @@ export function SettleFields({
   notePlaceholder: string;
   lockAmount?: boolean;
   lockCurrency?: boolean;
+  /** False when a summary above already states the (locked) amount. */
+  showAmount?: boolean;
 }) {
   return (
     <>
-      <div className="grid grid-cols-[1fr_auto] gap-2">
+      {showAmount && <div className="grid grid-cols-[1fr_auto] gap-2">
         <Field label="Amount">
           <Input
             inputMode="decimal"
@@ -41,6 +44,7 @@ export function SettleFields({
             readOnly={lockAmount}
             required
             placeholder="0.00"
+            data-autofocus={lockAmount ? undefined : true}
           />
         </Field>
         <Field label="Currency">
@@ -55,13 +59,15 @@ export function SettleFields({
             ))}
           </Select>
         </Field>
+      </div>}
+      <div className="grid grid-cols-[minmax(0,10rem)_minmax(0,1fr)] gap-2">
+        <Field label="Date">
+          <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
+        </Field>
+        <Field label="Note">
+          <Input value={note} onChange={(e) => setNote(e.target.value)} maxLength={500} placeholder={notePlaceholder} />
+        </Field>
       </div>
-      <Field label="Date">
-        <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
-      </Field>
-      <Field label="Note">
-        <Input value={note} onChange={(e) => setNote(e.target.value)} maxLength={500} placeholder={notePlaceholder} />
-      </Field>
     </>
   );
 }

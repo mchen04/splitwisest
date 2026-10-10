@@ -4,13 +4,13 @@ import { Dispatch, SetStateAction } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { fmtMoney } from "@/lib/client";
 import { currencySymbol } from "@/lib/currencies";
-import { Button, Input } from "./ui";
+import { Button, IconButton, Input, radioGroupKeyDown, radioTabIndex } from "./ui";
 import { Member } from "./expense-form";
 
 export type Method = "solo" | "equal" | "exact" | "percentage" | "shares" | "itemized";
 
 export const METHOD_LABELS: Record<Method, string> = {
-  solo: "Solo owes",
+  solo: "One person",
   equal: "Equal",
   exact: "Exact amounts",
   percentage: "Percentages",
@@ -24,7 +24,7 @@ export interface ItemRow {
   participantIds: number[];
 }
 
-const LEGEND = "mb-1 block text-sm font-medium text-ink-soft";
+const LEGEND = "mb-1.5 block text-body font-medium text-ink-soft";
 
 // Participant picker for equal/exact/percentage/shares: a checkbox per member
 // plus, for weighted methods, the per-member value input.
@@ -46,8 +46,8 @@ export function ParticipantSplit({
     return (
       <fieldset>
         <legend className={LEGEND}>Who owes the full amount?</legend>
-        <div className="grid grid-cols-2 gap-2" role="radiogroup">
-          {members.map((member) => {
+        <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Who owes the full amount?" onKeyDown={radioGroupKeyDown}>
+          {members.map((member, index) => {
             const checked = selected.has(member.id);
             return (
               <button
@@ -55,12 +55,13 @@ export function ParticipantSplit({
                 type="button"
                 role="radio"
                 aria-checked={checked}
+                tabIndex={radioTabIndex(checked, index, members.some((m) => selected.has(m.id)))}
                 onClick={() => onToggle(member.id)}
-                className={`min-h-11 min-w-0 rounded-lg border px-2.5 py-2 text-left ${checked ? "border-accent bg-accent-soft" : "border-line bg-card"}`}
+                className={`min-h-[var(--control-h)] min-w-0 rounded-lg border px-2.5 py-1.5 text-left ${checked ? "border-accent bg-accent-soft" : "border-line bg-card hover:border-line-strong"}`}
               >
-                <span className="block truncate text-sm font-medium">{member.displayName}</span>
+                <span className="block truncate text-body font-medium">{member.displayName}</span>
                 {checked && amountCents > 0 && (
-                  <span className="tnum block truncate text-xs text-ink-faint">{fmtMoney(amountCents, currency)}</span>
+                  <span className="tnum block truncate text-meta text-ink-faint">{fmtMoney(amountCents, currency)}</span>
                 )}
               </button>
             );
@@ -80,7 +81,7 @@ export function ParticipantSplit({
             return (
               <label
                 key={member.id}
-                className={`flex min-h-11 min-w-0 cursor-pointer items-center gap-2 rounded-lg border px-2.5 py-2 ${checked ? "border-accent bg-accent-soft" : "border-line bg-card"}`}
+                className={`flex min-h-[var(--control-h)] min-w-0 cursor-pointer items-center gap-2 rounded-lg border px-2.5 py-1.5 ${checked ? "border-accent bg-accent-soft" : "border-line bg-card hover:border-line-strong"}`}
               >
                 <input
                   type="checkbox"
@@ -89,9 +90,9 @@ export function ParticipantSplit({
                   className="h-4 w-4 shrink-0 accent-[var(--color-accent)]"
                 />
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-medium">{member.displayName}</span>
+                  <span className="block truncate text-body font-medium">{member.displayName}</span>
                   {checked && amountCents > 0 && (
-                    <span className="tnum block truncate text-xs text-ink-faint">
+                    <span className="tnum block truncate text-meta text-ink-faint">
                       ≈ {fmtMoney(Math.floor(amountCents / Math.max(participantCount, 1)), currency)}
                     </span>
                   )}
@@ -111,7 +112,7 @@ export function ParticipantSplit({
         {members.map((m) => {
           const checked = selected.has(m.id);
           return (
-            <div key={m.id} className="flex min-h-12 items-center gap-3 px-3 py-1.5">
+            <div key={m.id} className="flex min-h-[var(--row-h)] items-center gap-3 px-3 py-1.5">
               <input
                 id={`${idPrefix}-${m.id}`}
                 type="checkbox"
@@ -119,7 +120,7 @@ export function ParticipantSplit({
                 onChange={() => onToggle(m.id)}
                 className="h-4 w-4 accent-[var(--color-accent)]"
               />
-              <label htmlFor={`${idPrefix}-${m.id}`} className="min-w-0 flex-1 truncate text-sm font-medium">
+              <label htmlFor={`${idPrefix}-${m.id}`} className="min-w-0 flex-1 truncate text-body font-medium">
                 {m.displayName}
               </label>
               {checked && (
@@ -132,7 +133,7 @@ export function ParticipantSplit({
                     aria-label={`${METHOD_LABELS[method]} for ${m.displayName}`}
                     placeholder={method === "exact" ? "0.00" : method === "percentage" ? "%" : "1"}
                   />
-                  <span className="min-w-4 text-xs text-ink-faint">
+                  <span className="min-w-4 text-meta text-ink-faint">
                     {method === "percentage" ? "%" : method === "exact" ? currencySymbol(currency) : "×"}
                   </span>
                 </div>
@@ -205,14 +206,13 @@ export function ItemizedSplit({
                 placeholder="0.00"
                 aria-label={`Item ${idx + 1} amount`}
               />
-              <Button
-                type="button"
-                variant="ghost"
+              <IconButton
+                variant="danger"
                 onClick={() => setItems((arr) => arr.filter((_, i) => i !== idx))}
-                aria-label={`Remove item ${idx + 1}`}
+                label={`Remove item ${idx + 1}`}
               >
                 <Trash2 className="h-4 w-4" />
-              </Button>
+              </IconButton>
             </div>
             <div className="mt-2 flex flex-wrap gap-1.5">
               {members.map((m) => {
@@ -229,7 +229,7 @@ export function ItemizedSplit({
                           : [...item.participantIds, m.id],
                       })
                     }
-                    className={`rounded-full border px-2.5 py-1 text-xs font-medium ${
+                    className={`min-h-[var(--control-h-sm)] rounded-full border px-3 py-1 text-body font-medium ${
                       on ? "border-accent bg-accent-soft text-accent-dark" : "border-line text-ink-soft"
                     }`}
                   >
@@ -248,8 +248,8 @@ export function ItemizedSplit({
           <Plus className="h-4 w-4" /> Add item
         </Button>
         <div className="rounded-lg border border-line bg-subtle/60 p-3">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="flex items-center gap-2 text-sm font-medium">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <label className="flex min-h-[var(--control-h-sm)] items-center gap-2 text-body font-medium">
               <input
                 type="checkbox"
                 checked={taxEnabled}
@@ -267,9 +267,9 @@ export function ItemizedSplit({
                 className="!w-24 text-right"
                 aria-label="Tax rate"
               />
-              <span className="text-sm text-ink-faint">% = {fmtMoney(taxCents, currency)}</span>
+              <span className="text-body text-ink-faint">% = {fmtMoney(taxCents, currency)}</span>
             </div>
-            <label className="flex items-center gap-2 text-sm font-medium">
+            <label className="flex min-h-[var(--control-h-sm)] items-center gap-2 text-body font-medium">
               <input
                 type="checkbox"
                 checked={tipEnabled}
@@ -287,10 +287,10 @@ export function ItemizedSplit({
                 className="!w-24 text-right"
                 aria-label="Tip rate"
               />
-              <span className="text-sm text-ink-faint">% = {fmtMoney(tipCents, currency)}</span>
+              <span className="text-body text-ink-faint">% = {fmtMoney(tipCents, currency)}</span>
             </div>
           </div>
-          <div className="mt-3 grid grid-cols-3 gap-2 border-t border-line pt-3 text-sm">
+          <div className="mt-3 grid grid-cols-3 gap-2 border-t border-line pt-3 text-body">
             <span className="text-ink-faint">Subtotal</span>
             <span className="text-ink-faint">Adjustments</span>
             <span className="text-right font-semibold">Total</span>

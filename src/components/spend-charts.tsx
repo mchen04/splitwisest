@@ -36,17 +36,17 @@ export function SpendCharts({ expenses, currency }: { expenses: ChartExpense[]; 
   }, [expenses]);
 
   return (
-    <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
+    <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
       <Card className="p-4">
-        <h3 className="mb-3 flex items-center gap-1.5 text-sm font-semibold text-ink-soft"><ChartBar className="h-4 w-4" /> By category</h3>
+        <h3 className="mb-3 flex items-center gap-1.5 text-section font-semibold"><ChartBar className="h-4 w-4" /> By category</h3>
         <BarChart data={charts.byCat} currency={currency} title="Spending by category" />
       </Card>
       <Card className="p-4">
-        <h3 className="mb-3 flex items-center gap-1.5 text-sm font-semibold text-ink-soft"><ChartBar className="h-4 w-4" /> Over time</h3>
+        <h3 className="mb-3 flex items-center gap-1.5 text-section font-semibold"><ChartBar className="h-4 w-4" /> Over time</h3>
         <TimeChart data={charts.byMonth} currency={currency} />
       </Card>
       <Card className="p-4">
-        <h3 className="mb-3 flex items-center gap-1.5 text-sm font-semibold text-ink-soft"><ChartBar className="h-4 w-4" /> Paid by person</h3>
+        <h3 className="mb-3 flex items-center gap-1.5 text-section font-semibold"><ChartBar className="h-4 w-4" /> Paid by person</h3>
         <BarChart data={charts.byPayer} currency={currency} title="Total paid by person" />
       </Card>
     </div>

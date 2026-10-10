@@ -3,7 +3,7 @@
 ## Getting in
 
 - **Sign up** with a display name, username, and password. An invite code is optional; a friend's personal code makes you friends immediately, and a group code joins that group.
-- **Invite a friend** from the Balances page — **Copy link** shares a sign-up link that connects them to you automatically. You can also add someone by entering their invite code.
+- **Invite a friend** from the Balances page — **Copy invite link** shares a sign-up link that connects them to you automatically. You can also add someone by entering their invite code with **Add friend**.
 - **Forgot your password?** Use the "Forgot your password?" link on login and one of your recovery codes (generate these in Settings) to set a new one.
 
 ## Account & settings
@@ -13,28 +13,32 @@
 
 ## Friend requests
 
-- **Adding a friend by code** sends a **pending request**; you become friends only once they **accept** it (Balances → Friend requests). You can cancel a request you sent, and accept or decline ones you receive. If you both request each other, the friendship is created automatically.
+- **Adding a friend by code** sends a **pending request**; you become friends only once they **accept** it (Balances → Requests and reminders). You can cancel a request you sent, and accept or decline ones you receive. If you both request each other, the friendship is created automatically.
 - **Group invites stay open**: anyone with a group's invite code can join directly (no approval step), and joining a group makes everyone in it friends. This keeps group onboarding frictionless while friend connections stay consent-based.
 
 ## Groups
 
-- **Create a group** (Groups → New group) for any shared context: a trip, an apartment, a dinner crew. Pick the group currency — balances display in it.
-- **Invite friends** to a group from the group menu (**⋯ → Copy invite link**). Joining a group makes everyone in it friends.
+- **Create a group** (Groups → New group) for any shared context: a trip, an apartment, a dinner crew. Pick the group currency — balances display in it. **Join with code** joins someone else's group.
+- **Invite friends** to a group from the group menu (**⋯ → Copy invite link**). A confirmation shows when the link is copied. Joining a group makes everyone in it friends.
+- A group has five sections on every screen size: **Expenses**, **Balances**, **Chat**, **Activity**, and **Insights**.
 
 ## Expenses
 
-- Use **Add expense** from any page. The current group opens directly.
-- Outside a group, one group opens directly. Multiple groups show a picker.
-- Enter the amount and description. The payer defaults to you, and the date defaults to local today.
-- **Paid by**, **Date**, and **Category** stay visible. **Split** keeps less common choices under **Change**.
-- The default split assigns the full amount to one other member.
-- Choose Equal, Exact, Percentages, Shares, or Itemized when needed.
+- Use **Add expense** from any page. Inside a group, the form opens for that group.
+- Outside a group, the form opens in place for the group you last added to on this device, or your only group. You can switch the group at the top of the form. The first time, with several groups, a picker comes first. The page you were on stays open, and a confirmation links to the group.
+- While a newly picked group loads, **Paid by** and the split are paused. If it cannot load, the form says so under the group and offers **Try again** or **Back to** the group that is loaded. What you typed stays, and nothing can be saved until a group loads.
+- Enter the amount and description. On a computer the amount field is ready to type, and Return moves to the description. The payer defaults to you, and the date defaults to local today.
+- **Paid by**, **Date**, and **Category** stay visible.
+- The default split (**One person**) assigns the full amount to one other member.
+- Choose Equal, Exact amounts, Percentages, Shares, or Itemized bill when needed.
+- With a keyboard, each row of choices (split method, who owes, theme, notification filter) is one Tab stop. The arrow keys move to and select the next choice.
 - The form shows each share and reports whether the split matches the total.
 - Use **New category** beside Category. Enter adds the category without submitting the expense.
 - Notes and receipts stay under **Add note or receipt**.
 - A save error keeps the form and its values open. Offline errors ask you to reconnect.
-- **Edit or delete** any expense with the pencil/trash icons. Balances update for everyone instantly.
-- **Recurring**: set up weekly/monthly expenses (rent, subscriptions); they post automatically.
+- **Edit or delete** any expense with the pencil/trash icons, or from its details. Balances update for everyone instantly. Deleting asks for confirmation.
+- After you edit an expense, its details show the saved values straight away, even after a reload, and Delete removes exactly what they show. If someone else changed the expense first, Delete is refused with **Expense changed, refresh and try again**; open the details again to see the current version.
+- **Recurring**: set up weekly/monthly expenses (rent, subscriptions) with **Recurring** on the group's expense list (also in the group menu); they post automatically.
 
 ## Who owes who
 
@@ -48,23 +52,30 @@
 - While an open edit checks for changes, its preview and Save action pause. A failed check shows Try again.
 - One person can appear on both sides. Only the difference changes their balance.
 - Edit or delete a group balance from the same tab. This does not record a payment.
+- Right after you edit a group balance or a recorded payment, its row shows **Updating…** and its Delete waits until the updated row arrives.
 - If the group balance list fails to load, choose **Try again** on the Balances tab.
 - A group balance form stays open while its save is in progress.
 - If a save response is lost, retry the same entry. The app keeps its create request ID and does not add a second entry. Changing the entry starts a new request.
 - Before removing a member, edit or delete every group balance that includes them. This also applies to zero shares and net-zero entries.
-- The **group balance strip** shows each member's net. **Suggested settle-up** shows the fewest payments that clear the group.
-- The **Balances page** shows every friend relationship across all groups and what should happen next.
+- **Who owes who** shows the fewest payments that clear the group. Each member's net shows in the members list on wide screens and under **Member balances** on the Balances tab on phones and tablets.
+- The group's **Settle up** opens your suggested payment ready to record. With several, it lists them; **Record a different payment** opens a blank form.
+- **Home** lists every open balance under **Settle up**. Each balance you owe has its own **Settle up**; a friend who owes you has **Remind**.
+- Settling a balance from Home, Balances, or a profile records the whole amount. To pay part of a group balance, choose **Record a partial payment in <group>**. The group's Settle up form opens with the same two people, and you enter the amount.
+- The **Balances page** shows every friend relationship across all groups, with the same actions, plus requests and reminders. A reminder from someone you owe has **Settle up** on it.
 - **Settle up** records an offline payment (cash, bank transfer — whatever you used). SplitWisest never moves money.
 
 ## Finding things
 
-- **Expenses page** searches across all groups; filter by group, friend, category, payer, and date range.
+- **Expenses page** searches across all groups; filter by group, friend, category, and date range. On phones, open it with the search icon on Home; **Filters** shows the filters.
+- In the **Activity** feed, a group name opens that group's activity.
 - **CSV export** from the group menu (⋯).
 - **Insights** charts use the full group history. Expense filters and loaded pages do not limit them.
 
 ## Chat
 
 Each group has a chat tab; each friend has a direct chat. The **Chat** nav item lists every conversation. Messages and balances update live for everyone viewing — no refresh needed. Long histories load the newest messages first with a "Load earlier messages" affordance.
+
+If a message cannot be sent, the chat says so above the message field and keeps your text. **Try again** sends it. If the connection dropped before the app heard back, Try again first checks whether the message arrived, so it is never sent twice. Comments on an expense work the same way.
 
 On phones, scroll inside the message list to read history. Search, the message field, and Send stay visible. The bottom navigation hides while you write a message. The page itself does not scroll while a conversation is open.
 
@@ -80,10 +91,13 @@ For release verification, follow `docs/PWA.md`.
 
 ## Staying on top of things
 
-- **Unread badges** on the Chat, Activity, and Balances nav items show new messages, new activity, and pending settle-up nudges. A badge clears once you view the relevant screen.
+- **Unread badges** on the Chat, Activity, and Balances nav items show new messages, new activity, and pending settle-up nudges. A badge clears once you view the relevant screen. On phones, Home carries the search, notifications, and account buttons.
 - **Activity** has its own nav page with the full cross-group feed (paged with "Load more").
-- **Expense details**: tap an expense to open a read-only view — payer, split breakdown, notes, inline receipt previews, and a **per-expense comment thread**. Edit/Delete are available from there too.
-- **Settle-up reminders**: on Balances, **Remind** a friend who owes you to settle up. They see it as a reminder (and an unread badge) until they dismiss it.
+- **Expense details**: tap an expense to open a read-only view — payer, split breakdown, notes, inline receipt previews, and a **per-expense comment thread**. Edit and Delete stay pinned at the bottom of the details. An itemized bill lists each item with who had it, then the subtotal, tax, tip, and total.
+- **When something cannot load** (expense details, comments, payment history, chat history, the recovery-code count, or a home card), it says so and offers **Try again**. It does not show an empty list or a count it does not know.
+- **Activity** names a payment's payer once. When someone else recorded it, the line starts with who recorded it.
+- **Settle-up reminders**: on Home or Balances, **Remind** a friend who owes you to settle up. They see it as a reminder (and an unread badge) until they dismiss it.
+- **Confirmations** appear briefly at the bottom of the screen (above the navigation on phones) after you add, change, or delete something.
 
 ## Pagination
 

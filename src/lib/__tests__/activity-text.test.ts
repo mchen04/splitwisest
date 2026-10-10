@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activityActionText, activityChanges, activityData } from "../activity";
+import { activityActionText, activityAfterActor, activityChanges, activityData } from "../activity";
 
 describe("activityActionText", () => {
   it("renders a recorded single change as a full sentence", () => {
@@ -67,5 +67,30 @@ describe("activityActionText", () => {
     expect(activityActionText({ summary: "x", actorName: "Matthew", data: parsed })).toBe(
       "removed Sarah from the split"
     );
+  });
+});
+
+describe("activityAfterActor", () => {
+  const paid = "Diego Romero paid Maya Chen $120.00 (recorded offline)";
+
+  it("names the payer once when they recorded the payment", () => {
+    const rest = activityAfterActor({ actorName: "Diego Romero", actionText: paid, type: "settlement.recorded" });
+    expect(`Diego Romero${rest}`).toBe(paid);
+  });
+
+  it("keeps who recorded a payment when someone else paid", () => {
+    const rest = activityAfterActor({ actorName: "Maya Chen", actionText: paid, type: "settlement.recorded" });
+    expect(`Maya Chen${rest}`).toBe(`Maya Chen recorded that ${paid}`);
+  });
+
+  it("does not take a longer name for the actor's own", () => {
+    const rest = activityAfterActor({ actorName: "Diego", actionText: paid, type: "settlement.recorded" });
+    expect(`Diego${rest}`).toBe(`Diego recorded that ${paid}`);
+  });
+
+  it("leaves other activity and older payment rows unchanged", () => {
+    expect(activityAfterActor({ actorName: "Maya", actionText: "added an expense", type: "expense.added" })).toBe(" added an expense");
+    expect(activityAfterActor({ actorName: "Maya", actionText: "paid Sam $5.00", type: "settlement.recorded" })).toBe(" paid Sam $5.00");
+    expect(activityAfterActor({ actorName: "Maya", actionText: "added an expense" })).toBe(" added an expense");
   });
 });

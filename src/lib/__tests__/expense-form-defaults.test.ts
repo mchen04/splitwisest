@@ -13,7 +13,7 @@ describe("expense form defaults", () => {
     expect(form).toContain('useState<Method>("solo")');
     expect(form).toContain("member.id !== meId");
     expect(form).toContain('method === "solo" ? "equal" : method');
-    expect(splits).toContain('solo: "Solo owes"');
+    expect(splits).toContain('solo: "One person"');
     expect(splits).toContain("Who owes the full amount?");
   });
 });
