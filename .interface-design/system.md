@@ -127,6 +127,10 @@ Never introduce other radius values.
   whether the write landed (chat, comments) so it never posts twice.
 - A row that was just edited and is being re-read shows **Updating…** in place of its
   amount, and its Delete waits for the new row (the API refuses an old version).
+- A cached read that the app's own edit or delete made wrong is dropped at once, from
+  memory and storage, so neither a reopen nor a reload paints it or sends its old version.
+  An edited expense's details are then read again (`refreshExpenseDetails`,
+  `forgetExpenseDetails`).
 
 ## Interaction states
 

@@ -2,7 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Paperclip, Plus, Check, AlertCircle, Users, ChevronDown, X } from "lucide-react";
-import { api, ApiClientError, fmtMoney, todayStr, CURRENCIES, amountInputToCents, useApiData } from "@/lib/client";
+import {
+  api, ApiClientError, fmtMoney, todayStr, CURRENCIES, amountInputToCents, useApiData, refreshExpenseDetails,
+} from "@/lib/client";
 import { rememberExpenseGroup } from "@/lib/last-group";
 import { ActionError, Button, Field, Input, Select, Textarea, Modal, ErrorNote, toast, confirmAction, radioGroupKeyDown, radioTabIndex } from "./ui";
 import { ParticipantSplit, ItemizedSplit, Method, METHOD_LABELS, ItemRow } from "./expense-splits";
@@ -350,6 +352,9 @@ export function ExpenseForm({
       if (existing) {
         await api(`/api/expenses/${existing.id}`, { method: "PATCH", body });
         expenseId = existing.id;
+        // Details cached from before the edit would show the old amount and send
+        // the old version with the next delete, which the server refuses.
+        refreshExpenseDetails(expenseId);
       } else {
         const r = await api<{ id: number }>(`/api/groups/${groupId}/expenses`, { body });
         expenseId = r.id;
@@ -374,6 +379,9 @@ export function ExpenseForm({
         setError(`Expense saved, but receipt upload failed: ${message}`);
         setBusy(false);
         return;
+      } finally {
+        // Receipts are part of the details, so read them again with the new ones.
+        if (!createdNewExpense && files.length > 0) refreshExpenseDetails(expenseId);
       }
       onSaved();
       if (createdNewExpense) rememberExpenseGroup(groupId);

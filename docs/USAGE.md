@@ -37,6 +37,7 @@
 - Notes and receipts stay under **Add note or receipt**.
 - A save error keeps the form and its values open. Offline errors ask you to reconnect.
 - **Edit or delete** any expense with the pencil/trash icons, or from its details. Balances update for everyone instantly. Deleting asks for confirmation.
+- After you edit an expense, its details show the saved values straight away, even after a reload, and Delete removes exactly what they show. If someone else changed the expense first, Delete is refused with **Expense changed, refresh and try again**; open the details again to see the current version.
 - **Recurring**: set up weekly/monthly expenses (rent, subscriptions) with **Recurring** on the group's expense list (also in the group menu); they post automatically.
 
 ## Who owes who

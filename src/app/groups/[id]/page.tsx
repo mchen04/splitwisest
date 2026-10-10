@@ -8,7 +8,10 @@ import {
   RefreshCcw, MessageSquare, ScrollText, Scale, Search, X, PieChart, Settings, Copy, ChevronDown, Users,
   SlidersHorizontal, MoreHorizontal,
 } from "lucide-react";
-import { api, ApiClientError, fmtMoney, fmtDate, fmtTime, useMe, useFilters, useApiData, useSync } from "@/lib/client";
+import {
+  api, ApiClientError, fmtMoney, fmtDate, fmtTime, useMe, useFilters, useApiData, useSync,
+  forgetExpenseDetails, refreshExpenseDetails,
+} from "@/lib/client";
 import { AppShell } from "@/components/shell";
 import {
   Card, CardHeader, Money, EmptyState, Button, Avatar, Input, Select, Modal, Menu, MenuItem, DateField, IconButton,
@@ -279,11 +282,14 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
     }))) return;
     try {
       await api(`/api/expenses/${expense.id}?expectedUpdatedAt=${encodeURIComponent(expense.updatedAt)}`, { method: "DELETE" });
+      forgetExpenseDetails(expense.id);
       toast("Expense deleted");
       refreshAll();
     } catch (err) {
       // A concurrent edit (stale version → 400), a delete by another member (404),
-      // or a network error must surface.
+      // or a network error must surface. After a refusal the cached details are
+      // known to be out of date, so the next look shows the current record.
+      if (err instanceof ApiClientError) refreshExpenseDetails(expense.id);
       toast(err instanceof ApiClientError ? err.message : "Could not delete this expense", { tone: "error" });
       refreshAll();
     }
