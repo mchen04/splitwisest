@@ -76,7 +76,7 @@ export default function ExpensesPage() {
             {filterCount > 0 && <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1 text-meta font-bold text-on-accent">{filterCount}</span>}
           </Button>
         </div>
-        <div className={`${filtersShown ? "grid" : "hidden"} grid-cols-2 gap-2 border-t border-line p-2 md:grid md:grid-cols-3 lg:grid-cols-5`}>
+        <div className={`${filtersShown ? "grid" : "hidden"} grid-cols-[repeat(auto-fit,minmax(min(100%,11rem),1fr))] gap-2 border-t border-line p-2 md:grid`}>
           <Select value={filters.groupId} onChange={setFilter("groupId")} aria-label="Filter by group">
             <option value="">All groups</option>
             {groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
@@ -85,7 +85,7 @@ export default function ExpensesPage() {
             <option value="">All categories</option>
             {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </Select>
-          <div className="col-span-2 md:col-span-1">
+          <div className="col-span-full min-w-0 md:col-span-1">
             <Select value={filters.friendId} onChange={setFilter("friendId")} aria-label="Filter by friend">
               <option value="">Any friend</option>
               {friends.map((f) => <option key={f.id} value={f.id}>{f.displayName}</option>)}

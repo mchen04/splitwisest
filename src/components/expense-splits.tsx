@@ -106,7 +106,7 @@ export function ParticipantSplit({
   }
 
   return (
-    <fieldset>
+    <fieldset className="min-w-0">
       <legend className={LEGEND}>Participants</legend>
       <div className="divide-y divide-line rounded-lg border border-line">
         {members.map((m) => {

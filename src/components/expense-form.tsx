@@ -398,7 +398,7 @@ export function ExpenseForm({
     }
   }
 
-  const sectionCls = "space-y-3 rounded-xl border border-line p-3";
+  const sectionCls = "min-w-0 space-y-3 rounded-xl border border-line p-3";
   const pickedGroupName = groupOptions?.find((g) => g.id === selectedGroupId)?.name ?? "that group";
   return (
     <Modal open={open} onClose={onClose} title={existing ? "Edit expense" : "Add expense"} wide>
@@ -434,41 +434,45 @@ export function ExpenseForm({
           </p>
         )}
 
-        <div className="grid grid-cols-[minmax(0,1fr)_6rem] gap-2">
-          <Field label={method === "itemized" ? "Total" : "Amount"}>
-            <Input
-              id="expense-amount"
-              inputMode="decimal"
-              enterKeyHint="next"
-              value={displayedAmount}
-              onChange={(e) => setAmount(e.target.value)}
-              onKeyDown={(e) => {
-                // Return moves on to the description instead of submitting a half-filled form.
-                if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
-                e.preventDefault();
-                document.getElementById("expense-title")?.focus();
-              }}
-              required={method !== "itemized"}
-              readOnly={method === "itemized" && itemSubtotalCents > 0}
-              placeholder="0.00"
-              data-autofocus
-              className="!min-h-14 !text-amount-lg !font-semibold tracking-tight tnum"
-            />
-          </Field>
-          <Field label="Currency">
-            <Select value={currency} onChange={(e) => setCurrency(e.target.value)} className="!min-h-14">
-              {CURRENCIES.map((c) => (
-                <option key={c}>{c}</option>
-              ))}
-            </Select>
-          </Field>
+        <div className="flex flex-wrap gap-2">
+          <div className="min-w-0 flex-1 basis-40">
+            <Field label={method === "itemized" ? "Total" : "Amount"}>
+              <Input
+                id="expense-amount"
+                inputMode="decimal"
+                enterKeyHint="next"
+                value={displayedAmount}
+                onChange={(e) => setAmount(e.target.value)}
+                onKeyDown={(e) => {
+                  // Return moves on to the description instead of submitting a half-filled form.
+                  if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
+                  e.preventDefault();
+                  document.getElementById("expense-title")?.focus();
+                }}
+                required={method !== "itemized"}
+                readOnly={method === "itemized" && itemSubtotalCents > 0}
+                placeholder="0.00"
+                data-autofocus
+                className="!min-h-14 !text-amount-lg !font-semibold tracking-tight tnum"
+              />
+            </Field>
+          </div>
+          <div className="w-24 max-w-full">
+            <Field label="Currency">
+              <Select value={currency} onChange={(e) => setCurrency(e.target.value)} className="!min-h-14">
+                {CURRENCIES.map((c) => (
+                  <option key={c}>{c}</option>
+                ))}
+              </Select>
+            </Field>
+          </div>
         </div>
 
         <Field label="Description">
           <Input id="expense-title" value={title} onChange={(e) => setTitle(e.target.value)} enterKeyHint="done" required maxLength={120} placeholder="Dinner, groceries, tickets…" />
         </Field>
 
-        <div className="grid grid-cols-2 gap-x-3 gap-y-2 sm:grid-cols-3">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,11rem),1fr))] gap-x-3 gap-y-2">
           <Field label="Paid by">
             <Select value={payerId} onChange={(e) => setPayerId(Number(e.target.value))} disabled={groupSwitching}>
               {members.map((m) => (
@@ -479,7 +483,7 @@ export function ExpenseForm({
           <Field label="Date">
             <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
           </Field>
-          <div className="col-span-2 sm:col-span-1">
+          <div className="col-span-full min-w-0 sm:col-span-1">
             <Field label="Category">
               <Select
                 id="expense-category"
@@ -496,7 +500,7 @@ export function ExpenseForm({
           </div>
 
           {categoriesError && (
-            <div className="col-span-2 flex flex-wrap items-center gap-1 text-meta text-danger sm:col-span-3">
+            <div className="col-span-full flex flex-wrap items-center gap-1 text-meta text-danger">
               <p id="expense-category-error" role="alert">Categories could not load.</p>
               <button type="button" onClick={reloadCategories} className="min-h-[var(--control-h-sm)] px-1 font-semibold underline">
                 Try again
@@ -505,7 +509,7 @@ export function ExpenseForm({
           )}
 
           {addingCat ? (
-            <div className="col-span-2 flex gap-2 sm:col-span-3">
+            <div className="col-span-full flex gap-2">
               <Input
                 value={newCategory}
                 onChange={(e) => setNewCategory(e.target.value)}
@@ -538,7 +542,7 @@ export function ExpenseForm({
               type="button"
               id="expense-new-category"
               onClick={() => setAddingCat(true)}
-              className="col-span-2 inline-flex min-h-[var(--control-h-sm)] items-center gap-1 justify-self-start rounded-lg px-1 text-body font-medium text-accent hover:bg-accent-soft sm:col-span-3"
+              className="col-span-full inline-flex min-h-[var(--control-h-sm)] items-center gap-1 justify-self-start rounded-lg px-1 text-body font-medium text-accent hover:bg-accent-soft"
             >
               <Plus className="h-4 w-4" /> New category
             </button>
@@ -697,7 +701,7 @@ export function ExpenseForm({
         <ErrorNote message={error} />
         {/* Sticky so Cancel/Submit stay reachable while the long form scrolls
             (on short screens they used to scroll out of the viewport). */}
-        <div className="sticky -bottom-4 -mx-4 -mb-4 flex justify-end gap-2 rounded-b-2xl border-t border-line bg-card px-4 py-2.5">
+        <div className="sticky -bottom-4 -mx-4 -mb-4 flex flex-wrap justify-end gap-2 rounded-b-2xl border-t border-line bg-card px-4 py-2.5">
           <Button type="button" variant="secondary" onClick={onClose}>
             Cancel
           </Button>
