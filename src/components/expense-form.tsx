@@ -6,6 +6,8 @@ import {
   api, ApiClientError, fmtMoney, todayStr, CURRENCIES, amountInputToCents, useApiData, refreshExpenseDetails,
 } from "@/lib/client";
 import { rememberExpenseGroup } from "@/lib/last-group";
+import { currencyStep } from "@/lib/currencies";
+import { splitPercentage } from "@/lib/money";
 import { ActionError, Button, Field, Input, Select, Textarea, Modal, ErrorNote, toast, confirmAction, radioGroupKeyDown, radioTabIndex } from "./ui";
 import { ParticipantSplit, ItemizedSplit, Method, METHOD_LABELS, ItemRow } from "./expense-splits";
 
@@ -215,14 +217,25 @@ export function ExpenseForm({
     () => items.reduce((s, i) => s + amountToCents(i.amount), 0),
     [items]
   );
+  const savedItemSubtotalCents = existing?.items.reduce((sum, item) => sum + item.amountCents, 0) ?? 0;
   const taxCents = useMemo(() => {
     if (!taxEnabled || itemSubtotalCents <= 0) return 0;
-    return Math.round(itemSubtotalCents * (Math.max(parseFloat(taxRate || "0") || 0, 0) / 100));
-  }, [taxEnabled, itemSubtotalCents, taxRate]);
+    if ((existing?.itemizedTaxCents ?? 0) > 0 && existing?.currency === currency && itemSubtotalCents === savedItemSubtotalCents &&
+      taxRate === adjustmentRate(existing.itemizedTaxCents ?? 0, savedItemSubtotalCents, CALIFORNIA_TAX_RATE)) {
+      return existing.itemizedTaxCents ?? 0;
+    }
+    const step = currencyStep(currency);
+    return Math.round(itemSubtotalCents * (Math.max(parseFloat(taxRate || "0") || 0, 0) / 100) / step) * step;
+  }, [taxEnabled, itemSubtotalCents, taxRate, currency, existing, savedItemSubtotalCents]);
   const tipCents = useMemo(() => {
     if (!tipEnabled || itemSubtotalCents <= 0) return 0;
-    return Math.round(itemSubtotalCents * (Math.max(parseFloat(tipRate || "0") || 0, 0) / 100));
-  }, [tipEnabled, itemSubtotalCents, tipRate]);
+    if ((existing?.itemizedTipCents ?? 0) > 0 && existing?.currency === currency && itemSubtotalCents === savedItemSubtotalCents &&
+      tipRate === adjustmentRate(existing.itemizedTipCents ?? 0, savedItemSubtotalCents, "20")) {
+      return existing.itemizedTipCents ?? 0;
+    }
+    const step = currencyStep(currency);
+    return Math.round(itemSubtotalCents * (Math.max(parseFloat(tipRate || "0") || 0, 0) / 100) / step) * step;
+  }, [tipEnabled, itemSubtotalCents, tipRate, currency, existing, savedItemSubtotalCents]);
   const itemizedTotalCents = itemSubtotalCents + taxCents + tipCents;
   const effectiveAmountCents = method === "itemized" && itemSubtotalCents > 0 ? itemizedTotalCents : amountCents;
   const displayedAmount =
@@ -241,7 +254,11 @@ export function ExpenseForm({
     }
     if (method === "percentage") {
       const sum = participantList.reduce((s, m) => s + (parseFloat(values[m.id] || "0") || 0), 0);
-      return Math.abs(sum - 100) < 0.001
+      let valid = true;
+      try {
+        splitPercentage(amountCents, participantList.map((m) => ({ userId: m.id, value: parseFloat(values[m.id] || "0") || 0 })), currencyStep(currency));
+      } catch { valid = false; }
+      return valid
         ? { ok: true, msg: "Adds up to 100%" }
         : { ok: false, msg: `Currently ${sum.toFixed(1)}% — must equal 100%` };
     }
