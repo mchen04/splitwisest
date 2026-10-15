@@ -371,6 +371,7 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
     ? detail.balances.find((balance) => balance.userId === me.id)?.netCents ?? 0
     : 0;
   const mySuggestions = me && detail ? detail.suggestions.filter((s) => s.from === me.id || s.to === me.id) : [];
+  const oneDirection = mySuggestions.every((s) => (s.from === me?.id) === (mySuggestions[0]?.from === me?.id));
   const currency = detail?.group.currency ?? "USD";
 
   function openSettle() {
@@ -468,6 +469,26 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
             <HandCoins className="h-4 w-4" /> Settle up
           </Button>
         </div>
+        {detail && mySuggestions.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setTab("balances")}
+            title="Show who owes who"
+            className="mt-0.5 flex max-w-full flex-wrap gap-x-1.5 text-left text-body text-[var(--group-muted)] hover:underline lg:col-span-full lg:mt-0 lg:justify-self-end"
+          >
+            {oneDirection && <span>{mySuggestions[0].from === me?.id ? "to" : "from"}</span>}
+            {mySuggestions.slice(0, 3).map((s, i) => (
+              <span key={i} className="flex gap-x-1.5 whitespace-nowrap">
+                {i > 0 && <span aria-hidden>·</span>}
+                <span>
+                  {oneDirection ? "" : s.from === me?.id ? "to " : "from "}
+                  {memberName(s.from === me?.id ? s.to : s.from)} <span className="tnum font-semibold">{fmtMoney(s.amountCents, currency)}</span>
+                </span>
+              </span>
+            ))}
+            {mySuggestions.length > 3 && <span className="whitespace-nowrap">· +{mySuggestions.length - 3} more</span>}
+          </button>
+        )}
       </section>
 
       {/* Members rail (wide screens) — a nested sidebar instead of a full-width

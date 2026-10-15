@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { ReactNode, useEffect, useState, useSyncExternalStore } from "react";
 import {
-  LayoutDashboard, Users, Scale, Receipt, LogOut, Wallet,
+  LayoutDashboard, Users, UserRound, Receipt, LogOut, Wallet,
   MessageSquare, ScrollText, Moon, Sun, Plus, ChevronDown, Bell, WifiOff,
 } from "lucide-react";
 import { api, useApiData, useMe, useUnread, type Unread } from "@/lib/client";
@@ -39,9 +39,9 @@ function useOffline() {
 const NAV: { href: string; label: string; icon: typeof LayoutDashboard; badge?: BadgeKey }[] = [
   { href: "/", label: "Home", icon: LayoutDashboard },
   { href: "/groups", label: "Groups", icon: Users },
-  { href: "/balances", label: "Balances", icon: Scale, badge: "balances" },
-  { href: "/expenses", label: "Expenses", icon: Receipt },
+  { href: "/balances", label: "Friends", icon: UserRound, badge: "balances" },
   { href: "/chat", label: "Chat", icon: MessageSquare, badge: "messages" },
+  { href: "/expenses", label: "Expenses", icon: Receipt },
   { href: "/activity", label: "Activity", icon: ScrollText, badge: "activity" },
   { href: "/notifications", label: "Notifications", icon: Bell, badge: "notifications" },
 ];
@@ -49,7 +49,7 @@ const NAV: { href: string; label: string; icon: typeof LayoutDashboard; badge?: 
 const MOBILE_NAV: { href: string; label: string; icon: typeof LayoutDashboard; badge?: BadgeKey }[] = [
   { href: "/", label: "Home", icon: LayoutDashboard, badge: "notifications" },
   { href: "/groups", label: "Groups", icon: Users },
-  { href: "/balances", label: "Balances", icon: Scale, badge: "balances" },
+  { href: "/balances", label: "Friends", icon: UserRound, badge: "balances" },
   { href: "/chat", label: "Chat", icon: MessageSquare, badge: "messages" },
 ];
 

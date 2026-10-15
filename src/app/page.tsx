@@ -98,7 +98,7 @@ export default function Dashboard() {
   return (
     <AppShell title="Home">
       {/* Hero: the answer to "where do I stand?" in one number per currency. */}
-      <Card className="mb-3 px-4 pb-4 pt-3 md:shrink-0">
+      <Card className="mb-2.5 px-4 pb-3 pt-1.5 md:mb-3 md:shrink-0 md:pb-4 md:pt-3">
         <div className="flex min-h-11 items-center justify-between gap-3">
           <h1 className="text-body font-medium text-ink-soft">{currencies.length > 1 ? "Your balances" : "Your balance"}</h1>
           {/* The mobile shell has no top bar, so the hero carries search, the inbox, and the account entry point. */}
@@ -159,13 +159,15 @@ export default function Dashboard() {
         )}
       </Card>
 
+      <GroupChips groups={groups} error={groupsError} onRetry={reloadGroups} />
+
       <div className="grid grid-cols-1 items-start gap-3 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
         {/* What to do next: every open balance, with its action right on the row. */}
         <Card>
           <CardHeader
-            title="Settle up"
+            title="Who owes who"
             meta={withBalances.length > 0 ? `${withBalances.length} ${withBalances.length === 1 ? "friend" : "friends"}` : undefined}
-            action={<HeaderLink href="/balances">All balances</HeaderLink>}
+            action={<HeaderLink href="/balances">All friends</HeaderLink>}
           />
           {friends === null && friendsError ? (
             <LoadError what="balances" message={friendsError} onRetry={reloadFriends} />
@@ -175,7 +177,7 @@ export default function Dashboard() {
             <EmptyState
               icon={<Users className="h-6 w-6" />}
               title="No friends yet"
-              hint="Invite friends from Balances, or join a group to start splitting."
+              hint="Invite friends from Friends, or join a group to start splitting."
             />
           ) : withBalances.length === 0 ? (
             <p className="flex items-center gap-2 px-4 py-3 text-body text-ink-faint"><Scale className="h-4 w-4" /> Nobody owes anything right now.</p>
@@ -194,7 +196,7 @@ export default function Dashboard() {
               </ul>
               {withBalances.length > SETTLE_PREVIEW && (
                 <Link href="/balances" className="flex min-h-[var(--control-h)] items-center justify-center border-t border-line text-body font-medium text-accent hover:bg-subtle">
-                  {withBalances.length - SETTLE_PREVIEW} more on Balances
+                  {withBalances.length - SETTLE_PREVIEW} more on Friends
                 </Link>
               )}
             </>
@@ -202,7 +204,7 @@ export default function Dashboard() {
         </Card>
 
         <div className="grid grid-cols-1 gap-3">
-          <Card>
+          <Card className="hidden md:block">
             <CardHeader title="Your groups" action={<HeaderLink href="/groups">All groups</HeaderLink>} />
             {groups === null && groupsError ? (
               <LoadError what="your groups" message={groupsError} onRetry={reloadGroups} />
@@ -274,6 +276,42 @@ export default function Dashboard() {
         onSaved={load}
       />
     </AppShell>
+  );
+}
+
+function GroupChips({ groups, error, onRetry }: { groups: Group[] | null; error: string | null; onRetry: () => void }) {
+  if (groups === null && error) {
+    return (
+      <p role="alert" className="mb-2.5 text-body text-ink-soft md:hidden">
+        Your groups could not load. <button type="button" onClick={onRetry} className="inline-flex min-h-[var(--control-h-sm)] items-center font-semibold text-accent">Try again</button>
+      </p>
+    );
+  }
+  return (
+    <nav aria-label="Your groups" className="-mx-4 mb-2.5 flex gap-2 overflow-x-auto px-4 pb-0.5 md:hidden">
+      {groups === null ? (
+        [...Array(3)].map((_, i) => <div key={i} className="skeleton h-11 w-32 shrink-0 rounded-full" />)
+      ) : groups.length === 0 ? (
+        <Link href="/groups" className="inline-flex min-h-[var(--control-h)] shrink-0 items-center gap-1.5 rounded-full border border-line bg-card px-3.5 text-body font-semibold text-accent shadow-card">
+          <Users className="h-4 w-4" /> Create a group
+        </Link>
+      ) : (
+        groups.map((g) => (
+          <Link
+            key={g.id}
+            href={`/groups/${g.id}`}
+            aria-label={`${g.name}, ${g.myNetCents === 0 ? "settled" : `${g.myNetCents > 0 ? "you're owed" : "you owe"} ${fmtMoney(Math.abs(g.myNetCents), g.currency)}`}`}
+            className={`group-hue-${g.id % 6} inline-flex min-h-[var(--control-h)] max-w-64 shrink-0 items-center gap-2 rounded-full border border-line bg-card px-3.5 text-body shadow-card`}
+          >
+            <span className="h-2 w-2 shrink-0 rounded-full bg-[var(--group-color)]" aria-hidden />
+            <span className="min-w-0 truncate font-medium">{g.name}</span>
+            <span aria-hidden className={`tnum shrink-0 font-semibold ${g.myNetCents > 0 ? "text-owed" : g.myNetCents < 0 ? "text-owe" : "text-ink-faint"}`}>
+              {g.myNetCents === 0 ? "settled" : <Money cents={g.myNetCents} currency={g.currency} signed />}
+            </span>
+          </Link>
+        ))
+      )}
+    </nav>
   );
 }
 
