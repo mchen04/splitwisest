@@ -289,7 +289,9 @@ export function amountInputToCents(input: string): number | null {
   const normalized = /,\d{1,2}$/.test(t) && !t.includes(".") ? t.replace(/,(\d{1,2})$/, ".$1") : t;
   const cleaned = normalized.replace(/[^0-9.]/g, "");
   if (!cleaned || !/^\d*\.?\d*$/.test(cleaned)) return null;
-  const cents = Math.round(parseFloat(cleaned) * 100);
+  const [whole, fraction = ""] = cleaned.split(".");
+  const cents = Number(whole) * 100 + Number(fraction.slice(0, 2).padEnd(2, "0")) +
+    (Number(fraction[2] ?? "0") >= 5 ? 1 : 0);
   if (!Number.isFinite(cents) || cents <= 0 || cents > 100_000_000_000) return null;
   return cents;
 }

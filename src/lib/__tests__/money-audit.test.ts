@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { splitPercentage, splitShares } from "../money";
+import { amountInputToCents, splitPercentage, splitShares } from "../money";
 import { ParticipantSplit } from "../../components/expense-splits";
 
 vi.mock("../db", () => ({ sql: vi.fn(async () => [
@@ -13,6 +13,11 @@ vi.mock("../db", () => ({ sql: vi.fn(async () => [
 import { convert } from "../fx";
 
 describe("money audit regressions", () => {
+  it("rounds decimal amount input at half cents without binary drift", () => {
+    expect(amountInputToCents("1.005")).toBe(101);
+    expect(amountInputToCents("10.075")).toBe(1008);
+    expect(amountInputToCents("10,075")).toBe(1007500);
+  });
   it("allocates high precision expense weights using exact largest remainders", () => {
     const inputs = [37.1454, 25.709201, 37.145399].map((value, i) => ({ userId: i + 1, value }));
     expect([...splitPercentage(99_999_999, inputs).values()]).toEqual([37_145_399, 25_709_201, 37_145_399]);
