@@ -6,13 +6,15 @@ import { createExpenseWithActivity, ExpenseBody, materializeRecurring } from "@/
 import { finishGroupExpensePage, groupExpensePage } from "@/lib/group-expense-page";
 import { parseGroupId, requireGroupMember } from "@/lib/groups";
 import { versionToken } from "@/lib/versions";
+import { currencyStep } from "@/lib/currencies";
 
 type Ctx = { params: Promise<{ id: string }> };
 
 export const GET = handler(async (req: NextRequest, { params }: Ctx) => {
   const user = await requireUser();
   const groupId = parseGroupId((await params).id);
-  await requireGroupMember(groupId, user.id);
+  const group = await requireGroupMember(groupId, user.id);
+  const step = currencyStep(group.currency);
   await materializeRecurring(groupId);
 
   const q = req.nextUrl.searchParams;
@@ -55,11 +57,11 @@ export const GET = handler(async (req: NextRequest, { params }: Ctx) => {
           -- Per-expense largest-remainder allocation so displayed converted shares
           -- sum EXACTLY to converted_cents (matches group_balance_rows()).
           SELECT es.user_id, es.share_cents,
-            (div(es.share_cents::numeric * e.converted_cents, e.amount_cents)
+            ((div(es.share_cents::numeric * e.converted_cents, e.amount_cents::numeric * ${step})
               + CASE WHEN row_number() OVER (
-                    ORDER BY mod(es.share_cents::numeric * e.converted_cents, e.amount_cents) DESC, es.user_id)
-                  <= e.converted_cents - sum(div(es.share_cents::numeric * e.converted_cents, e.amount_cents)) OVER ()
-                THEN 1 ELSE 0 END)::bigint AS converted_share_cents
+                    ORDER BY mod(es.share_cents::numeric * e.converted_cents, e.amount_cents::numeric * ${step}) DESC, es.user_id)
+                  <= e.converted_cents / ${step} - sum(div(es.share_cents::numeric * e.converted_cents, e.amount_cents::numeric * ${step})) OVER ()
+                THEN 1 ELSE 0 END) * ${step})::bigint AS converted_share_cents
           FROM expense_shares es WHERE es.expense_id = e.id
         ) a) AS shares
     FROM expenses e
