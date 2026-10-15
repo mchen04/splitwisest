@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Search, SendHorizonal } from "lucide-react";
 import { api, ApiClientError, fmtTime, markRead, useApiData } from "@/lib/client";
 import { startsMessageBurst } from "@/lib/chat";
+import { useTextDraft } from "@/lib/drafts";
 import { ActionError, Avatar, Input, LoadError, toast } from "./ui";
 
 interface Message {
@@ -60,7 +61,7 @@ export function ChatPane({
     endpoint, 0, { sync: false }
   );
   const [messages, setMessages] = useState<Message[] | null>(null);
-  const [draft, setDraft] = useState("");
+  const [draft, setDraft] = useTextDraft(meId, `chat:${endpoint}`);
   const [query, setQuery] = useState("");
   const [searching, setSearching] = useState(false);
   const [sending, setSending] = useState(false);

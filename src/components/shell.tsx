@@ -11,6 +11,7 @@ import { api, useApiData, useMe, useUnread, type Unread } from "@/lib/client";
 import { useTheme } from "@/lib/theme";
 import { syncExistingPush } from "@/lib/push-client";
 import { defaultExpenseGroup, readExpenseGroup } from "@/lib/last-group";
+import { clearAllDrafts } from "@/lib/drafts";
 import { Avatar, ConfirmHost, IconButton, ToastRegion } from "./ui";
 import { QuickAddExpense } from "./quick-add-expense";
 
@@ -135,6 +136,7 @@ export function AppShell({ title, children }: { title?: string; children: ReactN
 
   async function logout() {
     await api("/api/auth/logout", { method: "POST" });
+    clearAllDrafts();
     router.push("/login");
   }
 
