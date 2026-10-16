@@ -13,7 +13,9 @@
     "migrate:apply": "tsx scripts/apply-migration.ts",
     "migrate:notifications": "tsx scripts/migrate-notifications.ts",
     "verify:notifications": "tsx scripts/verify-notifications.ts",
-    "verify:monthly-reminders": "tsx scripts/verify-monthly-reminders.ts"
+    "verify:monthly-reminders": "tsx scripts/verify-monthly-reminders.ts",
+    "verify:money-ledger": "tsx scripts/verify-money-ledger.ts",
+    "verify:money-form": "tsx scripts/verify-money-form.ts"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",

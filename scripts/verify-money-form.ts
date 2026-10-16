@@ -1,17 +1,17 @@
 import { randomBytes } from "node:crypto";
 import { strict as assert } from "node:assert";
 import { chromium } from "playwright-core";
+import { confirmMoneyQaApp, moneyQaTarget } from "./money-qa";
 
-const base = process.env.SPLITWISEST_BROWSER_URL ?? "https://127.0.0.1:3740";
-const target = new URL(base);
-assert.equal(target.hostname, "127.0.0.1");
-assert(/^374[0-9]$/.test(target.port));
+const { base: target, sql } = moneyQaTarget(true);
+const base = target.origin;
 
 async function main() {
   const failures: string[] = [];
   const browser = await chromium.launch({ headless: true });
   try {
     const context = await browser.newContext({ ignoreHTTPSErrors: true, serviceWorkers: "block" });
+    await confirmMoneyQaApp(sql, async (cookie) => (await context.request.get(`${base}/api/me`, { headers: { cookie } })).json());
     const login = await context.request.post(`${base}/api/auth/login`, { data: { username: "money_audit_0", password: process.env.SPLITWISEST_MONEY_QA_PASSWORD ?? randomBytes(32).toString("hex") } });
     assert.equal(login.status(), 200);
     const groups = await (await context.request.get(`${base}/api/groups`)).json();

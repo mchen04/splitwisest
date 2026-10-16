@@ -1,13 +1,8 @@
 import { randomBytes } from "node:crypto";
-import "../src/lib/neon-local";
-import { neon } from "@neondatabase/serverless";
 import { strict as assert } from "node:assert";
+import { confirmMoneyQaApp, moneyQaTarget } from "./money-qa";
 
-const base = new URL(process.env.SPLITWISEST_BASE_URL ?? "http://127.0.0.1:3741");
-const database = new URL(process.env.DATABASE_URL ?? "http://invalid");
-assert(["127.0.0.1", "localhost"].includes(base.hostname) && /^374[0-9]$/.test(base.port), "Use the isolated local app");
-assert(/^\/sw_codex[a-z0-9_]*$/.test(database.pathname) && process.env.NEON_LOCAL_PROXY, "Use an isolated sw_codex database");
-const sql = neon(process.env.DATABASE_URL!);
+const { base, sql } = moneyQaTarget();
 const failures: string[] = [];
 let passed = 0;
 let state = 7301;
@@ -197,7 +192,11 @@ async function reconcile(label: string) {
 
 async function main() {
   today = (await sql`SELECT CURRENT_DATE::text AS day`)[0].day as string;
-  assert.equal((await sql`SELECT 1 FROM users WHERE username LIKE 'money_audit_%'`).length, 0, "Reset the isolated database before rerunning");
+  const counts = (await sql`SELECT (SELECT count(*) FROM users) + (SELECT count(*) FROM groups)
+    + (SELECT count(*) FROM expenses) + (SELECT count(*) FROM settlements)
+    + (SELECT count(*) FROM group_obligations) + (SELECT count(*) FROM recurring_expenses) AS rows`)[0];
+  assert.equal(Number(counts.rows), 0, "Recreate the empty splitwisest_money_qa database before rerunning");
+  await confirmMoneyQaApp(sql, async (cookie) => (await request("/api/me", { cookie } as User)).data);
   for (const [currency, rate] of Object.entries({ USD: 1, EUR: 0.8, GBP: 0.7, JPY: 149.5, KRW: 1370 })) {
     await sql`INSERT INTO fx_rates(currency, rate_per_usd, fetched_at) VALUES(${currency}, ${rate}, now()) ON CONFLICT(currency) DO UPDATE SET rate_per_usd = EXCLUDED.rate_per_usd, fetched_at = now()`;
   }
