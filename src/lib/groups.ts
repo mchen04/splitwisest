@@ -1,6 +1,7 @@
 import { sql } from "./db";
 import { forbidden, notFound } from "./api";
 import { AuthError, markSessionOwner, newInviteCode, requireSessionToken, requireUser, SessionUser } from "./auth";
+import type { MemberBalance } from "./balances";
 
 export interface AuthorizedGroup {
   id: number;
@@ -46,13 +47,20 @@ export interface GroupVersions {
   recurringDue: boolean;
 }
 
+export interface GroupMember {
+  id: number;
+  displayName: string;
+  username: string;
+}
+
 // Session, membership, and fingerprints of everything the group detail and the
 // group-balance list return, read in one statement (401 before 404/403). Routes
 // read or write their data only after this succeeds, and the fingerprint never
 // runs ahead of that data. The session predicate matches getSessionUser.
 export async function requireGroupViewerVersions(
   rawId: string,
-): Promise<AuthorizedGroup & { versions: GroupVersions }> {
+  includeDetail = false,
+): Promise<AuthorizedGroup & { versions: GroupVersions; members: GroupMember[]; balances: MemberBalance[] }> {
   const token = await requireSessionToken();
   // A malformed id keeps the old order: an invalid session still answers 401.
   if (!Number.isInteger(Number(rawId))) await requireUser();
@@ -61,27 +69,47 @@ export async function requireGroupViewerVersions(
     WITH viewer AS (
       SELECT s.user_id AS id FROM sessions s JOIN users u ON u.id = s.user_id
       WHERE s.token = ${token} AND s.expires_at > now() AND u.deleted_at IS NULL
+    ),
+    group_viewer AS MATERIALIZED (
+      SELECT v.viewer_id, g.id, g.name, g.currency, g.invite_code, g.created_by, m.is_member
+      FROM (SELECT (SELECT id FROM viewer) AS viewer_id) v
+      LEFT JOIN groups g ON g.id = ${groupId}
+      CROSS JOIN LATERAL (
+        SELECT EXISTS (SELECT 1 FROM group_members gm WHERE gm.group_id = g.id AND gm.user_id = v.viewer_id) AS is_member
+      ) m
+    ),
+    members AS MATERIALIZED (
+      SELECT u.id, u.display_name, u.username
+      FROM group_viewer g JOIN group_members gm ON gm.group_id = g.id
+      JOIN users u ON u.id = gm.user_id WHERE g.is_member
+    ),
+    balances AS MATERIALIZED (
+      SELECT b.user_id, b.display_name, b.net_cents
+      FROM group_viewer g CROSS JOIN LATERAL group_balance_rows(g.id) b
+      WHERE g.is_member
     )
-    SELECT v.viewer_id, g.id, g.name, g.currency, g.invite_code, g.created_by, m.is_member,
-      CASE WHEN m.is_member THEN md5(jsonb_build_array(g.name, g.currency, g.invite_code, g.created_by,
+    SELECT g.*,
+      CASE WHEN g.is_member THEN md5(jsonb_build_array(g.name, g.currency, g.invite_code, g.created_by,
         (SELECT jsonb_agg(jsonb_build_array(u.id, u.display_name, u.username) ORDER BY u.id)
-         FROM group_members gm JOIN users u ON u.id = gm.user_id WHERE gm.group_id = g.id),
+         FROM members u),
         (SELECT jsonb_agg(jsonb_build_array(b.user_id, b.display_name, b.net_cents) ORDER BY b.user_id)
-         FROM group_balance_rows(g.id) b))::text) END AS detail_version,
-      CASE WHEN m.is_member THEN md5(jsonb_build_array(
+         FROM balances b))::text) END AS detail_version,
+      CASE WHEN g.is_member THEN md5(jsonb_build_array(
         (SELECT jsonb_agg(jsonb_build_array(o.id, o.title, o.amount_cents, o.updated_at) ORDER BY o.id)
          FROM group_obligations o WHERE o.group_id = g.id),
         (SELECT MAX(a.id) FROM activity a WHERE a.group_id = g.id
            AND a.type IN ('group_balance.added', 'group_balance.edited', 'group_balance.deleted')))::text) END AS list_version,
-      m.is_member AND EXISTS (
+      g.is_member AND EXISTS (
         SELECT 1 FROM recurring_expenses r
         WHERE r.group_id = g.id AND r.active AND r.next_date <= CURRENT_DATE
-      ) AS recurring_due
-    FROM (SELECT (SELECT id FROM viewer) AS viewer_id) v
-    LEFT JOIN groups g ON g.id = ${groupId}
-    CROSS JOIN LATERAL (
-      SELECT EXISTS (SELECT 1 FROM group_members gm WHERE gm.group_id = g.id AND gm.user_id = v.viewer_id) AS is_member
-    ) m`;
+      ) AS recurring_due,
+      CASE WHEN ${includeDetail} AND g.is_member THEN
+        (SELECT jsonb_agg(to_jsonb(u) ORDER BY u.display_name, u.id) FROM members u)
+      END AS members,
+      CASE WHEN ${includeDetail} AND g.is_member THEN
+        (SELECT jsonb_agg(to_jsonb(b) ORDER BY b.display_name, b.user_id) FROM balances b)
+      END AS balances
+    FROM group_viewer g`;
   if (rows[0].viewer_id === null) throw new AuthError();
   // Like requireUser, a confirmed session refreshes the owner cookie even when 404/403 follows.
   await markSessionOwner(Number(rows[0].viewer_id));
@@ -92,6 +120,12 @@ export async function requireGroupViewerVersions(
       list: rows[0].list_version,
       recurringDue: rows[0].recurring_due,
     },
+    members: ((rows[0].members ?? []) as { id: number; display_name: string; username: string }[]).map((m) => ({
+      id: Number(m.id), displayName: m.display_name, username: m.username,
+    })),
+    balances: ((rows[0].balances ?? []) as { user_id: number; display_name: string; net_cents: number }[]).map((b) => ({
+      userId: Number(b.user_id), displayName: b.display_name, netCents: Number(b.net_cents),
+    })),
   };
 }
 

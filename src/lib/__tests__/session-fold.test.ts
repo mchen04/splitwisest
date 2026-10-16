@@ -55,6 +55,37 @@ describe("polling routes check the session in their own statement", () => {
     expect(sql).toHaveBeenCalledTimes(1);
   });
 
+  it("returns group data and its fingerprint from the same snapshot", async () => {
+    jar.set("sw_session", "t");
+    sql.mockResolvedValueOnce([{ ...groupRow,
+      members: [{ id: 5, display_name: "A", username: "a" }, { id: 6, display_name: "B", username: "b" }],
+      balances: [{ user_id: 5, display_name: "A", net_cents: 50 }, { user_id: 6, display_name: "B", net_cents: -50 }],
+    }]).mockResolvedValueOnce([]);
+    const response = await detailRoute.GET(new Request("https://app.example/api/groups/7") as never,
+      { params: Promise.resolve({ id: "7" }) });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ version: "d",
+      members: [{ id: 5, displayName: "A", username: "a" }, { id: 6, displayName: "B", username: "b" }],
+      balances: [{ userId: 5, displayName: "A", netCents: 50 }, { userId: 6, displayName: "B", netCents: -50 }],
+      suggestions: [{ from: 6, to: 5, amountCents: 50 }],
+    });
+    expect(sql).toHaveBeenCalledTimes(2);
+  });
+
+  it("refreshes the snapshot after materializing due recurring expenses", async () => {
+    jar.set("sw_session", "t");
+    sql.mockResolvedValueOnce([{ ...groupRow, recurring_due: true }]).mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ ...groupRow, detail_version: "new",
+        balances: [{ user_id: 5, display_name: "A", net_cents: 0 }],
+        members: [{ id: 5, display_name: "A", username: "a" }],
+      }]);
+    const response = await detailRoute.GET(new Request("https://app.example/api/groups/7") as never,
+      { params: Promise.resolve({ id: "7" }) });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ version: "new", balances: [{ userId: 5, netCents: 0 }] });
+    expect(sql).toHaveBeenCalledTimes(3);
+  });
+
   it("checks the session first for a malformed id", async () => {
     jar.set("sw_session", "t");
     sql.mockResolvedValueOnce([]);
