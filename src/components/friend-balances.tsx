@@ -100,7 +100,7 @@ export function FriendBalanceRow({
   return (
     <li className="px-4 py-1.5">
       <div className="flex min-h-[var(--control-h)] items-center gap-3">
-        <Link href={`/people/${friend.id}`} className="flex min-h-[var(--control-h-sm)] min-w-0 flex-1 items-center gap-3 rounded-lg hover:text-accent-dark" aria-label={`Open ${friend.displayName}'s profile`}>
+        <Link prefetch={false} href={`/people/${friend.id}`} className="flex min-h-[var(--control-h-sm)] min-w-0 flex-1 items-center gap-3 rounded-lg hover:text-accent-dark" aria-label={`Open ${friend.displayName}'s profile`}>
           <Avatar name={friend.displayName} />
           <span className="min-w-0">
             <RowTitle title={friend.displayName}>{friend.displayName}</RowTitle>

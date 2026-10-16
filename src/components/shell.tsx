@@ -76,7 +76,7 @@ function MobileNavLink({ href, label, icon: Icon, badge, active, count }: {
   href: string; label: string; icon: typeof LayoutDashboard; badge?: BadgeKey; active: boolean; count: number;
 }) {
   return (
-    <Link
+    <Link prefetch={false}
       href={href}
       aria-current={active ? "page" : undefined}
       aria-label={badge && count > 0 ? `${label}, ${count > 9 ? "9+" : count} ${BADGE_WORDS[badge]}` : label}
@@ -196,7 +196,7 @@ export function AppShell({ title, children }: { title?: string; children: ReactN
     <div className="app-frame">
       {/* Desktop / tablet sidebar */}
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-56 flex-col border-r border-line bg-card md:flex">
-        <Link href="/" className="flex items-center gap-2 px-4 pb-3 pt-4">
+        <Link prefetch={false} href="/" className="flex items-center gap-2 px-4 pb-3 pt-4">
           <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-accent text-on-accent">
             <Wallet className="h-4 w-4" />
           </span>
@@ -221,7 +221,7 @@ export function AppShell({ title, children }: { title?: string; children: ReactN
                     : "text-ink-soft hover:bg-subtle hover:text-ink"
                 }`}
               >
-                <Link href={href} aria-current={isActive(href) ? "page" : undefined} className="flex min-h-[var(--nav-h)] min-w-0 flex-1 items-center gap-2.5 px-2.5 py-1.5 text-body font-medium">
+                <Link prefetch={false} href={href} aria-current={isActive(href) ? "page" : undefined} className="flex min-h-[var(--nav-h)] min-w-0 flex-1 items-center gap-2.5 px-2.5 py-1.5 text-body font-medium">
                   <Icon className="h-4 w-4 shrink-0" />
                   <span className="flex-1 truncate">{label}</span>
                   {badge && <Badge count={unread[badge]} />}
@@ -241,7 +241,7 @@ export function AppShell({ title, children }: { title?: string; children: ReactN
               {href === "/groups" && groupsOpen && (
                 <div className="mt-0.5 flex flex-col gap-0.5">
                   {groupsData?.groups?.map((g) => (
-                    <Link
+                    <Link prefetch={false}
                       key={g.id}
                       href={`/groups/${g.id}`}
                       className={`group-hue-${g.id % 6} flex min-h-[var(--nav-h)] items-center gap-2 rounded-lg py-1 pl-7 pr-2.5 text-body transition-colors ${
@@ -270,7 +270,7 @@ export function AppShell({ title, children }: { title?: string; children: ReactN
           </button>
           {me && (
             <div className="flex items-center gap-1.5">
-              <Link href="/settings" className="flex min-h-[var(--control-h)] min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2 py-1 hover:bg-subtle" title="Account settings">
+              <Link prefetch={false} href="/settings" className="flex min-h-[var(--control-h)] min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2 py-1 hover:bg-subtle" title="Account settings">
                 <Avatar name={me.displayName} size="sm" />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-body font-medium" title={me.displayName}>{me.displayName}</p>

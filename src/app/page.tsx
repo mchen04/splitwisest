@@ -101,16 +101,16 @@ export default function Dashboard() {
       <Card className="mb-2.5 px-4 py-2 md:mb-3 md:shrink-0 md:pb-4 md:pt-3">
         {me && (
           <div className="float-right -mr-2 flex items-center md:hidden">
-            <Link href="/expenses" aria-label="Search expenses"
+            <Link prefetch={false} href="/expenses" aria-label="Search expenses"
               className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-ink-soft hover:bg-subtle">
               <Search className="h-5 w-5" />
             </Link>
-            <Link href="/notifications" aria-label={`Notifications${unread.notifications ? `, ${unread.notifications} unread` : ""}`}
+            <Link prefetch={false} href="/notifications" aria-label={`Notifications${unread.notifications ? `, ${unread.notifications} unread` : ""}`}
               className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-ink-soft hover:bg-subtle">
               <Bell className="h-5 w-5" />
               {unread.notifications > 0 && <span className="absolute right-0.5 top-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1 text-meta font-semibold text-on-accent">{unread.notifications > 9 ? "9+" : unread.notifications}</span>}
             </Link>
-            <Link href="/settings" aria-label="Account settings" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full md:hidden">
+            <Link prefetch={false} href="/settings" aria-label="Account settings" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full md:hidden">
               <Avatar name={me.displayName} size="sm" />
             </Link>
           </div>
@@ -188,7 +188,7 @@ export default function Dashboard() {
                 ))}
               </ul>
               {withBalances.length > SETTLE_PREVIEW && (
-                <Link href="/balances" className="flex min-h-[var(--control-h)] items-center justify-center border-t border-line text-body font-medium text-accent hover:bg-subtle">
+                <Link prefetch={false} href="/balances" className="flex min-h-[var(--control-h)] items-center justify-center border-t border-line text-body font-medium text-accent hover:bg-subtle">
                   {withBalances.length - SETTLE_PREVIEW} more on Friends
                 </Link>
               )}
@@ -208,13 +208,13 @@ export default function Dashboard() {
                 icon={<Users className="h-6 w-6" />}
                 title="No groups yet"
                 hint="Create a group for a trip, an apartment, or a dinner crew."
-                action={<Link href="/groups" className="inline-flex min-h-[var(--control-h)] items-center rounded-lg border border-line px-3.5 text-body font-semibold hover:bg-subtle">Create a group</Link>}
+                action={<Link prefetch={false} href="/groups" className="inline-flex min-h-[var(--control-h)] items-center rounded-lg border border-line px-3.5 text-body font-semibold hover:bg-subtle">Create a group</Link>}
               />
             ) : (
               <ul className="divide-y divide-line">
                 {groups.map((g) => (
                   <li key={g.id}>
-                    <Link href={`/groups/${g.id}`} className={`group-hue-${g.id % 6} flex min-h-[var(--row-h)] items-center gap-3 px-4 py-2 hover:bg-subtle`}>
+                    <Link prefetch={false} href={`/groups/${g.id}`} className={`group-hue-${g.id % 6} flex min-h-[var(--row-h)] items-center gap-3 px-4 py-2 hover:bg-subtle`}>
                       <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--group-soft)] text-[var(--group-ink)]">
                         <Users className="h-4 w-4" />
                       </span>
@@ -285,12 +285,12 @@ function GroupChips({ groups, error, onRetry }: { groups: Group[] | null; error:
       {groups === null ? (
         [...Array(3)].map((_, i) => <div key={i} className="skeleton h-11 w-32 shrink-0 rounded-full" />)
       ) : groups.length === 0 ? (
-        <Link href="/groups" className="inline-flex min-h-[var(--control-h)] shrink-0 items-center gap-1.5 rounded-full border border-line bg-card px-3.5 text-body font-semibold text-accent shadow-card">
+        <Link prefetch={false} href="/groups" className="inline-flex min-h-[var(--control-h)] shrink-0 items-center gap-1.5 rounded-full border border-line bg-card px-3.5 text-body font-semibold text-accent shadow-card">
           <Users className="h-4 w-4" /> Create a group
         </Link>
       ) : (
         groups.map((g) => (
-          <Link
+          <Link prefetch={false}
             key={g.id}
             href={`/groups/${g.id}`}
             aria-label={`${g.name}, ${g.myNetCents === 0 ? "settled" : `${g.myNetCents > 0 ? "you're owed" : "you owe"} ${fmtMoney(Math.abs(g.myNetCents), g.currency)}`}`}
