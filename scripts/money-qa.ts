@@ -19,7 +19,8 @@ export function moneyQaTarget(browser = false) {
   assert(process.env.NEON_LOCAL_PROXY, "NEON_LOCAL_PROXY is required");
   const proxy = loopback(process.env.NEON_LOCAL_PROXY, ["http:", "https:"], "NEON_LOCAL_PROXY");
   assert(!proxy.username && !proxy.password, "Proxy URL must not contain credentials");
-  return { base, sql: neon(database.href) };
+  const password = process.env.SPLITWISEST_MONEY_QA_PASSWORD ?? randomBytes(32).toString("hex");
+  return { base, sql: neon(database.href), password };
 }
 
 export async function confirmMoneyQaApp(sql: NeonQueryFunction<false, false>, readMe: (cookie: string) => Promise<{ user?: { id: number } }>) {

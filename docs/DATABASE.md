@@ -110,7 +110,8 @@ pnpm tsx scripts/migrate.ts
 pnpm dev --hostname 127.0.0.1 --port 3000
 ```
 
-In another terminal, use the same database and proxy exports, then run these commands.
+In another terminal, use the same database and proxy exports.
+Generate one password for both verifier processes, as shown in the README testing instructions.
 
 ```bash
 export SPLITWISEST_BASE_URL="http://127.0.0.1:3000"

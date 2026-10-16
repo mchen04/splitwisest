@@ -1,8 +1,7 @@
-import { randomBytes } from "node:crypto";
 import { strict as assert } from "node:assert";
 import { confirmMoneyQaApp, moneyQaTarget } from "./money-qa";
 
-const { base, sql } = moneyQaTarget();
+const { base, sql, password } = moneyQaTarget();
 const failures: string[] = [];
 let passed = 0;
 let state = 7301;
@@ -201,7 +200,7 @@ async function main() {
     await sql`INSERT INTO fx_rates(currency, rate_per_usd, fetched_at) VALUES(${currency}, ${rate}, now()) ON CONFLICT(currency) DO UPDATE SET rate_per_usd = EXCLUDED.rate_per_usd, fetched_at = now()`;
   }
   for (let i = 0; i < 4; i++) {
-    const r = await request("/api/auth/signup", undefined, { username: `money_audit_${i}`, displayName: `Audit ${3 - i}`, password: process.env.SPLITWISEST_MONEY_QA_PASSWORD ?? randomBytes(32).toString("hex") });
+    const r = await request("/api/auth/signup", undefined, { username: `money_audit_${i}`, displayName: `Audit ${3 - i}`, password });
     assert.equal(r.status, 200, r.text); assert(r.cookie);
     const me = await api("/api/me", { cookie: r.cookie } as User);
     users.push({ id: me.user.id, cookie: r.cookie, name: me.user.displayName });

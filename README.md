@@ -63,6 +63,19 @@ pnpm lint                # lint
 pnpm build               # production build
 ```
 
+The money checks require the dedicated loopback database `splitwisest_money_qa` and its local app and proxy.
+Generate one password before launching the ledger and browser checks from the same shell:
+
+```bash
+export SPLITWISEST_MONEY_QA_PASSWORD="$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("hex"))')"
+pnpm verify:money-ledger
+pnpm verify:money-form
+unset SPLITWISEST_MONEY_QA_PASSWORD
+```
+
+Separate shells must receive the same value through their private local environment configuration.
+Without this variable, each process generates its own password and cannot share the ledger login.
+
 Browser checks cover desktop WebKit and realistic phone sizes. The iPhone gate adds the physical-device steps in `docs/PWA.md`.
 
 ## Deployment (Vercel)
