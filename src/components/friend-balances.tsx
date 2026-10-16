@@ -41,16 +41,27 @@ export function useRemind() {
   return { remind, sentTo: sent };
 }
 
-function ObligationText({ obligation, amount }: { obligation: FriendObligation; amount: string }) {
+function ObligationText({ obligation, amount, stacked = false }: { obligation: FriendObligation; amount: string; stacked?: boolean }) {
   const owe = obligation.netCents < 0;
+  const direction = (
+    <span className={`whitespace-nowrap ${owe ? "text-owe" : "text-owed"}`}>
+      {owe ? "you owe " : "owes you "}
+      <span className="tnum font-semibold">{amount}</span>
+    </span>
+  );
+  if (stacked) {
+    return (
+      <span className="block min-w-0 text-body">
+        <span className="block truncate text-meta text-ink-faint">{obligation.groupName ?? "Direct"}</span>
+        {direction}
+      </span>
+    );
+  }
   return (
     <span className="flex min-w-0 items-baseline gap-1 text-body">
       <span className="min-w-0 truncate text-ink-faint">{obligation.groupName ?? "Direct"}</span>
-      <span className={`shrink-0 whitespace-nowrap ${owe ? "text-owe" : "text-owed"}`}>
-        <span className="text-ink-faint">· </span>
-        {owe ? "you owe " : "owes you "}
-        <span className="tnum font-semibold">{amount}</span>
-      </span>
+      <span className="shrink-0 text-ink-faint">·</span>
+      {direction}
     </span>
   );
 }
@@ -82,7 +93,7 @@ export function FriendBalanceRow({
         onClick={() => onSettle(friend, obligationKey(o))}
         aria-label={`Settle up ${amount} with ${friend.displayName}${o.groupName ? ` in ${o.groupName}` : ""}`}
       >
-        <HandCoins className="h-4 w-4" /> Settle<span className="hidden sm:inline"> up</span>
+        <HandCoins className="h-4 w-4" /> Settle up
       </Button>
     );
   };
@@ -101,9 +112,7 @@ export function FriendBalanceRow({
         {single && single.netCents < 0 && settleButton(single)}
         {theyOweMe && (
           <Button size="sm" variant="secondary" onClick={() => onRemind(friend)} aria-label={`Remind ${friend.displayName} to settle up`}>
-            {reminded
-              ? <><Check className="h-4 w-4 text-owed" /> <span className="hidden sm:inline">Reminded</span></>
-              : <><Bell className="h-4 w-4" /> <span className="hidden sm:inline">Remind</span></>}
+            {reminded ? <><Check className="h-4 w-4 text-owed" /> Reminded</> : <><Bell className="h-4 w-4" /> Remind</>}
           </Button>
         )}
         {menu}
@@ -115,7 +124,7 @@ export function FriendBalanceRow({
             return (
               <li key={obligationKey(o)} className={`flex items-center gap-2 ${ownButton ? "min-h-[var(--control-h-sm)]" : "py-0.5"}`}>
                 <span className="min-w-0 flex-1">
-                  <ObligationText obligation={o} amount={fmtMoney(Math.abs(o.netCents), o.currency)} />
+                  <ObligationText obligation={o} amount={fmtMoney(Math.abs(o.netCents), o.currency)} stacked={ownButton} />
                 </span>
                 {ownButton && settleButton(o)}
               </li>

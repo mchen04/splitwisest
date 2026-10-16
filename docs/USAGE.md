@@ -60,7 +60,7 @@
 - Before removing a member, edit or delete every group balance that includes them. This also applies to zero shares and net-zero entries.
 - **Who owes who** shows the fewest payments that clear the group. Each member's net shows in the members list on wide screens and under **Member balances** on the Balances tab on phones and tablets.
 - The group's **Settle up** opens your suggested payment ready to record. With several, it lists them; **Record a different payment** opens a blank form.
-- **Home** lists every open balance under **Who owes who**. Each friend shows each open balance on its own line. A balance you owe has **Settle up**; a friend who owes you has **Remind** (a bell on phones).
+- **Home** lists every open balance under **Who owes who**. Each friend shows each open balance on its own line. A balance you owe has **Settle up**; a friend who owes you has **Remind**.
 - On phones, Home also shows your groups as one-tap chips with your balance in each, most recently active first.
 - A group's header shows who you pay or who pays you, with amounts. Tap it to open the group's Balances tab.
 - Settling a balance from Home, Friends, or a profile records the whole amount. To pay part of a group balance, choose **Record a partial payment in <group>**. The group's Settle up form opens with the same two people, and you enter the amount.
