@@ -98,58 +98,50 @@ export default function Dashboard() {
   return (
     <AppShell title="Home">
       {/* Hero: the answer to "where do I stand?" in one number per currency. */}
-      <Card className="mb-2.5 px-4 pb-3 pt-1.5 md:mb-3 md:shrink-0 md:pb-4 md:pt-3">
-        <div className="flex min-h-11 items-center justify-between gap-3">
-          <h1 className="text-body font-medium text-ink-soft">{currencies.length > 1 ? "Your balances" : "Your balance"}</h1>
-          {/* The mobile shell has no top bar, so the hero carries search, the inbox, and the account entry point. */}
-          {me && (
-            <div className="-mr-2 flex items-center md:hidden">
-              <Link href="/expenses" aria-label="Search expenses"
-                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-ink-soft hover:bg-subtle">
-                <Search className="h-5 w-5" />
-              </Link>
-              <Link href="/notifications" aria-label={`Notifications${unread.notifications ? `, ${unread.notifications} unread` : ""}`}
-                className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-ink-soft hover:bg-subtle">
-                <Bell className="h-5 w-5" />
-                {unread.notifications > 0 && <span className="absolute right-0.5 top-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1 text-meta font-semibold text-on-accent">{unread.notifications > 9 ? "9+" : unread.notifications}</span>}
-              </Link>
-              <Link href="/settings" aria-label="Account settings" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full md:hidden">
-                <Avatar name={me.displayName} size="sm" />
-              </Link>
-            </div>
-          )}
-        </div>
+      <Card className="mb-2.5 px-4 py-2 md:mb-3 md:shrink-0 md:pb-4 md:pt-3">
+        {me && (
+          <div className="float-right -mr-2 flex items-center md:hidden">
+            <Link href="/expenses" aria-label="Search expenses"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-ink-soft hover:bg-subtle">
+              <Search className="h-5 w-5" />
+            </Link>
+            <Link href="/notifications" aria-label={`Notifications${unread.notifications ? `, ${unread.notifications} unread` : ""}`}
+              className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-ink-soft hover:bg-subtle">
+              <Bell className="h-5 w-5" />
+              {unread.notifications > 0 && <span className="absolute right-0.5 top-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1 text-meta font-semibold text-on-accent">{unread.notifications > 9 ? "9+" : unread.notifications}</span>}
+            </Link>
+            <Link href="/settings" aria-label="Account settings" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full md:hidden">
+              <Avatar name={me.displayName} size="sm" />
+            </Link>
+          </div>
+        )}
+        <h1 className="hidden min-h-11 items-center text-body font-medium text-ink-soft md:flex">{currencies.length > 1 ? "Your balances" : "Your balance"}</h1>
         {friends === null && friendsError ? (
-          <p role="alert" className="text-body text-ink-soft">Your balance could not load. <button type="button" onClick={reloadFriends} className="inline-flex min-h-[var(--control-h-sm)] items-center font-semibold text-accent">Try again</button></p>
+          <p role="alert" className="min-h-11 py-2.5 text-body text-ink-soft">Your balance could not load. <button type="button" onClick={reloadFriends} className="inline-flex min-h-[var(--control-h-sm)] items-center font-semibold text-accent">Try again</button></p>
         ) : friends === null ? (
-          // Reserve the loaded hero's footprint so data arriving does not shift the page.
-          <div className="mt-1 space-y-2">
-            <div className="skeleton h-10 w-44" />
-            <div className="skeleton h-4 w-56" />
+          <div className="space-y-2 py-0.5">
+            <div className="skeleton h-8 w-40 md:h-10 md:w-44" />
+            <div className="skeleton h-3 w-28 md:h-4 md:w-56" />
           </div>
         ) : currencies.length === 0 && withBalances.length === 0 ? (
-          <p className="text-amount font-semibold tracking-tight text-ink">You&rsquo;re all settled up</p>
+          <p className="flex min-h-11 items-center text-amount font-semibold tracking-tight text-ink">You&rsquo;re all settled up</p>
         ) : (
           <>
             {currencies.length === 0 && (
-              <p className="text-amount font-semibold tracking-tight text-ink">Your balances offset overall</p>
+              <p className="flex min-h-11 items-center text-amount font-semibold tracking-tight text-ink">Your balances offset overall</p>
             )}
-            {/* Each currency nets separately, and each carries an explicit
-                owed/owe word so direction never relies on color alone. */}
-            <div className={currencies.length > 1 ? "grid grid-cols-2 gap-x-5 gap-y-2 sm:flex sm:flex-wrap sm:gap-x-8" : "flex"}>
-              {currencies.map(([cur, amt]) => (
-                <div key={cur} className="min-w-0">
-                  <p className={`${currencies.length > 1 ? "text-amount sm:text-amount-lg" : "text-hero"} font-semibold tracking-tight tnum ${amt > 0 ? "text-owed" : "text-owe"}`}>
-                    <Money cents={amt} currency={cur} signed />
-                  </p>
-                  <p className={`text-meta font-medium ${amt > 0 ? "text-owed" : "text-owe"}`}>
-                    {amt > 0 ? "owed to you" : "you owe"}{currencies.length > 1 ? ` · ${cur}` : ""}
-                  </p>
-                </div>
-              ))}
-            </div>
+            {currencies.map(([cur, amt]) => (
+              <div key={cur} className="mr-5 inline-block max-w-full align-top sm:mr-8">
+                <p className={`${currencies.length > 1 ? "text-amount sm:text-amount-lg" : "text-amount-lg md:text-hero"} font-semibold tracking-tight tnum ${amt > 0 ? "text-owed" : "text-owe"}`}>
+                  <Money cents={amt} currency={cur} signed />
+                </p>
+                <p className={`text-meta font-medium ${amt > 0 ? "text-owed" : "text-owe"}`}>
+                  {amt > 0 ? "owed to you" : "you owe"}{currencies.length > 1 ? ` · ${cur}` : ""}
+                </p>
+              </div>
+            ))}
             {singleCur && owedTotal > 0 && oweTotal > 0 && (
-              <p className="mt-1.5 text-body text-ink-faint">
+              <p className="clear-both mt-1 text-body text-ink-faint">
                 <span className="text-owed">{fmtMoney(owedTotal, singleCur)} owed to you</span>
                 {" · "}
                 <span className="text-owe">{fmtMoney(oweTotal, singleCur)} you owe</span>
@@ -157,6 +149,7 @@ export default function Dashboard() {
             )}
           </>
         )}
+        <div className="clear-both" />
       </Card>
 
       <GroupChips groups={groups} error={groupsError} onRetry={reloadGroups} />
