@@ -12,6 +12,7 @@ A private, friend-group expense tracker inspired by Splitwise. Track shared expe
 - Equal, exact, percentage, shares, and itemized splits; custom categories, notes, and receipt attachments
 - Group balances with separate owes and receives allocations; equal, exact, percentage, and shares on each side
 - Multi-currency with automatic conversion (rates snapshotted per expense)
+- Home shows who owes who per friend and, on phones, one-tap group chips; group headers show who you pay or who pays you
 - Group + friend balances with exact minimum-payment plans for up to 18 active balances
 - Offline settlement recording (group or direct between friends)
 - Recurring expenses (weekly/monthly, lazily materialized)
@@ -24,6 +25,7 @@ A private, friend-group expense tracker inspired by Splitwise. Track shared expe
 - The saved theme wins. Without a saved choice, the app follows the OS preference.
 - Installable PWA with safe-area support, a stable app frame, responsive layouts, and a matching offline screen
 - Deploy updates wait while an open form contains unsaved text or choices
+- Expense, chat, and comment drafts survive app switching, locking, and reloads; an interrupted expense form reopens with its values
 - Picks up a new deploy on its own — the client compares its build id against the server's and reloads once
 
 ## Stack
