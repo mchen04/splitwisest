@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Pencil, Trash2, Paperclip, FileText, SendHorizonal, MessageSquare, History } from "lucide-react";
 import { api, ApiClientError, fmtDate, fmtMoney, fmtTime, useApiData } from "@/lib/client";
 import { Change, describeChange } from "@/lib/activity-diff";
+import { useTextDraft } from "@/lib/drafts";
 import { Modal, Button, Avatar, Input, SectionLabel, LoadError, ActionError } from "./ui";
 
 interface Detail {
@@ -88,9 +89,7 @@ export function ExpenseDetailModal({
   const comments = localComments?.expenseId === expenseId
     ? localComments.comments
     : commentsData?.comments ?? null;
-  const [draftState, setDraftState] = useState<{ expenseId: number; value: string } | null>(null);
-  const draft = draftState?.expenseId === expenseId ? draftState.value : "";
-  const setDraft = (value: string) => setDraftState({ expenseId: expenseId ?? 0, value });
+  const [draft, setDraft] = useTextDraft(meId, `comment:${expenseId ?? 0}`);
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<{ expenseId: number; message: string | null } | null>(null);
   const sendFailure = sendError?.expenseId === expenseId ? sendError : null;

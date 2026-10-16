@@ -23,7 +23,7 @@ export const GET = handler(async (_req: NextRequest, { params }: Ctx) => {
       p.display_name AS payer, c.name AS category, e.split_method, e.notes,
       (SELECT string_agg(u.display_name || ': ' || to_char(
             es.share_cents/100.0,
-            CASE WHEN e.currency IN ('JPY','KRW') THEN 'FM999999990' ELSE 'FM999999990.00' END
+            CASE WHEN e.currency IN ('JPY','KRW') THEN 'FM999999999999999990' ELSE 'FM999999999999999990.00' END
           ), '; ' ORDER BY u.display_name)
        FROM expense_shares es JOIN users u ON u.id = es.user_id WHERE es.expense_id = e.id) AS shares
     FROM expenses e

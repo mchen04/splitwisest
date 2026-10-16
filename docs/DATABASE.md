@@ -96,6 +96,36 @@ pnpm dev   # or: pnpm build && pnpm start
 Pass these on the command line for the `tsx` scripts (they read `.env.local`
 *after* the driver is configured, so the env must already be set).
 
+## Money verifiers
+
+Use an empty database named exactly `splitwisest_money_qa` and a local Neon-HTTP proxy.
+Both verifiers refuse non-loopback app, database, and proxy hosts.
+They also check that the app uses the same QA database before creating ledger fixtures.
+
+```bash
+createdb -h 127.0.0.1 -p 5433 -U postgres splitwisest_money_qa
+export DATABASE_URL="${SPLITWISEST_MONEY_QA_DATABASE_URL:?Set your local QA connection string}"
+export NEON_LOCAL_PROXY="http://127.0.0.1:4444/sql"
+pnpm tsx scripts/migrate.ts
+pnpm dev --hostname 127.0.0.1 --port 3000
+```
+
+In another terminal, use the same database and proxy exports.
+Generate one password for both verifier processes, as shown in the README testing instructions.
+
+```bash
+export SPLITWISEST_BASE_URL="http://127.0.0.1:3000"
+export SPLITWISEST_BROWSER_URL="http://127.0.0.1:3000"
+pnpm verify:money-ledger
+pnpm verify:money-form
+```
+
+Any local port works. Set the browser URL to the HTTPS origin when the app uses secure cookies.
+The ledger verifier creates deterministic synthetic accounts and checks raw rows against API and SQL balances.
+The form verifier needs Chromium and the ledger fixtures. It checks previews, saves, and edits.
+Stop the QA app, then drop the database with `dropdb -h 127.0.0.1 -p 5433 -U postgres splitwisest_money_qa`.
+Recreate and migrate it before another ledger run. Never use a database that contains real records.
+
 ## Tables
 
 | Table | Purpose |

@@ -8,6 +8,7 @@ import { convert } from "./fx";
 import { activityData } from "./activity";
 import { Change, feedLine } from "./activity-diff";
 import { VersionToken, versionToken } from "./versions";
+import { validateCurrencyAmount } from "./currencies";
 
 // Validation fields shared by group and direct (friend) settlement bodies.
 export const settlementFields = {
@@ -51,6 +52,7 @@ export async function recordGroupSettlement(
   // could fabricate/alter a settlement between two OTHER members and silently
   // shift their money-bearing balance (mirrors the guard in recordDirectSettlement).
   if (createdBy !== body.payerId && createdBy !== body.recipientId) forbidden("You can't record this settlement");
+  validateCurrencyAmount(body.amountCents, body.currency);
   const { cents: convertedCents } = await convert(body.amountCents, body.currency, groupCurrency);
   const summary = await settlementSummary(body.payerId, body.recipientId, body.amountCents, body.currency);
   const expectedSnapshot = expectedBalances ? JSON.stringify(expectedBalances) : null;
@@ -115,6 +117,7 @@ export async function recordDirectSettlement(
   settleFullBalance = false
 ): Promise<{ id: number; updatedAt: string }> {
   if (createdBy !== body.payerId && createdBy !== body.recipientId) forbidden("You can't record this settlement");
+  validateCurrencyAmount(body.amountCents, body.currency);
   const userA = Math.min(body.payerId, body.recipientId);
   const userB = Math.max(body.payerId, body.recipientId);
   const summary = await settlementSummary(body.payerId, body.recipientId, body.amountCents, body.currency);
@@ -197,6 +200,7 @@ export async function updateSettlementWithActivity(
   body: { amountCents: number; currency: string; date: string; note: string; expectedUpdatedAt: string },
   convertedCents: number
 ) {
+  validateCurrencyAmount(body.amountCents, body.currency);
   const fallbackText = await settlementSummary(settlement.payerId, settlement.recipientId, body.amountCents, body.currency);
   const changes = diffSettlement(settlement, body);
   const actionText = feedLine(changes) ?? `edited a recorded payment - now ${fallbackText}`;

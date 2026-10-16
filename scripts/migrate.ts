@@ -356,25 +356,29 @@ async function main() {
         SELECT
           es.user_id,
           es.expense_id,
-          div(es.share_cents::numeric * e.converted_cents, e.amount_cents) AS floor_cents,
-          mod(es.share_cents::numeric * e.converted_cents, e.amount_cents) AS remainder,
-          e.converted_cents AS exp_converted
+          div(es.share_cents::numeric * e.converted_cents,
+            e.amount_cents::numeric * CASE WHEN g.currency IN ('JPY','KRW') THEN 100 ELSE 1 END) AS floor_units,
+          mod(es.share_cents::numeric * e.converted_cents,
+            e.amount_cents::numeric * CASE WHEN g.currency IN ('JPY','KRW') THEN 100 ELSE 1 END) AS remainder,
+          CASE WHEN g.currency IN ('JPY','KRW') THEN 100 ELSE 1 END AS unit_step,
+          e.converted_cents / CASE WHEN g.currency IN ('JPY','KRW') THEN 100 ELSE 1 END AS exp_converted
         FROM expense_shares es
         JOIN expenses e ON e.id = es.expense_id
+        JOIN groups g ON g.id = e.group_id
         WHERE e.group_id = target_group_id
       ),
       owed_ranked AS (
         SELECT
           oa.user_id,
-          oa.floor_cents,
-          oa.exp_converted - sum(oa.floor_cents) OVER (PARTITION BY oa.expense_id) AS leftover,
+          oa.floor_units, oa.unit_step,
+          oa.exp_converted - sum(oa.floor_units) OVER (PARTITION BY oa.expense_id) AS leftover,
           row_number() OVER (PARTITION BY oa.expense_id ORDER BY oa.remainder DESC, oa.user_id) AS rr
         FROM owed_alloc oa
       ),
       owed AS (
         SELECT user_id, SUM(amount_cents)::bigint AS amount_cents FROM (
           SELECT user_id,
-            (floor_cents + CASE WHEN rr <= leftover THEN 1 ELSE 0 END)::bigint AS amount_cents
+            ((floor_units + CASE WHEN rr <= leftover THEN 1 ELSE 0 END) * unit_step)::bigint AS amount_cents
           FROM owed_ranked
           UNION ALL
           SELECT goa.user_id, goa.share_cents AS amount_cents

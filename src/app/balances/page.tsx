@@ -157,9 +157,9 @@ export default function BalancesPage() {
   ));
 
   return (
-    <AppShell title="Balances">
-      <div className="mb-3 flex flex-wrap items-center gap-2 md:shrink-0">
-        <div className="relative min-w-0 basis-full sm:basis-0 sm:flex-1">
+    <AppShell title="Friends">
+      <div className="mb-2.5 flex items-center gap-2 md:mb-3 md:shrink-0">
+        <div className="relative min-w-0 flex-1">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-faint" />
           <Input
             value={query}
@@ -169,11 +169,11 @@ export default function BalancesPage() {
             className="pl-8"
           />
         </div>
-        <Button className="flex-1 sm:flex-none" onClick={() => { setAddOpen(true); setError(null); }}>
-          <UserPlus className="h-4 w-4" /> Add friend
+        <Button onClick={() => { setAddOpen(true); setError(null); }} aria-label="Add friend" className="max-sm:!px-2.5">
+          <UserPlus className="h-4 w-4" /> <span className="hidden sm:inline">Add friend</span>
         </Button>
-        <Button variant="secondary" className="flex-1 sm:flex-none" onClick={copyInviteLink} disabled={!inviteCode}>
-          <Copy className="h-4 w-4" /> Copy invite link
+        <Button variant="secondary" onClick={copyInviteLink} disabled={!inviteCode} aria-label="Copy invite link" className="max-sm:!px-2.5">
+          <Copy className="h-4 w-4" /> <span className="hidden sm:inline">Copy invite link</span>
         </Button>
       </div>
 
@@ -284,7 +284,7 @@ export default function BalancesPage() {
 
       <Modal open={addOpen} onClose={() => setAddOpen(false)} title="Add a friend">
         <form onSubmit={addFriend} className="space-y-3">
-          <Field label="Friend's invite code" hint="They can find it by tapping Copy invite link on their Balances page.">
+          <Field label="Friend's invite code" hint="They can find it by tapping Copy invite link on their Friends page.">
             <Input value={code} onChange={(e) => setCode(e.target.value)} required data-autofocus autoCapitalize="off" autoCorrect="off" spellCheck={false} />
           </Field>
           <ErrorNote message={error} />

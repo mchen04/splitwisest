@@ -11,11 +11,10 @@ export function rememberExpenseGroup(groupId: number) {
   }
 }
 
-/** The group Add should open with, or null when the user must choose one. */
 export function defaultExpenseGroup(groupIds: number[], stored: string | null): number | null {
-  if (groupIds.length === 1) return groupIds[0];
   const remembered = Number(stored);
-  return Number.isInteger(remembered) && groupIds.includes(remembered) ? remembered : null;
+  if (Number.isInteger(remembered) && groupIds.includes(remembered)) return remembered;
+  return groupIds[0] ?? null;
 }
 
 export function readExpenseGroup(): string | null {

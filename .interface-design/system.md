@@ -46,7 +46,8 @@ ornament. Consistency beats novelty; these decisions compound — follow them.
   text, labels, buttons), `text-row` (row titles: 16/20 on phones, 14/20 from 768px),
   `text-section` 16/24 (card and section headings), `text-title` 20/28 (a group,
   person, or dialog name), `text-amount` 24/32 (a balance), `text-amount-lg` 32/36
-  (the amount field, Home currency tiles), `text-hero` 40/44 (the one Home balance).
+  (the amount field, Home currency tiles, the one Home balance on phones), `text-hero` 40/44
+  (the one Home balance from 768px).
   Only `ui.tsx` uses the raw ramp (inputs need 16px on phones so iOS does not zoom).
 - Card headers use `CardHeader` (`text-section font-semibold`, optional count). Dialog
   titles use `text-title`. Group-inside-card labels use `SectionLabel` (uppercase meta).
@@ -112,7 +113,11 @@ Never introduce other radius values.
 - Default payer to the current user. Use local today and no category as the other defaults.
 - Split methods sit in one chip row (One person, Equal, Exact amounts, Percentages,
   Shares, Itemized bill); notes and receipts stay in a disclosure.
-- Outside a group, the form opens in place with the group as its first field.
+- Outside a group, the form opens in place with the group as its first field: one-tap
+  group chips (button radios), most recently active first. It opens on the remembered
+  group, else the most recently active one, so no picker step comes first.
+- An open add or edit form keeps a per-account draft. After a suspend, kill, or reload it
+  reopens with the draft and a Discard option; save or cancel clears it.
 - **Avatar**: deterministic `hsl(hash 52% 45%)`, initials, sizes sm 24 / md 32 / lg 40.
   The current user is colored like everyone else (never a black/empty circle).
 - **Money**: `tnum`; when signed, pair color **and** an explicit `+ / −` and, in
@@ -146,7 +151,12 @@ Never introduce other radius values.
   owns the persistent "Add expense" — pages don't duplicate a second primary of equal
   weight.
 - Home is a glance surface: **one** hero net-balance number + a contextual next step,
-  then groups / friends / a short activity peek.
+  then groups / friends / a short activity peek. On phones the totals sit beside the
+  search, inbox, and account icons, and groups are a horizontal row of one-tap chips
+  (name + your net) above **Who owes who**.
+- Friend balance rows put the name on the first line and each open balance on its own
+  line below it, so the group name and amount are never truncated by row actions.
+- The friends list is the **Friends** tab (route `/balances`).
 - Mobile: locked app frame and bottom navigation with safe-area padding.
 - The content region scrolls. Chat keeps its own message-list scroll.
 - Primary actions stay thumb-reachable. Modal actions include the bottom safe area.

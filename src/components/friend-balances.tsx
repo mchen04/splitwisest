@@ -41,11 +41,31 @@ export function useRemind() {
   return { remind, sentTo: sent };
 }
 
-/**
- * One friend and every open balance with them. Each balance you owe carries
- * its own Settle up, which opens the payment for exactly that balance; a friend
- * who owes you gets one Remind. Settled friends collapse to a single line.
- */
+function ObligationText({ obligation, amount, stacked = false }: { obligation: FriendObligation; amount: string; stacked?: boolean }) {
+  const owe = obligation.netCents < 0;
+  const direction = (
+    <span className={`whitespace-nowrap ${owe ? "text-owe" : "text-owed"}`}>
+      {owe ? "you owe " : "owes you "}
+      <span className="tnum font-semibold">{amount}</span>
+    </span>
+  );
+  if (stacked) {
+    return (
+      <span className="block min-w-0 text-body">
+        <span className="block truncate text-meta text-ink-faint">{obligation.groupName ?? "Direct"}</span>
+        {direction}
+      </span>
+    );
+  }
+  return (
+    <span className="flex min-w-0 items-baseline gap-1 text-body">
+      <span className="min-w-0 truncate text-ink-faint">{obligation.groupName ?? "Direct"}</span>
+      <span className="shrink-0 text-ink-faint">·</span>
+      {direction}
+    </span>
+  );
+}
+
 export function FriendBalanceRow({
   friend,
   onSettle,
@@ -63,10 +83,24 @@ export function FriendBalanceRow({
 }) {
   const open = friend.obligations.filter((o) => o.netCents !== 0);
   const theyOweMe = open.some((o) => o.netCents > 0);
+  const single = open.length === 1 ? open[0] : null;
+  const settleButton = (o: FriendObligation) => {
+    const amount = fmtMoney(Math.abs(o.netCents), o.currency);
+    return (
+      <Button
+        size="sm"
+        variant="secondary"
+        onClick={() => onSettle(friend, obligationKey(o))}
+        aria-label={`Settle up ${amount} with ${friend.displayName}${o.groupName ? ` in ${o.groupName}` : ""}`}
+      >
+        <HandCoins className="h-4 w-4" /> Settle up
+      </Button>
+    );
+  };
   return (
-    <li className="px-4 py-2">
-      <div className="flex min-h-[var(--control-h-sm)] items-center gap-3">
-        <Link href={`/people/${friend.id}`} className="flex min-h-[var(--control-h-sm)] min-w-0 flex-1 items-center gap-3 rounded-lg hover:text-accent-dark" aria-label={`Open ${friend.displayName}'s profile`}>
+    <li className="px-4 py-1.5">
+      <div className="flex min-h-[var(--control-h)] items-center gap-3">
+        <Link prefetch={false} href={`/people/${friend.id}`} className="flex min-h-[var(--control-h-sm)] min-w-0 flex-1 items-center gap-3 rounded-lg hover:text-accent-dark" aria-label={`Open ${friend.displayName}'s profile`}>
           <Avatar name={friend.displayName} />
           <span className="min-w-0">
             <RowTitle title={friend.displayName}>{friend.displayName}</RowTitle>
@@ -75,6 +109,7 @@ export function FriendBalanceRow({
           </span>
         </Link>
         {open.length === 0 && showUsername && <span className="shrink-0 text-body text-ink-faint">Settled up</span>}
+        {single && single.netCents < 0 && settleButton(single)}
         {theyOweMe && (
           <Button size="sm" variant="secondary" onClick={() => onRemind(friend)} aria-label={`Remind ${friend.displayName} to settle up`}>
             {reminded ? <><Check className="h-4 w-4 text-owed" /> Reminded</> : <><Bell className="h-4 w-4" /> Remind</>}
@@ -83,29 +118,15 @@ export function FriendBalanceRow({
         {menu}
       </div>
       {open.length > 0 && (
-        <ul className="mt-0.5 space-y-0.5 sm:pl-11">
+        <ul className="pl-11">
           {open.map((o) => {
-            const owe = o.netCents < 0;
-            const amount = fmtMoney(Math.abs(o.netCents), o.currency);
+            const ownButton = !single && o.netCents < 0;
             return (
-              <li key={obligationKey(o)} className="flex min-h-[var(--control-h-sm)] items-center gap-2">
-                <span className="min-w-0 flex-1 text-body">
-                  <span className="text-ink-faint">{o.groupName ?? "Direct"} · </span>
-                  <span className={owe ? "text-owe" : "text-owed"}>
-                    {owe ? "you owe " : "owes you "}
-                    <span className="tnum font-semibold">{amount}</span>
-                  </span>
+              <li key={obligationKey(o)} className={`flex items-center gap-2 ${ownButton ? "min-h-[var(--control-h-sm)]" : "py-0.5"}`}>
+                <span className="min-w-0 flex-1">
+                  <ObligationText obligation={o} amount={fmtMoney(Math.abs(o.netCents), o.currency)} stacked={ownButton} />
                 </span>
-                {owe && (
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => onSettle(friend, obligationKey(o))}
-                    aria-label={`Settle up ${amount} with ${friend.displayName}${o.groupName ? ` in ${o.groupName}` : ""}`}
-                  >
-                    <HandCoins className="h-4 w-4" /> Settle up
-                  </Button>
-                )}
+                {ownButton && settleButton(o)}
               </li>
             );
           })}

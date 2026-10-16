@@ -66,7 +66,7 @@ export async function convert(amountCents: number, from: string, to: string): Pr
   if (!fromRate || !toRate) invalidInput(`Unsupported currency ${from} or ${to}`);
   const rate = toRate / fromRate;
   const step = currencyStep(to);
-  const raw = Math.round(amountCents * rate);
+  const raw = amountCents * rate;
   // Snap to the target unit, but never collapse a positive amount to zero (the
   // converted_cents > 0 CHECK would reject it) — floor it to one whole unit.
   const cents = raw > 0 ? Math.max(Math.round(raw / step) * step, step) : raw;

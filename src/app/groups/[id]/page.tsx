@@ -17,7 +17,7 @@ import {
   Card, CardHeader, Money, EmptyState, Button, Avatar, Input, Select, Modal, Menu, MenuItem, DateField, IconButton,
   RowMeta, RowTitle, SectionLabel, toast, confirmAction,
 } from "@/components/ui";
-import { ExpenseForm } from "@/components/expense-form";
+import { ExpenseForm, readExpenseDraft } from "@/components/expense-form";
 import { GroupBalanceForm, ExistingGroupBalance } from "@/components/group-balance-form";
 import { SettleModal } from "@/components/settle-modal";
 import { RecurringModal, ExistingRecurring } from "@/components/recurring-modal";
@@ -188,7 +188,7 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
     }
   }, []);
 
-  async function openEdit(expenseId: number) {
+  const openEdit = useCallback(async (expenseId: number) => {
     try {
       const r = await api<{ expense: NonNullable<typeof editing> }>(`/api/expenses/${expenseId}`);
       setEditing(r.expense);
@@ -199,7 +199,16 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
       if (e instanceof ApiClientError) refreshAll();
       else throw e;
     }
-  }
+  }, [refreshAll]);
+
+  const editDraftChecked = useRef(false);
+  useEffect(() => {
+    if (editDraftChecked.current || !me || !detail) return;
+    editDraftChecked.current = true;
+    const draft = readExpenseDraft(me.id);
+    const expenseId = draft?.mode === "edit" && draft.groupId === groupId ? draft.expenseId : undefined;
+    if (expenseId) requestAnimationFrame(() => void openEdit(expenseId));
+  }, [me, detail, groupId, openEdit]);
 
   async function openGroupBalance(id: number) {
     try {
@@ -371,6 +380,7 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
     ? detail.balances.find((balance) => balance.userId === me.id)?.netCents ?? 0
     : 0;
   const mySuggestions = me && detail ? detail.suggestions.filter((s) => s.from === me.id || s.to === me.id) : [];
+  const oneDirection = mySuggestions.every((s) => (s.from === me?.id) === (mySuggestions[0]?.from === me?.id));
   const currency = detail?.group.currency ?? "USD";
 
   function openSettle() {
@@ -468,6 +478,26 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
             <HandCoins className="h-4 w-4" /> Settle up
           </Button>
         </div>
+        {detail && mySuggestions.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setTab("balances")}
+            title="Show who owes who"
+            className="mt-0.5 flex max-w-full flex-wrap gap-x-1.5 text-left text-body text-[var(--group-muted)] hover:underline lg:col-span-full lg:mt-0 lg:justify-self-end"
+          >
+            {oneDirection && <span>{mySuggestions[0].from === me?.id ? "to" : "from"}</span>}
+            {mySuggestions.slice(0, 3).map((s, i) => (
+              <span key={i} className="flex gap-x-1.5 whitespace-nowrap">
+                {i > 0 && <span aria-hidden>·</span>}
+                <span>
+                  {oneDirection ? "" : s.from === me?.id ? "to " : "from "}
+                  {memberName(s.from === me?.id ? s.to : s.from)} <span className="tnum font-semibold">{fmtMoney(s.amountCents, currency)}</span>
+                </span>
+              </span>
+            ))}
+            {mySuggestions.length > 3 && <span className="whitespace-nowrap">· +{mySuggestions.length - 3} more</span>}
+          </button>
+        )}
       </section>
 
       {/* Members rail (wide screens) — a nested sidebar instead of a full-width

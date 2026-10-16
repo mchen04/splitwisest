@@ -3,7 +3,8 @@
 import { Dispatch, SetStateAction } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { fmtMoney } from "@/lib/client";
-import { currencySymbol } from "@/lib/currencies";
+import { currencyStep, currencySymbol } from "@/lib/currencies";
+import { splitEqual } from "@/lib/money";
 import { Button, IconButton, Input, radioGroupKeyDown, radioTabIndex } from "./ui";
 import { Member } from "./expense-form";
 
@@ -29,7 +30,7 @@ const LEGEND = "mb-1.5 block text-body font-medium text-ink-soft";
 // Participant picker for equal/exact/percentage/shares: a checkbox per member
 // plus, for weighted methods, the per-member value input.
 export function ParticipantSplit({
-  members, selected, method, values, amountCents, currency, participantCount, onToggle, onValue, idPrefix = "p",
+  members, selected, method, values, amountCents, currency, onToggle, onValue, idPrefix = "p",
 }: {
   members: Member[];
   selected: Set<number>;
@@ -72,6 +73,8 @@ export function ParticipantSplit({
   }
 
   if (method === "equal") {
+    const ids = members.filter((member) => selected.has(member.id)).map((member) => member.id);
+    const shares = ids.length ? splitEqual(amountCents, ids, currencyStep(currency)) : new Map<number, number>();
     return (
       <fieldset>
         <legend className={LEGEND}>Participants</legend>
@@ -93,7 +96,7 @@ export function ParticipantSplit({
                   <span className="block truncate text-body font-medium">{member.displayName}</span>
                   {checked && amountCents > 0 && (
                     <span className="tnum block truncate text-meta text-ink-faint">
-                      ≈ {fmtMoney(Math.floor(amountCents / Math.max(participantCount, 1)), currency)}
+                      ≈ {fmtMoney(shares.get(member.id) ?? 0, currency)}
                     </span>
                   )}
                 </span>

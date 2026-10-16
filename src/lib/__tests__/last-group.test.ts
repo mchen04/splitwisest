@@ -10,10 +10,10 @@ describe("Add expense default group", () => {
     expect(defaultExpenseGroup([3, 7, 9], "7")).toBe(7);
   });
 
-  it("asks when nothing is remembered or the remembered group is gone", () => {
-    expect(defaultExpenseGroup([3, 7, 9], null)).toBeNull();
-    expect(defaultExpenseGroup([3, 7, 9], "42")).toBeNull();
-    expect(defaultExpenseGroup([3, 7, 9], "not-a-number")).toBeNull();
+  it("opens the most recently active group when nothing valid is remembered", () => {
+    expect(defaultExpenseGroup([3, 7, 9], null)).toBe(3);
+    expect(defaultExpenseGroup([3, 7, 9], "42")).toBe(3);
+    expect(defaultExpenseGroup([3, 7, 9], "not-a-number")).toBe(3);
   });
 
   it("has nothing to open without groups", () => {

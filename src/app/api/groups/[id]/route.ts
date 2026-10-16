@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { sql } from "@/lib/db";
 import { badRequest, handler, forbidden } from "@/lib/api";
 import { requireUser } from "@/lib/auth";
-import { groupBalances, suggestSettlements } from "@/lib/balances";
+import { suggestSettlements } from "@/lib/balances";
 import { materializeRecurring } from "@/lib/expenses";
 import {
   deleteGroup, parseGroupId, renameGroupWithActivity, requireGroupMember, requireGroupViewerVersions,
@@ -12,18 +11,14 @@ import {
 type Ctx = { params: Promise<{ id: string }> };
 
 export const GET = handler(async (_req: NextRequest, { params }: Ctx) => {
-  const group = await requireGroupViewerVersions((await params).id);
+  let group = await requireGroupViewerVersions((await params).id, true);
   const groupId = group.id;
 
   // materializeRecurring writes (must run first); members + balances are then
   // independent reads — run them as one parallel level over the Neon driver.
   await materializeRecurring(groupId);
-  const [members, balances] = await Promise.all([
-    sql`
-      SELECT u.id, u.display_name, u.username FROM group_members gm
-      JOIN users u ON u.id = gm.user_id WHERE gm.group_id = ${groupId} ORDER BY u.display_name`,
-    groupBalances(groupId),
-  ]);
+  if (group.versions.recurringDue) group = await requireGroupViewerVersions(String(groupId), true);
+  const { members, balances } = group;
   const suggestions = suggestSettlements(balances);
 
   return NextResponse.json({
@@ -35,7 +30,7 @@ export const GET = handler(async (_req: NextRequest, { params }: Ctx) => {
       createdBy: group.createdBy,
     },
     version: group.versions.detail,
-    members: members.map((m) => ({ id: Number(m.id), displayName: m.display_name, username: m.username })),
+    members,
     balances,
     suggestions,
   });

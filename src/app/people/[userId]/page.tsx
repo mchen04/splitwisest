@@ -87,7 +87,7 @@ export default function PersonPage({ params }: { params: Promise<{ userId: strin
           <EmptyState
             title="Profile not available"
             hint="You can only view yourself, friends, pending requests, and people who share a group with you."
-            action={<Link href="/balances"><Button variant="secondary"><ArrowLeft className="h-4 w-4" /> Balances</Button></Link>}
+            action={<Link href="/balances"><Button variant="secondary"><ArrowLeft className="h-4 w-4" /> Friends</Button></Link>}
           />
         </Card>
       </AppShell>

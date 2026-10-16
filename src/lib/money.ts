@@ -54,9 +54,9 @@ export function splitExact(totalCents: number, inputs: SplitInput[], step = 1): 
 export function splitPercentage(totalCents: number, inputs: SplitInput[], step = 1): Map<number, number> {
   if (inputs.length === 0) invalidInput("No participants");
   if (inputs.some((i) => (i.value ?? 0) < 0)) invalidInput("Percentages must be positive");
-  const totalPct = inputs.reduce((s, i) => s + (i.value ?? 0), 0);
-  if (Math.abs(totalPct - 100) > 0.001) {
-    invalidInput(`Percentages must add up to 100 (got ${totalPct})`);
+  const { weights, scale } = integerWeights(inputs.map((i) => i.value ?? 0));
+  if (weights.reduce((sum, weight) => sum + weight, BigInt(0)) !== BigInt(100) * scale) {
+    invalidInput("Percentages must add up to 100");
   }
   return distributeProportional(
     totalCents,
@@ -79,28 +79,40 @@ export function splitShares(totalCents: number, inputs: SplitInput[], step = 1):
 
 // Largest-remainder method: floor each proportional share (in whole `step`
 // units), then hand out the leftover units to the largest fractional remainders.
+function integerWeights(values: number[]) {
+  const decimals = values.map((value) => {
+    if (!Number.isFinite(value) || value < 0) invalidInput("Weights must be finite and nonnegative");
+    const [coefficient, exponent = "0"] = String(value).split("e");
+    const [whole, fraction = ""] = coefficient.split(".");
+    return { digits: BigInt(whole + fraction), places: fraction.length - Number(exponent) };
+  });
+  const places = Math.max(0, ...decimals.map((d) => d.places));
+  const power = (exponent: number) => BigInt(10) ** BigInt(exponent);
+  return { weights: decimals.map((d) => d.digits * power(places - d.places)), scale: power(places) };
+}
+
 function distributeProportional(
   totalCents: number,
   weights: { userId: number; weight: number }[],
   step = 1
 ): Map<number, number> {
-  const totalWeight = weights.reduce((s, w) => s + w.weight, 0);
-  if (totalWeight <= 0) invalidInput("Total weight must be positive");
-  const totalUnits = Math.round(totalCents / step);
-  const rows = weights.map(({ userId, weight }) => {
-    const raw = (totalUnits * weight) / totalWeight;
-    const floor = Math.floor(raw);
-    return { userId, floor, frac: raw - floor };
+  const integers = integerWeights(weights.map((w) => w.weight)).weights;
+  const totalWeight = integers.reduce((s, w) => s + w, BigInt(0));
+  if (totalWeight <= BigInt(0)) invalidInput("Total weight must be positive");
+  const totalUnits = BigInt(Math.round(totalCents / step));
+  const rows = weights.map(({ userId }, index) => {
+    const numerator = totalUnits * integers[index];
+    return { userId, floor: numerator / totalWeight, frac: numerator % totalWeight };
   });
-  let leftover = totalUnits - rows.reduce((s, r) => s + r.floor, 0);
-  const byFrac = [...rows].sort((a, b) => b.frac - a.frac);
+  let leftover = totalUnits - rows.reduce((s, r) => s + r.floor, BigInt(0));
+  const byFrac = [...rows].sort((a, b) => a.frac > b.frac ? -1 : a.frac < b.frac ? 1 : 0);
   const bonus = new Map<number, number>();
   for (const r of byFrac) {
-    bonus.set(r.userId, leftover > 0 ? 1 : 0);
-    if (leftover > 0) leftover--;
+    bonus.set(r.userId, leftover > BigInt(0) ? 1 : 0);
+    if (leftover > BigInt(0)) leftover--;
   }
   const out = new Map<number, number>();
-  for (const r of rows) out.set(r.userId, (r.floor + (bonus.get(r.userId) ?? 0)) * step);
+  for (const r of rows) out.set(r.userId, (Number(r.floor) + (bonus.get(r.userId) ?? 0)) * step);
   return out;
 }
 
@@ -277,7 +289,9 @@ export function amountInputToCents(input: string): number | null {
   const normalized = /,\d{1,2}$/.test(t) && !t.includes(".") ? t.replace(/,(\d{1,2})$/, ".$1") : t;
   const cleaned = normalized.replace(/[^0-9.]/g, "");
   if (!cleaned || !/^\d*\.?\d*$/.test(cleaned)) return null;
-  const cents = Math.round(parseFloat(cleaned) * 100);
+  const [whole, fraction = ""] = cleaned.split(".");
+  const cents = Number(whole) * 100 + Number(fraction.slice(0, 2).padEnd(2, "0")) +
+    (Number(fraction[2] ?? "0") >= 5 ? 1 : 0);
   if (!Number.isFinite(cents) || cents <= 0 || cents > 100_000_000_000) return null;
   return cents;
 }

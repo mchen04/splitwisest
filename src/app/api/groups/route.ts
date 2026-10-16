@@ -23,7 +23,7 @@ export const GET = handler(async () => {
     FROM groups g JOIN group_members gm ON gm.group_id = g.id
     LEFT JOIN LATERAL group_balance_rows(g.id) b ON b.user_id = ${user.id}
     WHERE gm.user_id = ${user.id}
-    ORDER BY g.created_at DESC`;
+    ORDER BY (SELECT MAX(a.id) FROM activity a WHERE a.group_id = g.id) DESC NULLS LAST, g.created_at DESC`;
   return NextResponse.json({
     groups: groups.map((g) => ({
       id: Number(g.id),

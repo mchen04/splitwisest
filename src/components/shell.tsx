@@ -2,15 +2,17 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { ReactNode, useEffect, useState, useSyncExternalStore } from "react";
+import { ReactNode, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
-  LayoutDashboard, Users, Scale, Receipt, LogOut, Wallet,
+  LayoutDashboard, Users, UserRound, Receipt, LogOut, Wallet,
   MessageSquare, ScrollText, Moon, Sun, Plus, ChevronDown, Bell, WifiOff,
 } from "lucide-react";
 import { api, useApiData, useMe, useUnread, type Unread } from "@/lib/client";
 import { useTheme } from "@/lib/theme";
 import { syncExistingPush } from "@/lib/push-client";
 import { defaultExpenseGroup, readExpenseGroup } from "@/lib/last-group";
+import { clearAllDrafts } from "@/lib/drafts";
+import { readExpenseDraft } from "./expense-form";
 import { Avatar, ConfirmHost, IconButton, ToastRegion } from "./ui";
 import { QuickAddExpense } from "./quick-add-expense";
 
@@ -39,9 +41,9 @@ function useOffline() {
 const NAV: { href: string; label: string; icon: typeof LayoutDashboard; badge?: BadgeKey }[] = [
   { href: "/", label: "Home", icon: LayoutDashboard },
   { href: "/groups", label: "Groups", icon: Users },
-  { href: "/balances", label: "Balances", icon: Scale, badge: "balances" },
-  { href: "/expenses", label: "Expenses", icon: Receipt },
+  { href: "/balances", label: "Friends", icon: UserRound, badge: "balances" },
   { href: "/chat", label: "Chat", icon: MessageSquare, badge: "messages" },
+  { href: "/expenses", label: "Expenses", icon: Receipt },
   { href: "/activity", label: "Activity", icon: ScrollText, badge: "activity" },
   { href: "/notifications", label: "Notifications", icon: Bell, badge: "notifications" },
 ];
@@ -49,7 +51,7 @@ const NAV: { href: string; label: string; icon: typeof LayoutDashboard; badge?: 
 const MOBILE_NAV: { href: string; label: string; icon: typeof LayoutDashboard; badge?: BadgeKey }[] = [
   { href: "/", label: "Home", icon: LayoutDashboard, badge: "notifications" },
   { href: "/groups", label: "Groups", icon: Users },
-  { href: "/balances", label: "Balances", icon: Scale, badge: "balances" },
+  { href: "/balances", label: "Friends", icon: UserRound, badge: "balances" },
   { href: "/chat", label: "Chat", icon: MessageSquare, badge: "messages" },
 ];
 
@@ -121,6 +123,19 @@ export function AppShell({ title, children }: { title?: string; children: ReactN
     return () => { window.removeEventListener("pageshow", refresh); window.removeEventListener("focus", refresh); };
   }, [me]);
 
+  const draftChecked = useRef(false);
+  useEffect(() => {
+    if (draftChecked.current || !me || !groupsData) return;
+    draftChecked.current = true;
+    const draft = readExpenseDraft(me.id);
+    if (!draft || !groupsData.groups.some((group) => group.id === draft.groupId)) return;
+    if (draft.mode === "new") {
+      requestAnimationFrame(() => setQuickAdd({ step: "form", groupId: draft.groupId }));
+    } else if (pathname !== `/groups/${draft.groupId}`) {
+      router.push(`/groups/${draft.groupId}`);
+    }
+  }, [me, groupsData, pathname, router]);
+
   const [groupsOpen, setGroupsOpen] = useState(false);
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -135,6 +150,7 @@ export function AppShell({ title, children }: { title?: string; children: ReactN
 
   async function logout() {
     await api("/api/auth/logout", { method: "POST" });
+    clearAllDrafts();
     router.push("/login");
   }
 
@@ -180,7 +196,7 @@ export function AppShell({ title, children }: { title?: string; children: ReactN
     <div className="app-frame">
       {/* Desktop / tablet sidebar */}
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-56 flex-col border-r border-line bg-card md:flex">
-        <Link href="/" className="flex items-center gap-2 px-4 pb-3 pt-4">
+        <Link prefetch={false} href="/" className="flex items-center gap-2 px-4 pb-3 pt-4">
           <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-accent text-on-accent">
             <Wallet className="h-4 w-4" />
           </span>
@@ -225,7 +241,7 @@ export function AppShell({ title, children }: { title?: string; children: ReactN
               {href === "/groups" && groupsOpen && (
                 <div className="mt-0.5 flex flex-col gap-0.5">
                   {groupsData?.groups?.map((g) => (
-                    <Link
+                    <Link prefetch={false}
                       key={g.id}
                       href={`/groups/${g.id}`}
                       className={`group-hue-${g.id % 6} flex min-h-[var(--nav-h)] items-center gap-2 rounded-lg py-1 pl-7 pr-2.5 text-body transition-colors ${
@@ -254,7 +270,7 @@ export function AppShell({ title, children }: { title?: string; children: ReactN
           </button>
           {me && (
             <div className="flex items-center gap-1.5">
-              <Link href="/settings" className="flex min-h-[var(--control-h)] min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2 py-1 hover:bg-subtle" title="Account settings">
+              <Link prefetch={false} href="/settings" className="flex min-h-[var(--control-h)] min-w-0 flex-1 items-center gap-2.5 rounded-lg px-2 py-1 hover:bg-subtle" title="Account settings">
                 <Avatar name={me.displayName} size="sm" />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-body font-medium" title={me.displayName}>{me.displayName}</p>

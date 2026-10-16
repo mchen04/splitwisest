@@ -98,58 +98,50 @@ export default function Dashboard() {
   return (
     <AppShell title="Home">
       {/* Hero: the answer to "where do I stand?" in one number per currency. */}
-      <Card className="mb-3 px-4 pb-4 pt-3 md:shrink-0">
-        <div className="flex min-h-11 items-center justify-between gap-3">
-          <h1 className="text-body font-medium text-ink-soft">{currencies.length > 1 ? "Your balances" : "Your balance"}</h1>
-          {/* The mobile shell has no top bar, so the hero carries search, the inbox, and the account entry point. */}
-          {me && (
-            <div className="-mr-2 flex items-center md:hidden">
-              <Link href="/expenses" aria-label="Search expenses"
-                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-ink-soft hover:bg-subtle">
-                <Search className="h-5 w-5" />
-              </Link>
-              <Link href="/notifications" aria-label={`Notifications${unread.notifications ? `, ${unread.notifications} unread` : ""}`}
-                className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-ink-soft hover:bg-subtle">
-                <Bell className="h-5 w-5" />
-                {unread.notifications > 0 && <span className="absolute right-0.5 top-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1 text-meta font-semibold text-on-accent">{unread.notifications > 9 ? "9+" : unread.notifications}</span>}
-              </Link>
-              <Link href="/settings" aria-label="Account settings" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full md:hidden">
-                <Avatar name={me.displayName} size="sm" />
-              </Link>
-            </div>
-          )}
-        </div>
+      <Card className="mb-2.5 px-4 py-2 md:mb-3 md:shrink-0 md:pb-4 md:pt-3">
+        {me && (
+          <div className="float-right -mr-2 flex items-center md:hidden">
+            <Link prefetch={false} href="/expenses" aria-label="Search expenses"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-ink-soft hover:bg-subtle">
+              <Search className="h-5 w-5" />
+            </Link>
+            <Link prefetch={false} href="/notifications" aria-label={`Notifications${unread.notifications ? `, ${unread.notifications} unread` : ""}`}
+              className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-ink-soft hover:bg-subtle">
+              <Bell className="h-5 w-5" />
+              {unread.notifications > 0 && <span className="absolute right-0.5 top-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1 text-meta font-semibold text-on-accent">{unread.notifications > 9 ? "9+" : unread.notifications}</span>}
+            </Link>
+            <Link prefetch={false} href="/settings" aria-label="Account settings" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full md:hidden">
+              <Avatar name={me.displayName} size="sm" />
+            </Link>
+          </div>
+        )}
+        <h1 className="hidden min-h-11 items-center text-body font-medium text-ink-soft md:flex">{currencies.length > 1 ? "Your balances" : "Your balance"}</h1>
         {friends === null && friendsError ? (
-          <p role="alert" className="text-body text-ink-soft">Your balance could not load. <button type="button" onClick={reloadFriends} className="inline-flex min-h-[var(--control-h-sm)] items-center font-semibold text-accent">Try again</button></p>
+          <p role="alert" className="min-h-11 py-2.5 text-body text-ink-soft">Your balance could not load. <button type="button" onClick={reloadFriends} className="inline-flex min-h-[var(--control-h-sm)] items-center font-semibold text-accent">Try again</button></p>
         ) : friends === null ? (
-          // Reserve the loaded hero's footprint so data arriving does not shift the page.
-          <div className="mt-1 space-y-2">
-            <div className="skeleton h-10 w-44" />
-            <div className="skeleton h-4 w-56" />
+          <div className="space-y-2 py-0.5">
+            <div className="skeleton h-8 w-40 md:h-10 md:w-44" />
+            <div className="skeleton h-3 w-28 md:h-4 md:w-56" />
           </div>
         ) : currencies.length === 0 && withBalances.length === 0 ? (
-          <p className="text-amount font-semibold tracking-tight text-ink">You&rsquo;re all settled up</p>
+          <p className="flex min-h-11 items-center text-amount font-semibold tracking-tight text-ink">You&rsquo;re all settled up</p>
         ) : (
           <>
             {currencies.length === 0 && (
-              <p className="text-amount font-semibold tracking-tight text-ink">Your balances offset overall</p>
+              <p className="flex min-h-11 items-center text-amount font-semibold tracking-tight text-ink">Your balances offset overall</p>
             )}
-            {/* Each currency nets separately, and each carries an explicit
-                owed/owe word so direction never relies on color alone. */}
-            <div className={currencies.length > 1 ? "grid grid-cols-2 gap-x-5 gap-y-2 sm:flex sm:flex-wrap sm:gap-x-8" : "flex"}>
-              {currencies.map(([cur, amt]) => (
-                <div key={cur} className="min-w-0">
-                  <p className={`${currencies.length > 1 ? "text-amount sm:text-amount-lg" : "text-hero"} font-semibold tracking-tight tnum ${amt > 0 ? "text-owed" : "text-owe"}`}>
-                    <Money cents={amt} currency={cur} signed />
-                  </p>
-                  <p className={`text-meta font-medium ${amt > 0 ? "text-owed" : "text-owe"}`}>
-                    {amt > 0 ? "owed to you" : "you owe"}{currencies.length > 1 ? ` · ${cur}` : ""}
-                  </p>
-                </div>
-              ))}
-            </div>
+            {currencies.map(([cur, amt]) => (
+              <div key={cur} className="mr-5 inline-block max-w-full align-top sm:mr-8">
+                <p className={`${currencies.length > 1 ? "text-amount sm:text-amount-lg" : "text-amount-lg md:text-hero"} font-semibold tracking-tight tnum ${amt > 0 ? "text-owed" : "text-owe"}`}>
+                  <Money cents={amt} currency={cur} signed />
+                </p>
+                <p className={`text-meta font-medium ${amt > 0 ? "text-owed" : "text-owe"}`}>
+                  {amt > 0 ? "owed to you" : "you owe"}{currencies.length > 1 ? ` · ${cur}` : ""}
+                </p>
+              </div>
+            ))}
             {singleCur && owedTotal > 0 && oweTotal > 0 && (
-              <p className="mt-1.5 text-body text-ink-faint">
+              <p className="clear-both mt-1 text-body text-ink-faint">
                 <span className="text-owed">{fmtMoney(owedTotal, singleCur)} owed to you</span>
                 {" · "}
                 <span className="text-owe">{fmtMoney(oweTotal, singleCur)} you owe</span>
@@ -157,15 +149,18 @@ export default function Dashboard() {
             )}
           </>
         )}
+        <div className="clear-both" />
       </Card>
+
+      <GroupChips groups={groups} error={groupsError} onRetry={reloadGroups} />
 
       <div className="grid grid-cols-1 items-start gap-3 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
         {/* What to do next: every open balance, with its action right on the row. */}
         <Card>
           <CardHeader
-            title="Settle up"
+            title="Who owes who"
             meta={withBalances.length > 0 ? `${withBalances.length} ${withBalances.length === 1 ? "friend" : "friends"}` : undefined}
-            action={<HeaderLink href="/balances">All balances</HeaderLink>}
+            action={<HeaderLink href="/balances">All friends</HeaderLink>}
           />
           {friends === null && friendsError ? (
             <LoadError what="balances" message={friendsError} onRetry={reloadFriends} />
@@ -175,7 +170,7 @@ export default function Dashboard() {
             <EmptyState
               icon={<Users className="h-6 w-6" />}
               title="No friends yet"
-              hint="Invite friends from Balances, or join a group to start splitting."
+              hint="Invite friends from Friends, or join a group to start splitting."
             />
           ) : withBalances.length === 0 ? (
             <p className="flex items-center gap-2 px-4 py-3 text-body text-ink-faint"><Scale className="h-4 w-4" /> Nobody owes anything right now.</p>
@@ -193,8 +188,8 @@ export default function Dashboard() {
                 ))}
               </ul>
               {withBalances.length > SETTLE_PREVIEW && (
-                <Link href="/balances" className="flex min-h-[var(--control-h)] items-center justify-center border-t border-line text-body font-medium text-accent hover:bg-subtle">
-                  {withBalances.length - SETTLE_PREVIEW} more on Balances
+                <Link prefetch={false} href="/balances" className="flex min-h-[var(--control-h)] items-center justify-center border-t border-line text-body font-medium text-accent hover:bg-subtle">
+                  {withBalances.length - SETTLE_PREVIEW} more on Friends
                 </Link>
               )}
             </>
@@ -202,7 +197,7 @@ export default function Dashboard() {
         </Card>
 
         <div className="grid grid-cols-1 gap-3">
-          <Card>
+          <Card className="hidden md:block">
             <CardHeader title="Your groups" action={<HeaderLink href="/groups">All groups</HeaderLink>} />
             {groups === null && groupsError ? (
               <LoadError what="your groups" message={groupsError} onRetry={reloadGroups} />
@@ -213,7 +208,7 @@ export default function Dashboard() {
                 icon={<Users className="h-6 w-6" />}
                 title="No groups yet"
                 hint="Create a group for a trip, an apartment, or a dinner crew."
-                action={<Link href="/groups" className="inline-flex min-h-[var(--control-h)] items-center rounded-lg border border-line px-3.5 text-body font-semibold hover:bg-subtle">Create a group</Link>}
+                action={<Link prefetch={false} href="/groups" className="inline-flex min-h-[var(--control-h)] items-center rounded-lg border border-line px-3.5 text-body font-semibold hover:bg-subtle">Create a group</Link>}
               />
             ) : (
               <ul className="divide-y divide-line">
@@ -274,6 +269,42 @@ export default function Dashboard() {
         onSaved={load}
       />
     </AppShell>
+  );
+}
+
+function GroupChips({ groups, error, onRetry }: { groups: Group[] | null; error: string | null; onRetry: () => void }) {
+  if (groups === null && error) {
+    return (
+      <p role="alert" className="mb-2.5 text-body text-ink-soft md:hidden">
+        Your groups could not load. <button type="button" onClick={onRetry} className="inline-flex min-h-[var(--control-h-sm)] items-center font-semibold text-accent">Try again</button>
+      </p>
+    );
+  }
+  return (
+    <nav aria-label="Your groups" className="-mx-4 mb-2.5 flex gap-2 overflow-x-auto px-4 pb-0.5 md:hidden">
+      {groups === null ? (
+        [...Array(3)].map((_, i) => <div key={i} className="skeleton h-11 w-32 shrink-0 rounded-full" />)
+      ) : groups.length === 0 ? (
+        <Link prefetch={false} href="/groups" className="inline-flex min-h-[var(--control-h)] shrink-0 items-center gap-1.5 rounded-full border border-line bg-card px-3.5 text-body font-semibold text-accent shadow-card">
+          <Users className="h-4 w-4" /> Create a group
+        </Link>
+      ) : (
+        groups.map((g) => (
+          <Link
+            key={g.id}
+            href={`/groups/${g.id}`}
+            aria-label={`${g.name}, ${g.myNetCents === 0 ? "settled" : `${g.myNetCents > 0 ? "you're owed" : "you owe"} ${fmtMoney(Math.abs(g.myNetCents), g.currency)}`}`}
+            className={`group-hue-${g.id % 6} inline-flex min-h-[var(--control-h)] max-w-64 shrink-0 items-center gap-2 rounded-full border border-line bg-card px-3.5 text-body shadow-card`}
+          >
+            <span className="h-2 w-2 shrink-0 rounded-full bg-[var(--group-color)]" aria-hidden />
+            <span className="min-w-0 truncate font-medium">{g.name}</span>
+            <span aria-hidden className={`tnum shrink-0 font-semibold ${g.myNetCents > 0 ? "text-owed" : g.myNetCents < 0 ? "text-owe" : "text-ink-faint"}`}>
+              {g.myNetCents === 0 ? "settled" : <Money cents={g.myNetCents} currency={g.currency} signed />}
+            </span>
+          </Link>
+        ))
+      )}
+    </nav>
   );
 }
 

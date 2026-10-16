@@ -1,11 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Paperclip, Plus, Check, AlertCircle, Users, ChevronDown, X } from "lucide-react";
 import {
   api, ApiClientError, fmtMoney, todayStr, CURRENCIES, amountInputToCents, useApiData, refreshExpenseDetails,
 } from "@/lib/client";
 import { rememberExpenseGroup } from "@/lib/last-group";
+import { readDraft, writeDraft, clearDraft } from "@/lib/drafts";
+import { currencyStep } from "@/lib/currencies";
+import { splitPercentage } from "@/lib/money";
 import { ActionError, Button, Field, Input, Select, Textarea, Modal, ErrorNote, toast, confirmAction, radioGroupKeyDown, radioTabIndex } from "./ui";
 import { ParticipantSplit, ItemizedSplit, Method, METHOD_LABELS, ItemRow } from "./expense-splits";
 
@@ -43,6 +46,39 @@ interface ExistingExpense {
   shares: { userId: number; shareCents: number; rawInput: number | null }[];
   items: { name: string; amountCents: number; participantIds: number[] }[];
   attachments: { id: number; filename: string; mime: string }[];
+}
+
+export const EXPENSE_DRAFT_KEY = "expense";
+
+interface ExpenseFields {
+  title: string;
+  amount: string;
+  currency: string;
+  date: string;
+  payerId: number;
+  categoryId: number | "";
+  notes: string;
+  showDetails: boolean;
+  method: Method;
+  selected: number[];
+  values: Record<number, string>;
+  items: ItemRow[];
+  taxEnabled: boolean;
+  taxRate: string;
+  tipEnabled: boolean;
+  tipRate: string;
+}
+
+export interface ExpenseDraft {
+  mode: "new" | "edit";
+  groupId: number;
+  expenseId?: number;
+  updatedAt?: string;
+  fields: ExpenseFields;
+}
+
+export function readExpenseDraft(meId: number): ExpenseDraft | null {
+  return readDraft<ExpenseDraft>(meId, EXPENSE_DRAFT_KEY);
 }
 
 function adjustmentRate(adjustmentCents: number, subtotalCents: number, fallback: string): string {
@@ -126,6 +162,77 @@ export function ExpenseForm({
   const [savedAttachments, setSavedAttachments] = useState<ExistingExpense["attachments"]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [restored, setRestored] = useState(false);
+  const [baseline, setBaseline] = useState<{ cycle: number; json: string } | null>(null);
+  const cycle = useRef(0);
+  const shownGroup = useRef(groupId);
+  const groupChips = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    groupChips.current?.querySelector<HTMLElement>('[aria-checked="true"]')?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [open, selectedGroupId]);
+
+  function applyFields(f: ExpenseFields) {
+    setTitle(f.title);
+    setAmount(f.amount);
+    setCurrency(f.currency);
+    setDate(f.date);
+    setPayerId(f.payerId);
+    setCategoryId(f.categoryId);
+    setNotes(f.notes);
+    setShowDetails(f.showDetails);
+    setMethod(f.method);
+    setSelected(new Set(f.selected));
+    setValues(f.values);
+    setItems(f.items);
+    setTaxEnabled(f.taxEnabled);
+    setTaxRate(f.taxRate);
+    setTipEnabled(f.tipEnabled);
+    setTipRate(f.tipRate);
+  }
+
+  const fieldsJson = JSON.stringify({
+    title, amount, currency, date, payerId, categoryId, notes, showDetails, method,
+    selected: [...selected], values, items, taxEnabled, taxRate, tipEnabled, tipRate,
+  } satisfies ExpenseFields);
+  const editId = existing?.id ?? null;
+  const editVersion = existing?.updatedAt ?? null;
+
+  function ownsStoredDraft() {
+    const stored = readExpenseDraft(meId);
+    return Boolean(stored && (editId !== null
+      ? stored.mode === "edit" && stored.expenseId === editId
+      : stored.mode === "new" && stored.groupId === groupId));
+  }
+
+  useEffect(() => {
+    if (!open || !baseline || baseline.cycle !== cycle.current) return;
+    const stored = readExpenseDraft(meId);
+    const owned = Boolean(stored && (editId !== null
+      ? stored.mode === "edit" && stored.expenseId === editId
+      : stored.mode === "new" && stored.groupId === groupId));
+    if (fieldsJson === baseline.json) {
+      if (owned) clearDraft(meId, EXPENSE_DRAFT_KEY);
+      return;
+    }
+    const context: Omit<ExpenseDraft, "fields"> = editId !== null
+      ? { mode: "edit", groupId, expenseId: editId, updatedAt: editVersion ?? undefined }
+      : { mode: "new", groupId };
+    writeDraft(meId, EXPENSE_DRAFT_KEY, { ...context, fields: JSON.parse(fieldsJson) } satisfies ExpenseDraft);
+  }, [open, baseline, fieldsJson, groupId, editId, editVersion, meId]);
+
+  function closeForm() {
+    if (ownsStoredDraft()) clearDraft(meId, EXPENSE_DRAFT_KEY);
+    onClose();
+  }
+
+  function discardDraft() {
+    if (!baseline) return;
+    applyFields(JSON.parse(baseline.json));
+    setRestored(false);
+    clearDraft(meId, EXPENSE_DRAFT_KEY);
+  }
 
   useEffect(() => {
     if (!open) return;
@@ -138,61 +245,74 @@ export function ExpenseForm({
     setCategoryBusy(false);
     setNewCategory("");
     setSavedAttachments(existing?.attachments ?? []);
+    let fields: ExpenseFields;
     if (existing) {
-      setTitle(existing.title);
-      setAmount((existing.amountCents / 100).toFixed(2));
-      setCurrency(existing.currency);
-      setDate(String(existing.date).slice(0, 10));
-      setPayerId(existing.payerId);
-      setCategoryId(existing.categoryId ?? "");
-      setNotes(existing.notes);
-      setShowDetails(Boolean(existing.notes || existing.attachments.length));
-      setMethod(existing.splitMethod === "equal" && existing.shares.length === 1 ? "solo" : existing.splitMethod as Method);
-      setSelected(new Set(existing.shares.map((s) => s.userId)));
       const vals: Record<number, string> = {};
       for (const s of existing.shares) {
         if (existing.splitMethod === "exact") vals[s.userId] = (s.shareCents / 100).toFixed(2);
         else if (s.rawInput !== null) vals[s.userId] = String(s.rawInput);
       }
-      setValues(vals);
       const savedItemSubtotal = existing.items.reduce((sum, item) => sum + item.amountCents, 0);
       const savedTaxCents = existing.itemizedTaxCents ?? 0;
       const savedTipCents = existing.itemizedTipCents ?? 0;
-      setTaxEnabled(savedTaxCents > 0);
-      setTaxRate(adjustmentRate(savedTaxCents, savedItemSubtotal, CALIFORNIA_TAX_RATE));
-      setTipEnabled(savedTipCents > 0);
-      setTipRate(adjustmentRate(savedTipCents, savedItemSubtotal, "20"));
-      setItems(
-        existing.items.map((i) => ({
+      fields = {
+        title: existing.title,
+        amount: (existing.amountCents / 100).toFixed(2),
+        currency: existing.currency,
+        date: String(existing.date).slice(0, 10),
+        payerId: existing.payerId,
+        categoryId: existing.categoryId ?? "",
+        notes: existing.notes,
+        showDetails: Boolean(existing.notes || existing.attachments.length),
+        method: existing.splitMethod === "equal" && existing.shares.length === 1 ? "solo" : existing.splitMethod as Method,
+        selected: existing.shares.map((s) => s.userId),
+        values: vals,
+        items: existing.items.map((i) => ({
           name: i.name,
           amount: (i.amountCents / 100).toFixed(2),
           participantIds: i.participantIds,
-        }))
-      );
+        })),
+        taxEnabled: savedTaxCents > 0,
+        taxRate: adjustmentRate(savedTaxCents, savedItemSubtotal, CALIFORNIA_TAX_RATE),
+        tipEnabled: savedTipCents > 0,
+        tipRate: adjustmentRate(savedTipCents, savedItemSubtotal, "20"),
+      };
     } else {
-      setTitle("");
-      setAmount("");
-      setCurrency(groupCurrency);
-      setDate(todayStr());
-      setPayerId(meId);
-      setCategoryId("");
-      setNotes("");
-      setShowDetails(false);
-      setMethod("solo");
-      setSelected(new Set([defaultSoloId]));
-      setValues({});
-      setItems([]);
-      setTaxEnabled(false);
-      setTaxRate(CALIFORNIA_TAX_RATE);
-      setTipEnabled(false);
-      setTipRate("20");
+      fields = {
+        title: "",
+        amount: "",
+        currency: groupCurrency,
+        date: todayStr(),
+        payerId: meId,
+        categoryId: "",
+        notes: "",
+        showDetails: false,
+        method: "solo",
+        selected: [defaultSoloId],
+        values: {},
+        items: [],
+        taxEnabled: false,
+        taxRate: CALIFORNIA_TAX_RATE,
+        tipEnabled: false,
+        tipRate: "20",
+      };
     }
+    const draft = readExpenseDraft(meId);
+    const restore = draft && (existing
+      ? draft.mode === "edit" && draft.expenseId === existing.id && draft.updatedAt === existing.updatedAt
+      : draft.mode === "new" && draft.groupId === groupId) ? draft.fields : null;
+    applyFields(restore ?? fields);
+    setRestored(Boolean(restore));
+    cycle.current++;
+    setBaseline({ cycle: cycle.current, json: JSON.stringify(fields) });
     // Reset only when the modal opens or the edited expense changes — background
     // sync replaces members/categories references and must not wipe live input.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, existing?.id]);
 
   useEffect(() => {
+    if (shownGroup.current === groupId) return;
+    shownGroup.current = groupId;
     if (!open || existing) return;
     // A different group has different members and currency. Keep what was
     // typed; restart the payer and split for the new members.
@@ -215,14 +335,25 @@ export function ExpenseForm({
     () => items.reduce((s, i) => s + amountToCents(i.amount), 0),
     [items]
   );
+  const savedItemSubtotalCents = existing?.items.reduce((sum, item) => sum + item.amountCents, 0) ?? 0;
   const taxCents = useMemo(() => {
     if (!taxEnabled || itemSubtotalCents <= 0) return 0;
-    return Math.round(itemSubtotalCents * (Math.max(parseFloat(taxRate || "0") || 0, 0) / 100));
-  }, [taxEnabled, itemSubtotalCents, taxRate]);
+    if ((existing?.itemizedTaxCents ?? 0) > 0 && existing?.currency === currency && itemSubtotalCents === savedItemSubtotalCents &&
+      taxRate === adjustmentRate(existing.itemizedTaxCents ?? 0, savedItemSubtotalCents, CALIFORNIA_TAX_RATE)) {
+      return existing.itemizedTaxCents ?? 0;
+    }
+    const step = currencyStep(currency);
+    return Math.round(itemSubtotalCents * (Math.max(parseFloat(taxRate || "0") || 0, 0) / 100) / step) * step;
+  }, [taxEnabled, itemSubtotalCents, taxRate, currency, existing, savedItemSubtotalCents]);
   const tipCents = useMemo(() => {
     if (!tipEnabled || itemSubtotalCents <= 0) return 0;
-    return Math.round(itemSubtotalCents * (Math.max(parseFloat(tipRate || "0") || 0, 0) / 100));
-  }, [tipEnabled, itemSubtotalCents, tipRate]);
+    if ((existing?.itemizedTipCents ?? 0) > 0 && existing?.currency === currency && itemSubtotalCents === savedItemSubtotalCents &&
+      tipRate === adjustmentRate(existing.itemizedTipCents ?? 0, savedItemSubtotalCents, "20")) {
+      return existing.itemizedTipCents ?? 0;
+    }
+    const step = currencyStep(currency);
+    return Math.round(itemSubtotalCents * (Math.max(parseFloat(tipRate || "0") || 0, 0) / 100) / step) * step;
+  }, [tipEnabled, itemSubtotalCents, tipRate, currency, existing, savedItemSubtotalCents]);
   const itemizedTotalCents = itemSubtotalCents + taxCents + tipCents;
   const effectiveAmountCents = method === "itemized" && itemSubtotalCents > 0 ? itemizedTotalCents : amountCents;
   const displayedAmount =
@@ -241,7 +372,11 @@ export function ExpenseForm({
     }
     if (method === "percentage") {
       const sum = participantList.reduce((s, m) => s + (parseFloat(values[m.id] || "0") || 0), 0);
-      return Math.abs(sum - 100) < 0.001
+      let valid = true;
+      try {
+        splitPercentage(amountCents, participantList.map((m) => ({ userId: m.id, value: parseFloat(values[m.id] || "0") || 0 })), currencyStep(currency));
+      } catch { valid = false; }
+      return valid
         ? { ok: true, msg: "Adds up to 100%" }
         : { ok: false, msg: `Currently ${sum.toFixed(1)}% — must equal 100%` };
     }
@@ -372,7 +507,7 @@ export function ExpenseForm({
         onSaved();
         if (createdNewExpense) rememberExpenseGroup(groupId);
         if (createdNewExpense) {
-          onClose();
+          closeForm();
           toast(`Expense saved, but receipt upload failed: ${message}`, { tone: "error" });
           return;
         }
@@ -387,7 +522,7 @@ export function ExpenseForm({
       if (createdNewExpense) rememberExpenseGroup(groupId);
       if (createdNewExpense && onCreated) onCreated({ id: expenseId, title: body.title });
       else toast(createdNewExpense ? "Expense added" : "Expense updated");
-      onClose();
+      closeForm();
     } catch (err) {
       setError(
         !navigator.onLine
@@ -401,21 +536,40 @@ export function ExpenseForm({
   const sectionCls = "min-w-0 space-y-3 rounded-xl border border-line p-3";
   const pickedGroupName = groupOptions?.find((g) => g.id === selectedGroupId)?.name ?? "that group";
   return (
-    <Modal open={open} onClose={onClose} title={existing ? "Edit expense" : "Add expense"} wide>
+    <Modal open={open} onClose={closeForm} title={existing ? "Edit expense" : "Add expense"} wide>
       <form onSubmit={submit} className="space-y-3">
+        {restored && (
+          <p role="status" className="flex min-h-[var(--control-h-sm)] items-center gap-2 rounded-xl bg-accent-soft px-3 py-1 text-body text-accent-dark">
+            <span className="min-w-0 flex-1">Restored what you were typing.</span>
+            <button type="button" onClick={discardDraft} className="inline-flex min-h-[var(--control-h-sm)] shrink-0 items-center rounded-lg px-2 font-semibold hover:bg-card/60">
+              Discard
+            </button>
+          </p>
+        )}
         {groupOptions && groupOptions.length > 1 && !existing ? (
           <div className="space-y-2">
-          <div className={`group-choice group-hue-${(selectedGroupId ?? groupId) % 6} flex items-center gap-2 rounded-xl bg-[var(--group-soft)] py-1.5 pl-3 pr-1.5 text-[var(--group-ink)]`}>
-            <Users className="h-4 w-4 shrink-0" aria-hidden />
-            <label htmlFor="expense-group" className="shrink-0 text-body font-medium">Group</label>
-            <Select
-              id="expense-group"
-              value={selectedGroupId ?? groupId}
-              onChange={(e) => onGroupChange?.(Number(e.target.value))}
-              className="!border-transparent !bg-card/70 font-semibold"
-            >
-              {groupOptions.map((g) => <option key={g.id} value={g.id}>{g.name} · {g.currency}</option>)}
-            </Select>
+          <div ref={groupChips} role="radiogroup" aria-label="Group" onKeyDown={radioGroupKeyDown} className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-0.5">
+            {groupOptions.map((g, index) => {
+              const checked = g.id === (selectedGroupId ?? groupId);
+              return (
+                <button
+                  key={g.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={checked}
+                  tabIndex={radioTabIndex(checked, index, true)}
+                  onClick={() => { if (!checked) onGroupChange?.(g.id); }}
+                  className={`group-hue-${g.id % 6} inline-flex min-h-[var(--control-h-sm)] max-w-64 shrink-0 items-center gap-1.5 rounded-full border px-3 text-body transition-colors ${
+                    checked
+                      ? "border-[var(--group-color)] bg-[var(--group-soft)] font-semibold text-[var(--group-ink)]"
+                      : "border-line text-ink-soft hover:border-line-strong hover:text-ink"
+                  }`}
+                >
+                  <span className="h-2 w-2 shrink-0 rounded-full bg-[var(--group-color)]" aria-hidden />
+                  <span className="truncate">{g.name}</span>
+                </button>
+              );
+            })}
           </div>
           {groupSwitching && (groupSwitchError ? (
             <ActionError title={`Could not load ${pickedGroupName}. What you typed is kept.`} message={groupSwitchError} onRetry={() => onRetryGroupSwitch?.()}>
@@ -702,7 +856,7 @@ export function ExpenseForm({
         {/* Sticky so Cancel/Submit stay reachable while the long form scrolls
             (on short screens they used to scroll out of the viewport). */}
         <div className="sticky -bottom-4 -mx-4 -mb-4 flex flex-wrap justify-end gap-2 rounded-b-2xl border-t border-line bg-card px-4 py-2.5">
-          <Button type="button" variant="secondary" onClick={onClose}>
+          <Button type="button" variant="secondary" onClick={closeForm}>
             Cancel
           </Button>
           <Button type="submit" busy={busy} disabled={groupSwitching || (splitStatus ? !splitStatus.ok : false)}>

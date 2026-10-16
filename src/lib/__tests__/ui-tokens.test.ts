@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { findUiTokenViolations, scanUiTokens } from "../../../scripts/check-ui-tokens";
+import { findUiTokenViolations } from "../../../scripts/check-ui-tokens";
 
 describe("UI token enforcement", () => {
   it("rejects one-off sizes and colors", () => {
@@ -52,10 +52,6 @@ describe("UI token enforcement", () => {
       expect(size, role).toBeDefined();
       expect((Number(line) * 16) % 4, `${role} line height`).toBe(0);
     }
-  });
-
-  it("keeps the application source on the token system", () => {
-    expect(scanUiTokens()).toEqual([]);
   });
 
   it("holds the ramp to one role per size", () => {

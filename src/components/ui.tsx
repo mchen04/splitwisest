@@ -370,7 +370,7 @@ export function RowMeta({ children, className = "" }: { children: ReactNode; cla
 /** A card-header link to the full view of a preview list. */
 export function HeaderLink({ href, children }: { href: string; children: ReactNode }) {
   return (
-    <Link href={href} className="inline-flex min-h-[var(--control-h-sm)] items-center rounded-lg px-2 text-body font-medium text-accent hover:bg-accent-soft">
+    <Link prefetch={false} href={href} className="inline-flex min-h-[var(--control-h-sm)] items-center rounded-lg px-2 text-body font-medium text-accent hover:bg-accent-soft">
       {children}
     </Link>
   );
@@ -651,7 +651,7 @@ export function ToastRegion() {
           {item.tone === "error" ? <AlertCircle className="h-4 w-4 shrink-0" aria-hidden /> : <Check className="h-4 w-4 shrink-0" aria-hidden />}
           <span className="min-w-0 flex-1 py-1">{item.message}</span>
           {item.action && (
-            <Link href={item.action.href} onClick={() => dismissToast(item.id)} className="inline-flex min-h-[var(--control-h-sm)] items-center rounded-lg px-2 font-semibold underline-offset-2 hover:underline">
+            <Link prefetch={false} href={item.action.href} onClick={() => dismissToast(item.id)} className="inline-flex min-h-[var(--control-h-sm)] items-center rounded-lg px-2 font-semibold underline-offset-2 hover:underline">
               {item.action.label}
             </Link>
           )}
