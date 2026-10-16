@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { ReactNode, useEffect, useState, useSyncExternalStore } from "react";
+import { ReactNode, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
   LayoutDashboard, Users, UserRound, Receipt, LogOut, Wallet,
   MessageSquare, ScrollText, Moon, Sun, Plus, ChevronDown, Bell, WifiOff,
@@ -12,6 +12,7 @@ import { useTheme } from "@/lib/theme";
 import { syncExistingPush } from "@/lib/push-client";
 import { defaultExpenseGroup, readExpenseGroup } from "@/lib/last-group";
 import { clearAllDrafts } from "@/lib/drafts";
+import { readExpenseDraft } from "./expense-form";
 import { Avatar, ConfirmHost, IconButton, ToastRegion } from "./ui";
 import { QuickAddExpense } from "./quick-add-expense";
 
@@ -121,6 +122,19 @@ export function AppShell({ title, children }: { title?: string; children: ReactN
     window.addEventListener("focus", refresh);
     return () => { window.removeEventListener("pageshow", refresh); window.removeEventListener("focus", refresh); };
   }, [me]);
+
+  const draftChecked = useRef(false);
+  useEffect(() => {
+    if (draftChecked.current || !me || !groupsData) return;
+    draftChecked.current = true;
+    const draft = readExpenseDraft(me.id);
+    if (!draft || !groupsData.groups.some((group) => group.id === draft.groupId)) return;
+    if (draft.mode === "new") {
+      requestAnimationFrame(() => setQuickAdd({ step: "form", groupId: draft.groupId }));
+    } else if (pathname !== `/groups/${draft.groupId}`) {
+      router.push(`/groups/${draft.groupId}`);
+    }
+  }, [me, groupsData, pathname, router]);
 
   const [groupsOpen, setGroupsOpen] = useState(false);
   useEffect(() => {

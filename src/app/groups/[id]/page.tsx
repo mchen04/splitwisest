@@ -17,7 +17,7 @@ import {
   Card, CardHeader, Money, EmptyState, Button, Avatar, Input, Select, Modal, Menu, MenuItem, DateField, IconButton,
   RowMeta, RowTitle, SectionLabel, toast, confirmAction,
 } from "@/components/ui";
-import { ExpenseForm } from "@/components/expense-form";
+import { ExpenseForm, readExpenseDraft } from "@/components/expense-form";
 import { GroupBalanceForm, ExistingGroupBalance } from "@/components/group-balance-form";
 import { SettleModal } from "@/components/settle-modal";
 import { RecurringModal, ExistingRecurring } from "@/components/recurring-modal";
@@ -188,7 +188,7 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
     }
   }, []);
 
-  async function openEdit(expenseId: number) {
+  const openEdit = useCallback(async (expenseId: number) => {
     try {
       const r = await api<{ expense: NonNullable<typeof editing> }>(`/api/expenses/${expenseId}`);
       setEditing(r.expense);
@@ -199,7 +199,16 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
       if (e instanceof ApiClientError) refreshAll();
       else throw e;
     }
-  }
+  }, [refreshAll]);
+
+  const editDraftChecked = useRef(false);
+  useEffect(() => {
+    if (editDraftChecked.current || !me || !detail) return;
+    editDraftChecked.current = true;
+    const draft = readExpenseDraft(me.id);
+    const expenseId = draft?.mode === "edit" && draft.groupId === groupId ? draft.expenseId : undefined;
+    if (expenseId) requestAnimationFrame(() => void openEdit(expenseId));
+  }, [me, detail, groupId, openEdit]);
 
   async function openGroupBalance(id: number) {
     try {
