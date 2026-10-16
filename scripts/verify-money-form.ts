@@ -64,6 +64,7 @@ async function main() {
       await page.getByRole("button", { name: "View Audit saved adjustment", exact: true }).click();
       await page.getByRole("button", { name: "Edit", exact: true }).click();
       const edit = page.getByRole("dialog", { name: "Edit expense", exact: true });
+      await page.waitForFunction(() => document.querySelector<HTMLInputElement>('[role="dialog"] #expense-amount')?.value);
       const editedTotal = await edit.locator("#expense-amount").inputValue();
       console.log(`Saved one-cent tax: preview=${editedTotal}, expected=999999999.99`);
       if (editedTotal !== "999999999.99") failures.push(`saved adjustment preview ${editedTotal} != 999999999.99`);
