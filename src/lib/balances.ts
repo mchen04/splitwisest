@@ -46,7 +46,7 @@ export interface GroupBalanceSnapshot {
   balances: [number, number][];
 }
 
-function netObligations(obligations: FriendObligation[]): Record<string, number> {
+export function netObligations(obligations: FriendObligation[]): Record<string, number> {
   const net: Record<string, number> = {};
   for (const obligation of obligations) {
     net[obligation.currency] = (net[obligation.currency] ?? 0) + obligation.netCents;

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { sql } from "@/lib/db";
 import { handler, badRequest } from "@/lib/api";
 import { requireUser } from "@/lib/auth";
-import { friendBalances } from "@/lib/balances";
+import { friendObligations, netObligations } from "@/lib/balances";
 import { assertAuthRateLimit, clearAuthRateLimit } from "@/lib/rate-limit";
 import {
   canRequestFriendById,
@@ -17,8 +17,9 @@ export const GET = handler(async () => {
   // run them as a single parallel level rather than four serial round-trips.
   // (Pending requests in both directions let the UI show accept/decline on
   // incoming and a "requested" state on outgoing.)
-  const [rows, balances, incoming, outgoing] = await Promise.all([
-    sql`
+  const [[rows, incoming, outgoing], balances] = await Promise.all([
+    sql.transaction((tx) => [
+    tx`
     SELECT u.id, u.display_name, u.username,
       (SELECT COALESCE(MAX(m.id), 0) FROM messages m
         WHERE m.channel = 'dm'
@@ -31,26 +32,26 @@ export const GET = handler(async () => {
     JOIN users u ON u.id = CASE WHEN f.user_a = ${user.id} THEN f.user_b ELSE f.user_a END
     WHERE f.user_a = ${user.id} OR f.user_b = ${user.id}
     ORDER BY u.display_name LIMIT 1000`,
-    friendBalances(user.id),
-    sql`
+    tx`
     SELECT fr.id, u.id AS user_id, u.display_name, u.username, fr.created_at
     FROM friend_requests fr JOIN users u ON u.id = fr.from_id
     WHERE fr.to_id = ${user.id} ORDER BY fr.id DESC LIMIT 500`,
-    sql`
+    tx`
     SELECT fr.id, u.id AS user_id, u.display_name, u.username, fr.created_at
     FROM friend_requests fr JOIN users u ON u.id = fr.to_id
     WHERE fr.from_id = ${user.id} ORDER BY fr.id DESC LIMIT 500`,
+    ], { isolationLevel: "RepeatableRead", readOnly: true }),
+    friendObligations(user.id),
   ]);
-  const balanceByFriend = new Map(balances.map((b) => [b.friendId, b]));
 
   return NextResponse.json({
     friends: rows.map((f) => ({
       id: Number(f.id),
       displayName: f.display_name,
       username: f.username,
-      obligations: balanceByFriend.get(Number(f.id))?.obligations ?? [],
-      netByCurrency: balanceByFriend.get(Number(f.id))?.netByCurrency ?? {},
-      canRemoveFriend: (balanceByFriend.get(Number(f.id))?.obligations.length ?? 0) === 0,
+      obligations: balances.get(Number(f.id)) ?? [],
+      netByCurrency: netObligations(balances.get(Number(f.id)) ?? []),
+      canRemoveFriend: (balances.get(Number(f.id))?.length ?? 0) === 0,
       unreadMessages: Number(f.last_message_id) > Number(f.read_message_id) ? 1 : 0,
     })),
     incomingRequests: incoming.map((r) => ({
