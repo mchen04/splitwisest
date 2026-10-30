@@ -1,26 +1,8 @@
-import "../src/lib/neon-local";
-import { neon } from "@neondatabase/serverless";
-import { existsSync, readFileSync } from "fs";
-
-function loadLocalEnv() {
-  const path = ".env.local";
-  if (!existsSync(path)) return;
-  for (const line of readFileSync(path, "utf8").split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-    const idx = trimmed.indexOf("=");
-    if (idx < 0) continue;
-    const key = trimmed.slice(0, idx).trim();
-    const value = trimmed.slice(idx + 1).trim().replace(/^['"]|['"]$/g, "");
-    process.env[key] ??= value;
-  }
-}
-
-loadLocalEnv();
+import { sql } from "../src/lib/db";
 
 export type Json = Record<string, unknown>;
 
-export const sql = neon(process.env.DATABASE_URL!);
+export { sql };
 export const baseUrl = process.env.SPLITWISEST_BASE_URL ?? "http://localhost:3000";
 
 export function assert(condition: unknown, message: string): asserts condition {

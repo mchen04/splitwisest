@@ -36,21 +36,26 @@ Next.js (App Router, TypeScript), Tailwind CSS v4, Lucide icons, Neon PostgreSQL
 
 ```bash
 pnpm install
-# .env.local needs DATABASE_URL (SIGNUP_CODE is optional)
-pnpm tsx scripts/migrate.ts  # create tables (idempotent)
-pnpm migrate:notifications  # additive notification schema
+pnpm db:local
+export DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5433/splitwisest
+export NEON_LOCAL_PROXY=http://127.0.0.1:4444/sql
 pnpm dev
 ```
 
-No hosted Neon account? You can run entirely against a local Postgres via a small
-Neon-HTTP proxy — see **docs/DATABASE.md → "Local Postgres"** (the `NEON_LOCAL_PROXY`
-escape hatch, inert in production).
+Docker Desktop must be running. `db:local` starts local Postgres and its HTTP proxy, then applies both migrations.
+Repeated runs preserve local data. `pnpm db:local:down` removes the containers and local data.
+Use the printed environment lines if you select different ports.
+You can copy `.env.example` to `.env.local` for Next.js; export the same values for QA scripts.
+Development refuses Neon URLs unless you set `ALLOW_REMOTE_DB=1` explicitly.
+See [database setup](docs/DATABASE.md) and the [script directory](docs/DEVELOPMENT.md).
 
 ### Environment variables
 
 | Variable | Purpose |
 |---|---|
-| `DATABASE_URL` | Neon Postgres connection string (pooler URL, `sslmode=require`) |
+| `DATABASE_URL` | Local Postgres URL by default; production uses a Neon connection string. |
+| `NEON_LOCAL_PROXY` | Local SQL-over-HTTP endpoint. Leave unset for production Neon. |
+| `ALLOW_REMOTE_DB` | Set to `1` for intentional Neon access from development or migration scripts. |
 | `SIGNUP_CODE` | Optional bootstrap invite code. Friend and group invite codes also work during signup. |
 
 ## Testing
@@ -84,7 +89,10 @@ Browser checks cover desktop WebKit and realistic phone sizes. The iPhone gate a
 vercel --prod
 ```
 
-Set `DATABASE_URL` in Vercel project env vars. Add `SIGNUP_CODE` only if you want a bootstrap invite code. Run the migration once against the production database before first use.
+Set the production `DATABASE_URL` in Vercel. Leave `NEON_LOCAL_PROXY` unset there.
+Add `SIGNUP_CODE` only if you want a bootstrap invite code.
+Production builds and Vercel runtime bypass the development guard.
+Follow [production migration instructions](docs/DATABASE.md#production-migrations) before first use.
 
 ## Documentation
 

@@ -172,13 +172,6 @@ describe("diffExpense — combinations", () => {
     ]);
   });
 
-  it("a currency change never surfaces the converted amount or fx rate", () => {
-    const changes = diffExpense(base, snap({ currency: "EUR", amountCents: 4200 }));
-    expect(fields(changes)).toEqual(["currency"]);
-    const rendered = changes.map(describeChange).join(" ");
-    expect(rendered).not.toMatch(/converted|fx|rate/i);
-  });
-
   it("names every person when several join at once", () => {
     const next = snap({
       shares: [

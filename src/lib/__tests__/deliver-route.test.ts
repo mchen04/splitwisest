@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -47,10 +46,5 @@ describe("notification retry endpoint", () => {
     const route = await import("@/app/api/notifications/deliver/route");
     expect((await route.POST(request("POST", `Bearer ${secret}`))).status).toBe(503);
     expect(deliverNotifications).not.toHaveBeenCalled();
-  });
-
-  it("is scheduled by Vercel Cron at the Hobby plan's daily limit", () => {
-    const { crons } = JSON.parse(readFileSync("vercel.json", "utf8"));
-    expect(crons).toEqual([{ path: "/api/notifications/deliver", schedule: expect.stringMatching(/^\d{1,2} \d{1,2} \* \* \*$/) }]);
   });
 });

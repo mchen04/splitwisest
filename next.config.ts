@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import "./src/lib/neon-local";
 import { deploymentId } from "./src/lib/deployment-id";
 
 // One id per deploy, shared by the client bundle (NEXT_PUBLIC_BUILD_ID), the

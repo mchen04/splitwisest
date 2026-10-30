@@ -1,7 +1,6 @@
-import { neon, type NeonQueryFunction } from "@neondatabase/serverless";
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import type { NeonQueryFunction } from "@neondatabase/serverless";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename } from "node:path";
-import { loadEnvFile } from "node:process";
 import { parseArgs } from "node:util";
 import { planMigration, type MigrationPlan } from "./migration-guard";
 
@@ -37,9 +36,8 @@ async function main() {
     console.log(plan.transaction.map((s) => `${s};`).join("\n"));
     return;
   }
-  if (existsSync(".env.local")) loadEnvFile(".env.local");
-  await import("../src/lib/neon-local");
-  await applyGuardedMigration(neon(process.env.DATABASE_URL!), basename(positionals[0], ".sql"), plan);
+  const { sql } = await import("../src/lib/db");
+  await applyGuardedMigration(sql, basename(positionals[0], ".sql"), plan);
 }
 
 if (process.argv[1]?.endsWith("apply-migration.ts")) {
