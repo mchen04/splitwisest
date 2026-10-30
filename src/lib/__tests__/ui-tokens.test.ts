@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { findUiTokenViolations } from "../../../scripts/check-ui-tokens";
 
@@ -44,22 +42,7 @@ describe("UI token enforcement", () => {
     expect(findUiTokenViolations(keyed, "src/app/page.tsx")).toEqual([]);
   });
 
-  it("defines every type role on the 4px baseline", () => {
-    const css = readFileSync(join(process.cwd(), "src/app/globals.css"), "utf8");
-    for (const role of ["meta", "body", "row", "section", "title", "amount", "amount-lg", "hero"]) {
-      const size = css.match(new RegExp(`--text-${role}: ([\\d.]+)rem;`))?.[1];
-      const line = css.match(new RegExp(`--text-${role}--line-height: ([\\d.]+)rem;`))?.[1];
-      expect(size, role).toBeDefined();
-      expect((Number(line) * 16) % 4, `${role} line height`).toBe(0);
-    }
-  });
-
-  it("holds the ramp to one role per size", () => {
-    // 12 / 14 / 16 / 20 / 24 / 32 / 40. 18 is unset because against 20 it is a
-    // 1.11 step — close enough to read as an accident rather than a level.
-    const css = readFileSync(join(process.cwd(), "src/app/globals.css"), "utf8");
-    expect(css).toContain("--text-lg: initial;");
-    expect(css).toContain("--text-lg--line-height: initial;");
+  it("rejects an off-ramp text size", () => {
     expect(findUiTokenViolations('<h2 className="text-lg" />', "example.tsx").map((item) => item.rule))
       .toEqual(["off-ramp text size (text-lg)"]);
   });

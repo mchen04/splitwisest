@@ -1,25 +1,5 @@
-import "../src/lib/neon-local";
-import { neon } from "@neondatabase/serverless";
+import { sql } from "../src/lib/db";
 import { randomBytes } from "crypto";
-import { existsSync, readFileSync } from "fs";
-
-function loadLocalEnv() {
-  const path = ".env.local";
-  if (!existsSync(path)) return;
-  for (const line of readFileSync(path, "utf8").split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-    const idx = trimmed.indexOf("=");
-    if (idx < 0) continue;
-    const key = trimmed.slice(0, idx).trim();
-    const value = trimmed.slice(idx + 1).trim().replace(/^['"]|['"]$/g, "");
-    process.env[key] ??= value;
-  }
-}
-
-loadLocalEnv();
-
-const sql = neon(process.env.DATABASE_URL!);
 
 function isUniqueViolation(err: unknown) {
   return typeof err === "object" && err !== null && "code" in err && (err as { code?: unknown }).code === "23505";
