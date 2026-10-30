@@ -46,7 +46,7 @@ Docker Desktop must be running. `db:local` starts local Postgres and its HTTP pr
 Repeated runs preserve local data. `pnpm db:local:down` removes the containers and local data.
 Use the printed environment lines if you select different ports.
 You can copy `.env.example` to `.env.local` for Next.js; export the same values for QA scripts.
-Development refuses Neon URLs unless you set `ALLOW_REMOTE_DB=1` explicitly.
+Local commands, including production builds, refuse Neon URLs unless you set `ALLOW_REMOTE_DB=1` explicitly.
 See [database setup](docs/DATABASE.md) and the [script directory](docs/DEVELOPMENT.md).
 
 ### Environment variables
@@ -55,7 +55,7 @@ See [database setup](docs/DATABASE.md) and the [script directory](docs/DEVELOPME
 |---|---|
 | `DATABASE_URL` | Local Postgres URL by default; production uses a Neon connection string. |
 | `NEON_LOCAL_PROXY` | Local SQL-over-HTTP endpoint. Leave unset for production Neon. |
-| `ALLOW_REMOTE_DB` | Set to `1` for intentional Neon access from development or migration scripts. |
+| `ALLOW_REMOTE_DB` | Set to `1` for intentional Neon access from any local command, including production builds and migrations. |
 | `SIGNUP_CODE` | Optional bootstrap invite code. Friend and group invite codes also work during signup. |
 
 ## Testing
@@ -91,7 +91,7 @@ vercel --prod
 
 Set the production `DATABASE_URL` in Vercel. Leave `NEON_LOCAL_PROXY` unset there.
 Add `SIGNUP_CODE` only if you want a bootstrap invite code.
-Production builds and Vercel runtime bypass the development guard.
+Only `VERCEL=1` or an explicit `ALLOW_REMOTE_DB=1` permits remote Neon access.
 Follow [production migration instructions](docs/DATABASE.md#production-migrations) before first use.
 
 ## Documentation

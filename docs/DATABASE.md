@@ -19,8 +19,8 @@ For simultaneous checkouts, set unused `SPLITWISEST_PG_PORT` and `SPLITWISEST_PR
 Use the two environment lines printed by that command.
 
 Next.js can read these values from `.env.local`; QA and migration scripts use exported values only.
-Development, tests, and scripts reject `*.neon.tech` unless `ALLOW_REMOTE_DB=1`.
-`NODE_ENV=production` and `VERCEL=1` bypass this guard.
+All local commands, including production builds and servers, reject `*.neon.tech` unless `ALLOW_REMOTE_DB=1`.
+Only `VERCEL=1` or an explicit `ALLOW_REMOTE_DB=1` permits remote Neon access; `NODE_ENV=production` does not bypass this guard.
 
 ## Production migrations
 

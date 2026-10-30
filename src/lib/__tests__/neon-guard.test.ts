@@ -15,7 +15,7 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllEnvs());
 
 describe("local database guard", () => {
-  it.each(["test", "development", ""])("blocks Neon in %s before creating a client", async (mode) => {
+  it.each(["test", "development", "production", ""])("blocks Neon in %s before creating a client", async (mode) => {
     vi.stubEnv("NODE_ENV", mode);
     await expect(import("../db")).rejects.toThrow(/pnpm db:local/);
   });
@@ -33,8 +33,8 @@ describe("local database guard", () => {
     await expect(import("../db")).rejects.toThrow(/pnpm db:local/);
   });
 
-  it("blocks development before Next.js starts", async () => {
-    vi.stubEnv("NODE_ENV", "development");
+  it.each(["development", "production"])("blocks Neon in %s before Next.js starts", async (mode) => {
+    vi.stubEnv("NODE_ENV", mode);
     await expect(import("../../../next.config")).rejects.toThrow(/pnpm db:local/);
   });
 
@@ -43,17 +43,20 @@ describe("local database guard", () => {
     await expect(import("../db")).rejects.toThrow(/ALLOW_REMOTE_DB=1/);
   });
 
-  it("allows explicit remote migrations without making a request", async () => {
+  it.each(["development", "production"])("allows explicit remote migrations in %s without making a request", async (mode) => {
+    vi.stubEnv("NODE_ENV", mode);
     vi.stubEnv("ALLOW_REMOTE_DB", "1");
     expect((await import("../db")).sql).toBeTypeOf("function");
   });
 
-  it.each(["production", "vercel"])("allows %s without making a request", async (target) => {
-    vi.stubEnv(target === "production" ? "NODE_ENV" : "VERCEL", target === "production" ? "production" : "1");
+  it.each(["development", "production"])("allows Vercel in %s without making a request", async (mode) => {
+    vi.stubEnv("NODE_ENV", mode);
+    vi.stubEnv("VERCEL", "1");
     expect((await import("../db")).sql).toBeTypeOf("function");
   });
 
-  it("uses the local HTTP proxy", async () => {
+  it.each(["development", "production"])("uses the local HTTP proxy in %s", async (mode) => {
+    vi.stubEnv("NODE_ENV", mode);
     vi.stubEnv("DATABASE_URL", local);
     vi.stubEnv("NEON_LOCAL_PROXY", "http://localhost:4444/sql");
     expect((await import("../db")).sql).toBeTypeOf("function");
