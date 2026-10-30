@@ -30,14 +30,14 @@ describe("polling routes check the session in their own statement", () => {
   });
 
   it("answers 401 before 404 or 403 when the session is not valid", async () => {
-    jar.set("sw_session", "t");
+    jar.set("sw_session", "a".repeat(64));
     sql.mockResolvedValue([{ ...groupRow, viewer_id: null, id: null, is_member: false }]);
     expect((await version("7")).status).toBe(401);
     expect(store.set).not.toHaveBeenCalled();
   });
 
   it("answers 404 for a missing group and 403 for a non-member, refreshing the owner cookie", async () => {
-    jar.set("sw_session", "t");
+    jar.set("sw_session", "a".repeat(64));
     sql.mockResolvedValueOnce([{ ...groupRow, id: null, is_member: false }]);
     expect((await version("7")).status).toBe(404);
     sql.mockResolvedValueOnce([{ ...groupRow, is_member: false }]);
@@ -47,7 +47,7 @@ describe("polling routes check the session in their own statement", () => {
   });
 
   it("returns fingerprints for a member in one query", async () => {
-    jar.set("sw_session", "t");
+    jar.set("sw_session", "a".repeat(64));
     sql.mockResolvedValueOnce([groupRow]);
     const res = await version("7");
     expect(res.status).toBe(200);
@@ -56,7 +56,7 @@ describe("polling routes check the session in their own statement", () => {
   });
 
   it("returns group data and its fingerprint from the same snapshot", async () => {
-    jar.set("sw_session", "t");
+    jar.set("sw_session", "a".repeat(64));
     sql.mockResolvedValueOnce([{ ...groupRow,
       members: [{ id: 5, display_name: "A", username: "a" }, { id: 6, display_name: "B", username: "b" }],
       balances: [{ user_id: 5, display_name: "A", net_cents: 50 }, { user_id: 6, display_name: "B", net_cents: -50 }],
@@ -73,7 +73,7 @@ describe("polling routes check the session in their own statement", () => {
   });
 
   it("refreshes the snapshot after materializing due recurring expenses", async () => {
-    jar.set("sw_session", "t");
+    jar.set("sw_session", "a".repeat(64));
     sql.mockResolvedValueOnce([{ ...groupRow, recurring_due: true }]).mockResolvedValueOnce([])
       .mockResolvedValueOnce([{ ...groupRow, detail_version: "new",
         balances: [{ user_id: 5, display_name: "A", net_cents: 0 }],
@@ -87,7 +87,7 @@ describe("polling routes check the session in their own statement", () => {
   });
 
   it("checks the session first for a malformed id", async () => {
-    jar.set("sw_session", "t");
+    jar.set("sw_session", "a".repeat(64));
     sql.mockResolvedValueOnce([]);
     expect((await version("abc")).status).toBe(401);
     sql.mockResolvedValueOnce([{ id: 5, username: "a", display_name: "A", invite_code: "i" }]);
@@ -95,7 +95,7 @@ describe("polling routes check the session in their own statement", () => {
   });
 
   it("answers sync 401 when its session row is missing", async () => {
-    jar.set("sw_session", "t");
+    jar.set("sw_session", "a".repeat(64));
     sql.mockResolvedValueOnce([{ viewer_id: null }]);
     expect((await syncRoute.GET()).status).toBe(401);
     expect(store.set).not.toHaveBeenCalled();
@@ -106,7 +106,7 @@ describe("polling routes check the session in their own statement", () => {
     ["missing group", { id: null, is_member: false }, 404],
     ["non-member", { is_member: false }, 403],
   ])("detail and list stop after one query for a %s (no recurring writes)", async (_name, row, status) => {
-    jar.set("sw_session", "t");
+    jar.set("sw_session", "a".repeat(64));
     sql.mockResolvedValue([{ ...groupRow, ...row }]);
     const ctx = { params: Promise.resolve({ id: "7" }) };
     expect((await detailRoute.GET(new Request("https://app.example/api/groups/7") as never, ctx)).status).toBe(status);

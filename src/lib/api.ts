@@ -1,6 +1,6 @@
 import { after, NextResponse } from "next/server";
 import { ZodError } from "zod";
-import { AuthError } from "./auth";
+import { AuthError, requireSessionToken } from "./auth";
 import { DomainError } from "./errors";
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
@@ -30,11 +30,18 @@ export function handler<T extends unknown[]>(
 ) {
   return async (...args: T): Promise<NextResponse | Response> => {
     try {
-      if (blockedCrossOrigin(args[0])) {
+      const req = args[0];
+      if (blockedCrossOrigin(req)) {
         return NextResponse.json({ error: "Cross-origin request blocked" }, { status: 403 });
       }
+      if (req instanceof Request && (req.method === "GET" || req.method === "HEAD") &&
+        (req.headers.get("next-router-prefetch") === "1" ||
+          [req.headers.get("purpose"), req.headers.get("sec-purpose")].some((value) =>
+            value?.split(/[;,]/).some((part) => part.trim().toLowerCase() === "prefetch")))) {
+        await requireSessionToken();
+        return new NextResponse(null, { status: 204, headers: { "Cache-Control": "private, no-store" } });
+      }
       const response = await fn(...args);
-      const req = args[0];
       if (response.ok && process.env.VAPID_PUBLIC_KEY && req instanceof Request &&
         !new URL(req.url).pathname.startsWith("/api/push/") &&
         (!SAFE_METHODS.has(req.method) || /^\/api\/groups\/\d+(?:\/expenses|\/version)?$/.test(new URL(req.url).pathname))) {

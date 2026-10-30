@@ -8,6 +8,10 @@ const SESSION_DAYS = 30;
 const DUMMY_HASH = "scrypt:0123456789abcdef0123456789abcdef:" + "ab".repeat(64);
 const RECOVERY_CODE_CHECKS = 8;
 
+function isSessionToken(token: string | undefined): token is string {
+  return token?.length === 64 && /^[a-f0-9]+$/.test(token);
+}
+
 export function hashPassword(password: string): string {
   const salt = randomBytes(16).toString("hex");
   const hash = scryptSync(password, salt, 64).toString("hex");
@@ -102,7 +106,7 @@ export async function setSessionCookie(token: string, userId: number) {
 export async function clearSession() {
   const store = await cookies();
   const token = store.get(SESSION_COOKIE)?.value;
-  if (token) await sql`DELETE FROM sessions WHERE token = ${token}`;
+  if (isSessionToken(token)) await sql`DELETE FROM sessions WHERE token = ${token}`;
   store.delete(SESSION_COOKIE);
   store.delete(CACHE_OWNER_COOKIE);
 }
@@ -118,7 +122,7 @@ export async function revokeOtherSessions(userId: number) {
 export async function getSessionUser(): Promise<SessionUser | null> {
   const store = await cookies();
   const token = store.get(SESSION_COOKIE)?.value;
-  if (!token) return null;
+  if (!isSessionToken(token)) return null;
   const rows = await sql`
     SELECT u.id, u.username, u.display_name, u.invite_code
     FROM sessions s JOIN users u ON u.id = s.user_id
@@ -139,7 +143,7 @@ export async function getSessionUser(): Promise<SessionUser | null> {
 // fail with 401 when it is missing, and call markSessionOwner on success.
 export async function requireSessionToken(): Promise<string> {
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
-  if (!token) throw new AuthError();
+  if (!isSessionToken(token)) throw new AuthError();
   return token;
 }
 

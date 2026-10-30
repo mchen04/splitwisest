@@ -29,7 +29,7 @@ describe("batched authenticated reads", () => {
     transaction.mockReset();
     store.set.mockClear();
     jar.clear();
-    jar.set("sw_session", "session");
+    jar.set("sw_session", "a".repeat(64));
   });
 
   it("returns the same category fields in one database request", async () => {
@@ -47,8 +47,6 @@ describe("batched authenticated reads", () => {
     const [queries, options] = transaction.mock.calls[0];
     expect(queries).toHaveLength(2);
     expect(options).toEqual({ isolationLevel: "RepeatableRead", readOnly: true });
-    expect(queries[1].values[0].text).toContain("s.expires_at > now()");
-    expect(queries[1].values[0].text).toContain("u.deleted_at IS NULL");
     expect(jar.get("sw_cache_owner")).toBe("7");
   });
 

@@ -1,7 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { deliverNotifications } from "@/lib/notification-delivery";
-import { sql } from "@/lib/db";
 import { enqueueMonthlyReminders } from "@/lib/monthly-reminders";
 
 export const maxDuration = 60;
@@ -17,14 +16,9 @@ async function deliver(req: NextRequest) {
     return NextResponse.json({ error: "Not authorized" }, { status: 401 });
   }
   try {
-    const remindersCreated = await enqueueMonthlyReminders();
-    const result = { ...await deliverNotifications(), remindersCreated };
-    await sql`DELETE FROM notifications WHERE id IN
-      (SELECT id FROM notifications WHERE created_at < now() - interval '90 days' ORDER BY id LIMIT 500)`;
-    await sql`DELETE FROM push_subscriptions WHERE id IN
-      (SELECT s.id FROM push_subscriptions s JOIN sessions sess ON sess.token = s.session_token
-        WHERE sess.expires_at <= now() ORDER BY s.id LIMIT 100)`;
     const trigger = req.headers.get("user-agent")?.startsWith("vercel-cron") ? "vercel-cron" : "manual";
+    const remindersCreated = await enqueueMonthlyReminders();
+    const result = { ...await deliverNotifications(undefined, { cleanup: trigger === "vercel-cron" }), remindersCreated };
     console.info(JSON.stringify({ event: "notification-delivery", trigger, ...result }));
     return NextResponse.json(result);
   } catch {

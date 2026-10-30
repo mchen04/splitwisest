@@ -1,198 +1,108 @@
-# iPhone PWA verification
+# PWA verification
 
-SplitWisest supports Safari and an installed iPhone Home Screen app. The installed app is the release target for safe areas and keyboard layout.
+## Mobile layout
 
-## Layout contract
+On phones, `.app-frame` fills the visible viewport.
+`.app-scroll` owns page scrolling; chat instead scrolls its message list inside `.app-fixed`.
+Bottom navigation stays in the frame's normal flow and includes the safe-area inset.
+It hides while the chat composer has focus.
+Modal panels include the bottom inset, and toasts sit above navigation.
+Login, signup, and recovery remain scrollable outside the app frame.
 
-The app is a locked frame, not a scrolling document. `.app-frame` covers the
-visible viewport, `.app-scroll` is the only region that scrolls, and the bottom
-navigation is the frame's last row. Navigation is therefore in normal flow. It
-was `position: fixed` before, which let iOS place it differently on routes that
-scroll than on routes that fit in one screen.
+Check phone widths of 320, 390, and 393 pixels.
+Use long names, a long conversation, and increased text size.
+Confirm that fields, labels, actions, and navigation remain reachable.
+A reduced viewport tests available space but does not open a native phone keyboard.
 
-- The viewport uses `viewport-fit=cover`.
-- The document never scrolls. `document.scrollHeight` equals `window.innerHeight`.
-- Bottom navigation includes the iPhone bottom inset and a small lift.
-- Mobile modal sheets include the bottom inset.
-- Confirmation toasts sit above the bottom navigation and the inset.
-- Bottom navigation sits at the same y on every route.
-- No route carries a page title row.
-- Chat fills the visible viewport without page scrolling.
-- The message list keeps its own vertical scroll.
-- Search, the composer, Send, and navigation stay visible.
-- Sending clears the draft without moving the page.
-- Shared mobile controls use a 44 px minimum height, and so does every control on a
-  touch-first screen (`pointer: coarse`) at any width.
-- Tapping Send keeps focus in the message field, so the navigation does not
-  reappear mid-tap and move Send out from under the finger.
+## Updates and caching
 
-## Local checks
+`pnpm build` generates the ignored `public/sw.js` from `src/sw/sw.template.js`.
+The worker, client bundle, `/api/version`, and `x-build-id` header share one deployment ID.
+The ID uses `VERCEL_GIT_COMMIT_SHA`, then `GITHUB_SHA`, then a local source hash.
+The worker script revalidates so new bytes trigger an update.
+The client checks for updates on resume, online events, navigation, and a 60-second interval.
 
-Run the permanent source checks first:
+`decideUpdateAction` prevents repeated reloads for the same build.
+It avoids reloads on first installation or when the page already uses the server build.
+Changed form text or choices defer a reload.
+Expense, chat, and comment drafts use per-account browser storage.
+Expense drafts do not retain receipt files.
 
-```bash
-pnpm vitest run src/lib/__tests__/mobile-shell.test.ts
-pnpm vitest run src/lib/__tests__/draft-guard.test.ts src/lib/__tests__/theme.test.ts
-pnpm exec tsc --noEmit
-pnpm lint
-pnpm build
-```
+| Resource | Cache behavior |
+|---|---|
+| Page navigation | Network first, with a 3.5-second timeout; fallback to the cached page, start page, then offline page. |
+| Content-hashed static files | Cache first; remove stale build files after all open windows report the current build. |
+| Public page fragments | Separate cache per build; reuse only while public freshness headers remain valid. |
+| Private fragments | Never cache. |
+| API responses | Never intercept or cache. |
 
-Check desktop WebKit and phone widths of 320, 390, and 393 pixels. An iPhone WebKit profile tests layout emulation.
-It does not prove native Safari, an installed PWA, or a physical phone. Check those separately.
-
-Set `navigator.standalone` to `true` before navigation. Use a long conversation, then verify these values:
-
-- The user agent contains `iPhone`.
-- The viewport meta tag contains `viewport-fit=cover`.
-- Document and body heights equal `window.innerHeight`.
-- `document.scrollHeight` equals `window.innerHeight` on every route.
-- The bottom navigation's top edge is the same value on every route.
-- `window.scrollY` stays at zero.
-- The message list uses `overflow-y: auto` and has overflow content.
-- The composer and Send bottom edges stay above the navigation top edge.
-- A 34 px test inset produces 38 px bottom navigation padding.
-- A modal panel includes the simulated bottom inset.
-
-Verify the expense flow at each size:
-
-- Payer, date, and category appear without opening Split.
-- Payer defaults to the current user. Date uses local today. Category defaults to none.
-- Tab stays inside the modal and skips hidden or disabled controls.
-- A failed save keeps the modal open and preserves every value.
-- A second click cannot submit while the first save runs.
-- Group tabs and menus support arrow keys, Home, End, and Escape.
-- Open the Balances tab and check the group balance preview, save action, and scrolling at phone widths.
-
-Take a viewport screenshot before the browser closes. Keep screenshots outside the repository.
-
-## Physical iPhone release gate
-
-Use the deployed HTTPS URL.
-
-1. Open the site in Safari.
-2. Use **Share → Add to Home Screen**.
-3. Turn on **Open as Web App** when Safari shows that option.
-4. Close Safari.
-5. Launch SplitWisest from the Home Screen icon.
-6. Open a long direct or group conversation.
-7. Scroll message history to both ends.
-8. Focus the message field and show the keyboard.
-9. Confirm the message field and Send stay visible, and the bottom navigation hides.
-10. Send a message without scrolling the page.
-11. Confirm bottom navigation stays above the Home indicator.
-12. Open Add expense and confirm its actions stay above the Home indicator.
-
-Test portrait and landscape. Repeat once with increased text size if the release changes mobile spacing.
-
-## Update and cache contract
-
-Every deploy ships a byte-different `/sw.js`: `pnpm build` runs
-`scripts/generate-sw.ts`, which writes `public/sw.js` (gitignored) from
-`src/sw/sw.template.js` with the deployment id embedded. The worker script, the
-client bundle (`NEXT_PUBLIC_BUILD_ID`), `/api/version`, and the `x-build-id`
-response header all derive from one id in `src/lib/deployment-id.ts`.
-
-The browser's own service-worker update algorithm is the update mechanism:
-`registration.update()` fetches `/sw.js` (served `Cache-Control: no-cache`),
-new bytes install, `skipWaiting` + `clients.claim` fire `controllerchange`, and
-the client reconciles. Detection runs on resume and connectivity signals —
-`visibilitychange`, `pageshow` (including back/forward-cache restores),
-`online`, history changes (soft navigations), and a 60 s interval as backstop.
-
-One function decides what happens: `decideUpdateAction` in
-`src/lib/update-policy.ts`. It reloads at most once per detected version,
-never reloads a first install, never reloads a page already on the server's
-build, stops instead of looping when a reload fails to land, and defers while
-a form holds changed text, selects, checkboxes, radios, or stateful buttons.
-
-Caching (`src/sw/sw.template.js`):
-
-- Navigations are network-first with a 3.5 s timeout, falling back to the page
-  cache, then the cached start_url shell, then `offline.html`. The first
-  navigation after a deploy therefore carries the new build.
-- The offline page follows the saved or system theme and includes safe-area padding.
-- `/_next/static/` files are cache-first (content-hashed, immutable). They are
-  never purged by a version bump; stale-build files are swept only once every
-  open window reports it runs the current build.
-- RSC payloads (`?_rsc=`) are never cached, and a payload the server minted
-  for a different build is refused so the router hard-navigates instead of
-  mixing builds.
-- `/api/**` is never touched by the worker.
-- Both runtime caches are entry-bounded; cached entries carry build tags in
-  the meta cache.
+Fragment caching requires a successful prerendered response from the same build.
+Private, no-store, no-cache, Set-Cookie, and cookie-varying responses cannot enter it.
+Requests with Authorization cannot use it.
+A fragment from another build fails so the router can load a full page.
+Caches have entry limits: 24 pages, 150 static files, and 150 fragments per build.
+The offline page follows the saved or system theme.
 
 ## Two-build verification
 
-Run `pnpm db:local` first. Export its two environment lines for all browser and build commands below.
+Start the [local database](DATABASE.md#local-setup) and export its connection values.
+The harness builds two versions and serves them on one local HTTPS origin.
+It uses WebKit with an iPhone profile and standalone-mode emulation.
+It tests first install, cold starts, resume, navigation, repeated swaps, offline fallback, and damaged caches.
 
-`node scripts/pwa-swap-harness.mjs all` (or `build` then `suite`) runs the
-whole contract against two local production builds differing only in
-GITHUB_SHA, swapped on one origin behind a local TLS proxy, driven as an
-INSTALLED app: Playwright WebKit, iPhone profile, `navigator.standalone`,
-display-mode standalone, launched at the manifest start_url, logged in.
-This is installed-mode emulation, not an installed PWA on a physical device.
-Scenarios cover first install, cold start, cold start across a swap,
-foreground-resume across a swap, in-session navigation across a swap,
-three-cycle reload stability, offline cold start, and poisoned-cache repair.
-Negative controls — `--mutate no-swap | break-manifest | no-sw | flap-sw |
-flap-version-no-sw | break-precache | swallow-precache | bloat-storage` — each
-force a named check red. The harness writes temporary data under `.pwa-harness`.
-
-Remove `.pwa-harness`, generated `public/sw.js`, and test screenshots after verification.
-See `docs/pwa-cache-ledger.md` for measured results.
-
-## Performance measurement
-
-Serve a local production build with the local database, then measure it:
-
-```bash
-node scripts/perf-measure.mjs http://127.0.0.1:3000 --runs 3 --label baseline
+```sh
+node scripts/pwa-swap-harness.mjs all
+node scripts/pwa-swap-harness.mjs suite --mutate no-swap
 ```
 
-The command requires Lighthouse and a Playwright Chromium installation.
-Repeat with the same browser, origin, and run count to compare results.
-Reports go to `.pwa-harness/`; remove them after review.
+The normal run must pass; the no-swap control must fail.
+Other controls include break-manifest, no-sw, flap-sw, flap-version-no-sw, break-precache, swallow-precache, and bloat-storage.
+Keep failed controls separate from passing evidence.
+The harness writes temporary builds and output under `.pwa-harness/`.
+Remove its temporary files and generated worker after review.
 
-## Date and split overflow regression
+## Form and overflow checks
 
-`scripts/verify-mobile-overflow.mjs` checks a real local app with synthetic accounts.
-It rejects non-loopback origins and keeps credentials, measurements, and screenshots outside git.
-It uses the installed `playwright-core` browser engines.
+Create three synthetic accounts and a shared USD group through a disposable local app.
+Keep fixtures and evidence outside the checkout.
+Put the first account's username and password in `fixture-secrets.json`.
+Put the group ID in `fixture.json`, for example `{"groupId": 1}`.
+Use local HTTPS for a production server because its session cookie requires Secure.
 
-Prepare a separate local database with both migrations above, then create three synthetic
-accounts and one shared USD group through the local signup, group, and join APIs.
-Keep the first account's generated username/password in `fixture-secrets.json` and the
-numeric group ID in `fixture.json` (`{"groupId": 1}`), in a private directory outside git.
-Never use production credentials or database rows. For `next start`, use local HTTPS:
-WebKit requires HTTPS for the production session cookie. Trust only the test certificate.
-
-```bash
+```sh
 MOBILE_ORIGIN=https://127.0.0.1:3148 \
 MOBILE_FIXTURE_DIR=/absolute/path/to/local-fixture \
 MOBILE_EVIDENCE_DIR=/absolute/path/to/evidence/webkit \
 node scripts/verify-mobile-overflow.mjs
-# Repeat with MOBILE_ENGINE=chromium and a separate evidence directory.
-# To isolate layout from service-worker transport, use MOBILE_SERVICE_WORKERS=block.
-# Keep the default worker-enabled run and its failures as separate evidence.
 ```
 
-The check edits and saves real expenses and creates custom categories in this disposable group.
-It checks native date width, control boundaries, scrolling above the footer, keyboard access,
-all split modes, recurring and settlement forms, filters, settings, and navigation.
-It opens Add expense on Home, uses the current One person option, and confirms date persistence.
-For horizontal scrolling controls, it measures reachability and selects the notification filter.
-The 150% text case fails on the current-main date layout (162px for 185px of native segments). Weighted splits with long names fail
-at 320px before the fieldset minimum-width fix. Screenshots alone do not prove reachability.
-The 200% text case also checks that amount and currency labels do not overlap.
+Repeat with `MOBILE_ENGINE=chromium` and a separate evidence directory.
+The check saves real fixture expenses and creates categories.
+It covers date controls, splits, recurring forms, payments, settings, navigation, and chat Send.
+The default run permits service workers and fails on browser runtime errors.
+`MOBILE_SERVICE_WORKERS=block` isolates layout for diagnosis; it does not prove worker behavior.
+Check keyboard reachability as well as screenshots.
+WebKit uses Option-Tab to include buttons in keyboard navigation.
 
-The phone profile and `navigator.standalone` emulate layout only. Reduced viewport height
-simulates available keyboard space; it does not open an iPhone keyboard or native date picker.
-The default run allows service workers and fails on browser runtime errors.
-Blocking workers is a diagnostic comparison, not proof of the installed PWA lifecycle.
-Desktop WebKit can report worker/RSC request errors during route changes.
-Keep those failed receipts even when every layout and persistence assertion passes.
+For draft and theme changes, run the focused checks:
 
-The same check presses Send in a reduced-height chat viewport and verifies its position.
-Navigation must stay hidden through the pointer press, then the real message must save.
-WebKit on macOS uses Option-Tab (`Alt+Tab`) to include buttons in keyboard navigation.
+```sh
+pnpm exec vitest run src/lib/__tests__/draft-guard.test.ts src/lib/__tests__/theme.test.ts
+```
+
+## Physical iPhone check
+
+Use the deployed HTTPS app and synthetic data.
+
+1. Add the app to the Home Screen from Safari.
+2. Enable Open as Web App if offered.
+3. Launch the Home Screen app in portrait and landscape.
+4. Open a long conversation and scroll both ways.
+5. Focus the composer and confirm that the keyboard leaves Send reachable.
+6. Send a message and confirm that the page does not scroll.
+7. Dismiss the keyboard and check navigation above the Home indicator.
+8. Open an expense form and check its fields and actions above the Home indicator.
+9. Repeat with larger text after changes to mobile spacing.
+
+Desktop emulation does not prove native Safari, installed-app behavior, or physical keyboard layout.
+See [notification checks](NOTIFICATIONS.md#verification) for background alerts and tap destinations.

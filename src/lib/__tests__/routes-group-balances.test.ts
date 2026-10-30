@@ -17,7 +17,7 @@ describe("group balance list snapshot", () => {
   beforeEach(() => {
     sql.mockReset();
     jar.clear();
-    jar.set("sw_session", "session");
+    jar.set("sw_session", "a".repeat(64));
   });
 
   it("returns the version, cursor and bounded page from one request", async () => {

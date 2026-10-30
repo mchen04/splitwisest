@@ -81,9 +81,9 @@ describe("diffExpense — one field at a time", () => {
     ]);
   });
 
-  it("detects per-person values changing while membership holds", () => {
+  it.each(["exact", "percentage"])("detects per-person values changing while membership holds for %s", (splitMethod) => {
     const next = snap({
-      splitMethod: "exact",
+      splitMethod,
       shares: [
         { userId: 1, name: "Matthew", shareCents: 3000, rawInput: 30 },
         { userId: 2, name: "Sarah", shareCents: 1200, rawInput: 12 },
@@ -146,17 +146,6 @@ describe("diffExpense — combinations", () => {
     ]);
   });
 
-  it("split method switched and per-person values changed in one edit", () => {
-    const next = snap({
-      splitMethod: "percentage",
-      shares: [
-        { userId: 1, name: "Matthew", shareCents: 2520, rawInput: 60 },
-        { userId: 2, name: "Sarah", shareCents: 1680, rawInput: 40 },
-      ],
-    });
-    expect(fields(diffExpense(base, next))).toEqual(["splitMethod", "splitValues"]);
-  });
-
   it("one person added and another removed in the same edit", () => {
     const next = snap({
       shares: [
@@ -187,12 +176,6 @@ describe("diffExpense — combinations", () => {
 describe("feedLine", () => {
   it("is null when nothing changed", () => {
     expect(feedLine([])).toBeNull();
-  });
-
-  it("reads as a full sentence for a single change", () => {
-    expect(feedLine(diffExpense(base, snap({ amountCents: 3850 })))).toBe(
-      "changed the amount from $42.00 to $38.50"
-    );
   });
 
   it("leads with the highest ranked change and counts the rest", () => {

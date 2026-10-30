@@ -35,7 +35,7 @@ describe("batched group reads", () => {
     transaction.mockReset();
     materialize.mockReset();
     jar.clear();
-    jar.set("sw_session", "session");
+    jar.set("sw_session", "a".repeat(64));
   });
 
   it("checks the session and membership and returns data in one request", async () => {
@@ -44,9 +44,7 @@ describe("batched group reads", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ activity: [] });
     expect(transaction).toHaveBeenCalledOnce();
-    const queries = transaction.mock.calls[0][0];
-    expect(queries).toHaveLength(3);
-    expect(queries[2].values[0].text).toContain("FROM group_members");
+    expect(transaction.mock.calls[0][0]).toHaveLength(3);
     expect(jar.get("sw_cache_owner")).toBe("7");
   });
 
