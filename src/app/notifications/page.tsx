@@ -58,7 +58,7 @@ function InboxPage() {
             <CheckCheck className="h-4 w-4" /> Mark all read
           </Button>
         )}
-        <Link prefetch={false} href="/settings#notifications" aria-label="Notification settings" title="Notification settings"
+        <Link href="/settings#notifications" aria-label="Notification settings" title="Notification settings"
           className="inline-flex h-[var(--control-h)] w-[var(--control-h)] items-center justify-center rounded-lg text-ink-soft hover:bg-subtle hover:text-ink">
           <Settings className="h-4.5 w-4.5" />
         </Link>
@@ -74,7 +74,7 @@ function InboxPage() {
         : <Card className="shrink-0 divide-y divide-line overflow-hidden">
           {data.notifications.map((n) => <div key={n.id} className="flex items-start gap-2 py-2 pl-3 pr-1.5 sm:pl-4">
             <span className={`mt-2 h-2 w-2 shrink-0 rounded-full ${n.readAt ? "bg-transparent" : "bg-accent"}`} aria-hidden="true" />
-            <Link prefetch={false} href={`/notifications/${n.id}`} className="min-w-0 flex-1 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+            <Link href={`/notifications/${n.id}`} className="min-w-0 flex-1 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
               <span className="sr-only">{n.readAt ? "Read" : "Unread"}</span>
               <p className={`text-row ${n.readAt ? "font-medium text-ink-soft" : "font-semibold text-ink"}`}>{n.title}</p>
               <p className="break-words text-body text-ink-soft">{n.body}</p>

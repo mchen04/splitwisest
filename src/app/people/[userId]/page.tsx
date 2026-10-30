@@ -87,7 +87,7 @@ export default function PersonPage({ params }: { params: Promise<{ userId: strin
           <EmptyState
             title="Profile not available"
             hint="You can only view yourself, friends, pending requests, and people who share a group with you."
-            action={<Link prefetch={false} href="/balances"><Button variant="secondary"><ArrowLeft className="h-4 w-4" /> Friends</Button></Link>}
+            action={<Link href="/balances"><Button variant="secondary"><ArrowLeft className="h-4 w-4" /> Friends</Button></Link>}
           />
         </Card>
       </AppShell>
@@ -169,7 +169,7 @@ export default function PersonPage({ params }: { params: Promise<{ userId: strin
                   <ul className="divide-y divide-line">
                     {profile.sharedGroups.map((g) => (
                       <li key={g.id}>
-                        <Link prefetch={false} href={`/groups/${g.id}`} className={`group-hue-${g.id % 6} flex min-h-[var(--control-h)] items-center gap-3 px-4 py-1.5 hover:bg-subtle`}>
+                        <Link href={`/groups/${g.id}`} className={`group-hue-${g.id % 6} flex min-h-[var(--control-h)] items-center gap-3 px-4 py-1.5 hover:bg-subtle`}>
                           <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[var(--group-soft)] text-[var(--group-ink)]">
                             <Users className="h-3.5 w-3.5" />
                           </span>
@@ -280,7 +280,7 @@ function ProfileActions({
   } else if (iOweThem && canSettle) {
     primary = <Button onClick={() => onSettle(-1)}><HandCoins className="h-4 w-4" /> Settle up</Button>; used = "settle";
   } else if (profile.canChat) {
-    primary = <Link prefetch={false} href={dmHref}><Button><MessageSquare className="h-4 w-4" /> Chat</Button></Link>; used = "chat";
+    primary = <Link href={dmHref}><Button><MessageSquare className="h-4 w-4" /> Chat</Button></Link>; used = "chat";
   } else if (profile.canRequestFriend) {
     primary = <Button onClick={onRequest}><UserPlus className="h-4 w-4" /> Add friend</Button>; used = "request";
   }
@@ -326,7 +326,7 @@ function HistoryList({ profile, meId, query }: { profile: PersonProfile; meId: n
     <ul className="divide-y divide-line">
       {rows.map((row) => row.type === "expense" ? (
         <li key={row.key}>
-          <Link prefetch={false} href={`/groups/${row.item.groupId}?expense=${row.item.id}`} className="flex min-h-[var(--row-h)] items-center gap-3 px-4 py-2 hover:bg-subtle">
+          <Link href={`/groups/${row.item.groupId}?expense=${row.item.id}`} className="flex min-h-[var(--row-h)] items-center gap-3 px-4 py-2 hover:bg-subtle">
             <Receipt className="h-4 w-4 shrink-0 text-accent" />
             <span className="min-w-0 flex-1">
               <RowTitle>{row.item.title}</RowTitle>

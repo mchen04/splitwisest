@@ -127,7 +127,7 @@ export default function ExpensesPage() {
               return (
                 <li key={e.id}>
                   {newMonth && <SectionLabel className="border-b border-line bg-subtle px-4 py-1">{month}</SectionLabel>}
-                  <Link prefetch={false} href={`/groups/${e.groupId}?expense=${e.id}`} className="flex min-h-[var(--row-h)] items-center gap-3 border-b border-line px-4 py-1.5 hover:bg-subtle">
+                  <Link href={`/groups/${e.groupId}?expense=${e.id}`} className="flex min-h-[var(--row-h)] items-center gap-3 border-b border-line px-4 py-1.5 hover:bg-subtle">
                     <span className="min-w-0 flex-1">
                       <span className="flex min-w-0 items-center gap-2">
                         <RowTitle className="min-w-0">{e.title}</RowTitle>

@@ -57,10 +57,10 @@ export default function LoginPage() {
         </Button>
       </form>
       <div className="mt-4 flex items-center justify-between text-body">
-        <Link prefetch={false} href="/recover" className="whitespace-nowrap text-ink-soft hover:text-accent">
+        <Link href="/recover" className="whitespace-nowrap text-ink-soft hover:text-accent">
           Forgot password?
         </Link>
-        <Link prefetch={false} href="/signup" className="whitespace-nowrap font-semibold text-accent hover:text-accent-dark">
+        <Link href="/signup" className="whitespace-nowrap font-semibold text-accent hover:text-accent-dark">
           Create account
         </Link>
       </div>

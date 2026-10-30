@@ -147,7 +147,7 @@ function DirectSettleForm({
             {/* This records the whole balance. Paying part of a group balance is
                 the group's own Settle up form, opened with the same two people. */}
             {!existing && obligation.groupId !== null && me && (
-              <Link prefetch={false}
+              <Link
                 href={`/groups/${obligation.groupId}?settle=partial&payer=${obligation.netCents < 0 ? me.id : friend.id}&recipient=${obligation.netCents < 0 ? friend.id : me.id}`}
                 className="-ml-1 mt-0.5 inline-flex min-h-[var(--control-h-sm)] items-center rounded-lg px-1 text-body font-medium text-accent hover:bg-accent-soft"
               >

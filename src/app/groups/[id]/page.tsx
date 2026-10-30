@@ -343,7 +343,7 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
     return (
       <AppShell title="Group">
         {query}
-        <EmptyState title={loadError} action={<Link prefetch={false} href="/groups"><Button variant="secondary">Back to groups</Button></Link>} />
+        <EmptyState title={loadError} action={<Link href="/groups"><Button variant="secondary">Back to groups</Button></Link>} />
       </AppShell>
     );
   }
@@ -410,9 +410,9 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
 
   const suggestionText = (s: { from: number; to: number }) => (
     <>
-      <Link prefetch={false} href={`/people/${s.from}`} className="font-semibold hover:text-accent-dark hover:underline">{s.from === me?.id ? "You" : memberName(s.from)}</Link>
+      <Link href={`/people/${s.from}`} className="font-semibold hover:text-accent-dark hover:underline">{s.from === me?.id ? "You" : memberName(s.from)}</Link>
       {s.from === me?.id ? " pay " : " should pay "}
-      <Link prefetch={false} href={`/people/${s.to}`} className="font-semibold hover:text-accent-dark hover:underline">{s.to === me?.id ? "you" : memberName(s.to)}</Link>
+      <Link href={`/people/${s.to}`} className="font-semibold hover:text-accent-dark hover:underline">{s.to === me?.id ? "you" : memberName(s.to)}</Link>
     </>
   );
 
@@ -821,9 +821,9 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
                   <HandCoins className="h-4 w-4 shrink-0 text-owed" />
                   <span className="min-w-0 flex-1">
                     <span className="block text-body">
-                      <Link prefetch={false} href={`/people/${s.payerId}`} className="font-semibold hover:text-accent-dark hover:underline">{s.payerName}</Link>{" "}
+                      <Link href={`/people/${s.payerId}`} className="font-semibold hover:text-accent-dark hover:underline">{s.payerName}</Link>{" "}
                       paid{" "}
-                      <Link prefetch={false} href={`/people/${s.recipientId}`} className="font-semibold hover:text-accent-dark hover:underline">{s.recipientName}</Link>
+                      <Link href={`/people/${s.recipientId}`} className="font-semibold hover:text-accent-dark hover:underline">{s.recipientName}</Link>
                     </span>
                     <RowMeta>
                       {fmtDate(s.date)}
@@ -1061,7 +1061,7 @@ function MemberNets({ balances, currency, meId, compact = false }: {
     <ul className="divide-y divide-line">
       {balances.map((b) => (
         <li key={b.userId}>
-          <Link prefetch={false} href={`/people/${b.userId}`} className={`flex min-h-[var(--control-h)] items-center gap-2 hover:bg-subtle ${compact ? "px-3 py-1" : "px-4 py-1.5"}`}>
+          <Link href={`/people/${b.userId}`} className={`flex min-h-[var(--control-h)] items-center gap-2 hover:bg-subtle ${compact ? "px-3 py-1" : "px-4 py-1.5"}`}>
             <Avatar name={b.displayName} size="sm" />
             <span className={`min-w-0 flex-1 truncate font-medium ${compact ? "text-body" : "text-row"}`} title={b.displayName}>
               {b.displayName}{b.userId === meId && !compact ? " (you)" : ""}
@@ -1185,7 +1185,7 @@ function GroupSwitcher({
             {groups.length === 0 ? (
               <p role="status" className="px-3 py-2.5 text-body text-ink-faint">Loading groups…</p>
             ) : groups.map((g) => (
-              <Link prefetch={false}
+              <Link
                 key={g.id}
                 href={`/groups/${g.id}`}
                 role="option"
@@ -1208,7 +1208,7 @@ function GroupSwitcher({
               </Link>
             ))}
           </div>
-          <Link prefetch={false} href="/groups" className="mt-1 flex min-h-[var(--control-h)] items-center border-t border-line px-3 text-body font-medium text-accent hover:bg-subtle">
+          <Link href="/groups" className="mt-1 flex min-h-[var(--control-h)] items-center border-t border-line px-3 text-body font-medium text-accent hover:bg-subtle">
             All groups
           </Link>
         </div>

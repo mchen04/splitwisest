@@ -78,7 +78,7 @@ export default function ActivityPage() {
                       <p className="text-meta text-ink-faint">
                         {/* The group opens on its own activity, where this event sits in context. */}
                         {a.groupName && a.groupId ? (
-                          <><Link prefetch={false} href={`/groups/${a.groupId}?tab=activity`} className="font-medium text-ink-soft hover:text-accent-dark hover:underline">{a.groupName}</Link>{" · "}</>
+                          <><Link href={`/groups/${a.groupId}?tab=activity`} className="font-medium text-ink-soft hover:text-accent-dark hover:underline">{a.groupName}</Link>{" · "}</>
                         ) : a.groupName ? `${a.groupName} · ` : ""}
                         <time dateTime={a.createdAt} title={fmtTime(a.createdAt)}>{timeOnly(a.createdAt)}</time>
                       </p>

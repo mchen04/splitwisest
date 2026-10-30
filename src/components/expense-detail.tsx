@@ -181,7 +181,7 @@ export function ExpenseDetailModal({
             </div>
             <p className="text-body text-ink-soft">
               Paid by{" "}
-              <Link prefetch={false} href={`/people/${detail.payerId}`} className="font-semibold hover:text-accent-dark hover:underline">
+              <Link href={`/people/${detail.payerId}`} className="font-semibold hover:text-accent-dark hover:underline">
                 {detail.shares.find((s) => s.userId === detail.payerId)?.displayName
                   ?? (detail.payerId === meId ? "you" : "a member")}
               </Link>
@@ -194,11 +194,11 @@ export function ExpenseDetailModal({
             <ul className="divide-y divide-line rounded-lg border border-line">
               {detail.shares.map((s) => (
                 <li key={s.userId} className="flex min-h-10 items-center gap-2.5 px-3 py-1.5 text-body">
-                  <Link prefetch={false} href={`/people/${s.userId}`} aria-label={`Open ${s.displayName}'s profile`}>
+                  <Link href={`/people/${s.userId}`} aria-label={`Open ${s.displayName}'s profile`}>
                     <Avatar name={s.displayName} size="sm" />
                   </Link>
                   <span className="min-w-0 flex-1 truncate">
-                    <Link prefetch={false} href={`/people/${s.userId}`} className="hover:text-accent-dark hover:underline">
+                    <Link href={`/people/${s.userId}`} className="hover:text-accent-dark hover:underline">
                       {s.displayName}{s.userId === meId ? " (you)" : ""}
                     </Link>
                   </span>
@@ -288,12 +288,12 @@ export function ExpenseDetailModal({
               <ul className="space-y-2.5">
                 {edits.map((e) => (
                   <li key={e.id} className="flex items-start gap-2.5">
-                    <Link prefetch={false} href={`/people/${e.actorId}`} aria-label={`Open ${e.actorName}'s profile`}>
+                    <Link href={`/people/${e.actorId}`} aria-label={`Open ${e.actorName}'s profile`}>
                       <Avatar name={e.actorName} size="sm" />
                     </Link>
                     <div className="min-w-0 flex-1">
                       <p className="text-body">
-                        <Link prefetch={false} href={`/people/${e.actorId}`} className="font-medium hover:text-accent-dark hover:underline">
+                        <Link href={`/people/${e.actorId}`} className="font-medium hover:text-accent-dark hover:underline">
                           {e.actorId === meId ? "You" : e.actorName}
                         </Link>{" "}
                         <span className="text-meta text-ink-faint">{fmtTime(e.createdAt)}</span>
@@ -330,12 +330,12 @@ export function ExpenseDetailModal({
               <ul className="space-y-2.5">
                 {comments.map((c) => (
                   <li key={c.id} className="flex items-start gap-2.5">
-                    <Link prefetch={false} href={`/people/${c.authorId}`} aria-label={`Open ${c.authorName}'s profile`}>
+                    <Link href={`/people/${c.authorId}`} aria-label={`Open ${c.authorName}'s profile`}>
                       <Avatar name={c.authorName} size="sm" />
                     </Link>
                     <div className="min-w-0 flex-1">
                       <p className="text-body">
-                        <Link prefetch={false} href={`/people/${c.authorId}`} className="font-medium hover:text-accent-dark hover:underline">
+                        <Link href={`/people/${c.authorId}`} className="font-medium hover:text-accent-dark hover:underline">
                           {c.authorId === meId ? "You" : c.authorName}
                         </Link>{" "}
                         <span className="text-meta text-ink-faint">{fmtTime(c.createdAt)}</span>

@@ -1,6 +1,3 @@
-import { readFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
-import ts from "typescript";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const hooks = vi.hoisted(() => ({ cleanups: [] as (() => void)[], updates: vi.fn(), initialValues: [] as unknown[] }));
@@ -293,30 +290,5 @@ describe("other background requests", () => {
     } else emit("focus");
     await vi.advanceTimersByTimeAsync(100);
     expect(testRequests()).toHaveLength(hidden ? 1 : 2);
-  });
-
-  it("disables speculative navigation requests on client links", () => {
-    const links: string[] = [];
-    function checkDirectory(directory: string) {
-      for (const entry of readdirSync(directory, { withFileTypes: true })) {
-        const path = join(directory, entry.name);
-        if (entry.isDirectory()) checkDirectory(path);
-        else if (entry.name.endsWith(".tsx")) {
-          const file = ts.createSourceFile(path, readFileSync(path, "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-          function visit(node: ts.Node) {
-            if ((ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) && node.tagName.getText(file) === "Link") {
-              links.push(path);
-              const prefetch = node.attributes.properties.find((attribute) => ts.isJsxAttribute(attribute) && attribute.name.getText(file) === "prefetch");
-              expect(prefetch?.getText(file), path).toBe("prefetch={false}");
-            }
-            ts.forEachChild(node, visit);
-          }
-          visit(file);
-        }
-      }
-    }
-    checkDirectory("src/app");
-    checkDirectory("src/components");
-    expect(links.length).toBeGreaterThan(30);
   });
 });

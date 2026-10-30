@@ -78,7 +78,7 @@ export default function SignupPage() {
       </form>
       <p className="mt-4 text-center text-body text-ink-soft">
         Already have an account?{" "}
-        <Link prefetch={false} href="/login" className="font-semibold text-accent hover:text-accent-dark">
+        <Link href="/login" className="font-semibold text-accent hover:text-accent-dark">
           Log in
         </Link>
       </p>

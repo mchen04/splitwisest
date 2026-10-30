@@ -239,14 +239,14 @@ function ChatPageInner() {
             ) : (
               <Avatar name={selected.name} size="sm" />
             )}
-            <Link prefetch={false}
+            <Link
               href={selected.kind === "group" ? `/groups/${selected.id}` : `/people/${selected.id}`}
               className="group/title flex min-h-[var(--control-h-sm)] min-w-0 flex-1 flex-col justify-center rounded-lg"
             >
               <span className="block truncate text-row font-semibold group-hover/title:text-accent-dark group-hover/title:underline">{selected.name}</span>
               <span className="truncate text-meta text-ink-faint">{selected.subtitle}</span>
             </Link>
-            <Link prefetch={false}
+            <Link
               href={selected.kind === "group" ? `/groups/${selected.id}` : `/people/${selected.id}`}
               className="inline-flex min-h-[var(--control-h-sm)] shrink-0 items-center rounded-lg border border-line px-2.5 text-body font-medium text-ink-soft hover:border-accent hover:text-accent-dark"
             >

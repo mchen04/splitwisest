@@ -46,7 +46,7 @@ export default function RecoverPage() {
         <Button type="submit" busy={busy} className="w-full">Reset password</Button>
       </form>
       <p className="mt-4 text-center text-body">
-        <Link prefetch={false} href="/login" className="font-semibold text-accent hover:text-accent-dark">Back to log in</Link>
+        <Link href="/login" className="font-semibold text-accent hover:text-accent-dark">Back to log in</Link>
       </p>
     </AuthFrame>
   );
