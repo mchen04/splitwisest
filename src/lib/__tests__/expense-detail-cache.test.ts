@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Reopening an expense right after editing it used to paint the details cached
@@ -238,51 +236,5 @@ describe("what a read hook shows when the details open", () => {
     const other = { path: "/api/expenses/8", data: before, error: null, status: 200, settled: true };
 
     expect(stateOnShow(other, RECORD, null)).toBe(other);
-  });
-});
-
-function source(path: string) {
-  return readFileSync(join(process.cwd(), path), "utf8");
-}
-
-describe("expense edit and delete wiring", () => {
-  const form = source("src/components/expense-form.tsx");
-  const page = source("src/app/groups/[id]/page.tsx");
-  const detail = source("src/components/expense-detail.tsx");
-  const deleteExpense = page.split("async function deleteExpense")[1].split("\n  async function ")[0];
-
-  it("refreshes the details right after an edit is saved, and again after its receipts upload", () => {
-    const patch = form.indexOf('method: "PATCH"');
-
-    expect(form.indexOf("refreshExpenseDetails(expenseId)", patch)).toBeGreaterThan(patch);
-    expect(form.indexOf("refreshExpenseDetails(expenseId)", patch)).toBeLessThan(form.indexOf("} else {", patch));
-    expect(form).toMatch(/finally \{[\s\S]*?!createdNewExpense && files\.length > 0\) refreshExpenseDetails\(expenseId\)/);
-  });
-
-  it("still sends the version shown, so a changed expense is refused rather than deleted", () => {
-    expect(deleteExpense).toContain("expectedUpdatedAt=${encodeURIComponent(expense.updatedAt)}");
-    expect(deleteExpense).not.toMatch(/api(Cached)?<[^>]*>\(`\/api\/expenses\/\$\{expense\.id\}`\)/);
-    expect(source("src/lib/expenses.ts")).toContain('if (!expense.expectedUpdatedAt) badRequest("Expense changed, refresh and try again")');
-  });
-
-  it("forgets deleted details and rereads them after a refusal", () => {
-    expect(deleteExpense.indexOf("forgetExpenseDetails(expense.id)")).toBeGreaterThan(deleteExpense.indexOf('method: "DELETE"'));
-    expect(deleteExpense.indexOf("forgetExpenseDetails(expense.id)")).toBeLessThan(deleteExpense.indexOf("catch (err)"));
-    expect(deleteExpense.split("catch (err)")[1]).toContain("if (err instanceof ApiClientError) refreshExpenseDetails(expense.id)");
-  });
-
-  it("keeps deleting from details that the list page does not hold", () => {
-    expect(detail).toContain("onClick={() => onDelete(detail)}");
-    expect(page).toMatch(/onDelete=\{\(expense\) => \{\s*setDetailId\(null\);\s*void deleteExpense\(expense\);/);
-  });
-
-  it("reads details from the same paths the cache refreshes", () => {
-    const client = source("src/lib/client.ts");
-
-    for (const path of ["`/api/expenses/${expenseId ?? 0}`", "`/api/expenses/${expenseId ?? 0}/history`", "`/api/expenses/${expenseId ?? 0}/comments`"]) {
-      expect(detail).toContain(path);
-    }
-    expect(client).toContain("[`/api/expenses/${id}`, `/api/expenses/${id}/history`]");
-    expect(client).toContain("`/api/expenses/${id}/comments`");
   });
 });

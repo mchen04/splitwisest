@@ -30,6 +30,13 @@ import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+process.env.DATABASE_URL ??= "postgres://postgres:postgres@127.0.0.1:5433/splitwisest";
+process.env.NEON_LOCAL_PROXY ??= "http://127.0.0.1:4444/sql";
+for (const key of ["DATABASE_URL", "NEON_LOCAL_PROXY"]) {
+  if (!["localhost", "127.0.0.1", "[::1]", "db.localtest.me"].includes(new URL(process.env[key]).hostname)) {
+    throw new Error(`${key} must use a local host. Run pnpm db:local and use its environment lines.`);
+  }
+}
 const HDIR = join(ROOT, ".pwa-harness");
 const NEXT_DIR = join(ROOT, ".next");
 const SHAS = { A: "a".repeat(40), B: "b".repeat(40) };
@@ -961,7 +968,6 @@ function buildOldSlot(ref) {
   if (res.status !== 0) throw new Error("worktree add failed");
   res = spawnSync("pnpm", ["install"], { cwd: oldTree, stdio: "inherit" });
   if (res.status !== 0) throw new Error("pnpm install in old tree failed");
-  writeFileSync(join(oldTree, ".env.local"), readFileSync(join(ROOT, ".env.local")));
   res = spawnSync("pnpm", ["build"], {
     cwd: oldTree,
     env: { ...process.env, GITHUB_SHA: "c".repeat(40) },

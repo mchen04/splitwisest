@@ -1,15 +1,11 @@
-import { neon } from "@neondatabase/serverless";
-import { existsSync, readFileSync } from "node:fs";
-import { loadEnvFile } from "node:process";
+import { readFileSync } from "node:fs";
 import { applyGuardedMigration } from "./apply-migration";
 import { planMigration } from "./migration-guard";
 
-if (existsSync(".env.local")) loadEnvFile(".env.local");
 const plan = planMigration(readFileSync(new URL("./notifications.sql", import.meta.url), "utf8"));
 
 async function main() {
-  await import("../src/lib/neon-local");
-  const sql = neon(process.env.DATABASE_URL!);
+  const { sql } = await import("../src/lib/db");
   await applyGuardedMigration(sql, "notifications", plan);
   const [tables, triggers] = await sql.transaction((tx) => [
     tx`SELECT count(*)::int AS count FROM information_schema.tables
@@ -23,4 +19,7 @@ async function main() {
   if (tables[0].count !== 4 || triggers[0].count !== 7) throw new Error("Notification schema readback failed");
   console.log("Notification schema verified: four tables and seven triggers. No activity backfill.");
 }
-main().catch(() => { console.error("Notification migration failed; transaction rolled back. Check database configuration."); process.exitCode = 1; });
+main().catch((error: unknown) => {
+  console.error(error instanceof Error ? error.message : "Notification migration failed.");
+  process.exitCode = 1;
+});

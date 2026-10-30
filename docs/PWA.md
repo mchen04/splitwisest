@@ -124,6 +124,8 @@ Caching (`src/sw/sw.template.js`):
 
 ## Two-build verification
 
+Run `pnpm db:local` first. Export its two environment lines for all browser and build commands below.
+
 `node scripts/pwa-swap-harness.mjs all` (or `build` then `suite`) runs the
 whole contract against two local production builds differing only in
 GITHUB_SHA, swapped on one origin behind a local TLS proxy, driven as an
@@ -139,6 +141,18 @@ force a named check red. The harness writes temporary data under `.pwa-harness`.
 
 Remove `.pwa-harness`, generated `public/sw.js`, and test screenshots after verification.
 See `docs/pwa-cache-ledger.md` for measured results.
+
+## Performance measurement
+
+Serve a local production build with the local database, then measure it:
+
+```bash
+node scripts/perf-measure.mjs http://127.0.0.1:3000 --runs 3 --label baseline
+```
+
+The command requires Lighthouse and a Playwright Chromium installation.
+Repeat with the same browser, origin, and run count to compare results.
+Reports go to `.pwa-harness/`; remove them after review.
 
 ## Date and split overflow regression
 

@@ -16,6 +16,9 @@ if (!origin) {
   console.error("usage: perf-measure.mjs <origin> [--runs N] [--label name]");
   process.exit(2);
 }
+if (!["localhost", "127.0.0.1", "[::1]"].includes(new URL(origin).hostname)) {
+  throw new Error("Use a local app started with the environment from pnpm db:local.");
+}
 const argv = process.argv.slice(3);
 const flag = (name, dflt) => {
   const i = argv.indexOf(`--${name}`);

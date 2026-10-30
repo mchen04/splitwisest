@@ -6,6 +6,8 @@
     "dev": "next dev",
     "build": "tsx scripts/generate-sw.ts && next build",
     "start": "next start",
+    "db:local": "tsx scripts/db-local.ts",
+    "db:local:down": "tsx scripts/db-local.ts down",
     "lint": "eslint",
     "verify:ui-tokens": "tsx scripts/check-ui-tokens.ts",
     "verify:core": "tsx scripts/verify-core-flows.ts",
