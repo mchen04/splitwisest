@@ -76,7 +76,7 @@ function MobileNavLink({ href, label, icon: Icon, badge, active, count }: {
   href: string; label: string; icon: typeof LayoutDashboard; badge?: BadgeKey; active: boolean; count: number;
 }) {
   return (
-    <Link
+    <Link prefetch={false}
       href={href}
       aria-current={active ? "page" : undefined}
       aria-label={badge && count > 0 ? `${label}, ${count > 9 ? "9+" : count} ${BADGE_WORDS[badge]}` : label}
@@ -116,7 +116,7 @@ export function AppShell({ title, children }: { title?: string; children: ReactN
 
   useEffect(() => {
     if (!me) return;
-    const refresh = () => { void syncExistingPush(me.id).catch(() => {}); };
+    const refresh = () => { if (!document.hidden) void syncExistingPush(me.id).catch(() => {}); };
     refresh();
     window.addEventListener("pageshow", refresh);
     window.addEventListener("focus", refresh);
@@ -221,7 +221,7 @@ export function AppShell({ title, children }: { title?: string; children: ReactN
                     : "text-ink-soft hover:bg-subtle hover:text-ink"
                 }`}
               >
-                <Link href={href} aria-current={isActive(href) ? "page" : undefined} className="flex min-h-[var(--nav-h)] min-w-0 flex-1 items-center gap-2.5 px-2.5 py-1.5 text-body font-medium">
+                <Link prefetch={false} href={href} aria-current={isActive(href) ? "page" : undefined} className="flex min-h-[var(--nav-h)] min-w-0 flex-1 items-center gap-2.5 px-2.5 py-1.5 text-body font-medium">
                   <Icon className="h-4 w-4 shrink-0" />
                   <span className="flex-1 truncate">{label}</span>
                   {badge && <Badge count={unread[badge]} />}

@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Bell, Smartphone } from "lucide-react";
-import { api, fmtTime, useMe } from "@/lib/client";
+import { api, fmtTime, useMe, useSync } from "@/lib/client";
 import { NOTIFICATION_CATEGORIES, type NotificationPreferences, type NotificationSettings } from "@/lib/notification-types";
 import { devicePushStatus, disablePush, enablePush, type DevicePushStatus } from "@/lib/push-client";
 import { Button, Card, CardHeader, ErrorNote, HeaderLink } from "./ui";
@@ -30,29 +30,35 @@ export function NotificationSettingsCard() {
     setDevice(await devicePushStatus(next.publicKey));
   }, []);
   useEffect(() => {
-    const refresh = () => { void reload().catch(() => setError("Could not load notification settings. Try again.")); };
+    const refresh = () => {
+      if (!document.hidden) void reload().catch(() => setError("Could not load notification settings. Try again."));
+    };
     refresh();
     window.addEventListener("focus", refresh);
-    return () => window.removeEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
   }, [reload]);
 
-  useEffect(() => {
-    if (!testId) return;
-    let active = true;
-    const poll = async () => {
-      try {
-        const result = await api<{ state: string; attempts: number }>(`/api/push/test?id=${testId}`);
-        if (!active) return;
+  const pendingTest = useRef<number | null>(null);
+  useEffect(() => () => { pendingTest.current = null; }, [testId]);
+  useSync(testId ? () => {
+    if (pendingTest.current === testId) return;
+    pendingTest.current = testId;
+    void api<{ state: string; attempts: number }>(`/api/push/test?id=${testId}`)
+      .then((result) => {
+        if (pendingTest.current !== testId) return;
         if (result.state === "sent") {
           setNotice("Push service accepted the test. Confirm arrival and tap it on this device."); setTestId(null);
         } else if (result.state === "failed" || result.state === "skipped") {
           setError("The test could not reach this device. Turn notifications off and on, then try again."); setTestId(null);
         } else if (result.attempts > 0) setNotice("The test is waiting for delivery. It will retry automatically.");
-      } catch { /* The next poll handles a short connection loss. */ }
-    };
-    const timer = window.setInterval(() => void poll(), 3000);
-    return () => { active = false; window.clearInterval(timer); };
-  }, [testId]);
+      })
+      .catch(() => {})
+      .finally(() => { if (pendingTest.current === testId) pendingTest.current = null; });
+  } : undefined, true);
 
   async function act(work: () => Promise<unknown>, success: string) {
     if (busy) return;

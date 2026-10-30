@@ -214,7 +214,7 @@ export default function Dashboard() {
               <ul className="divide-y divide-line">
                 {groups.map((g) => (
                   <li key={g.id}>
-                    <Link href={`/groups/${g.id}`} className={`group-hue-${g.id % 6} flex min-h-[var(--row-h)] items-center gap-3 px-4 py-2 hover:bg-subtle`}>
+                    <Link prefetch={false} href={`/groups/${g.id}`} className={`group-hue-${g.id % 6} flex min-h-[var(--row-h)] items-center gap-3 px-4 py-2 hover:bg-subtle`}>
                       <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--group-soft)] text-[var(--group-ink)]">
                         <Users className="h-4 w-4" />
                       </span>
@@ -290,7 +290,7 @@ function GroupChips({ groups, error, onRetry }: { groups: Group[] | null; error:
         </Link>
       ) : (
         groups.map((g) => (
-          <Link
+          <Link prefetch={false}
             key={g.id}
             href={`/groups/${g.id}`}
             aria-label={`${g.name}, ${g.myNetCents === 0 ? "settled" : `${g.myNetCents > 0 ? "you're owed" : "you owe"} ${fmtMoney(Math.abs(g.myNetCents), g.currency)}`}`}

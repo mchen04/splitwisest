@@ -25,6 +25,6 @@ export default function OpenNotification() {
   }, [id, router]);
   return <AppShell title="Open notification"><p role={error ? "alert" : "status"} className="py-4 text-body text-ink-soft">
     {error ? "This notification is unavailable, or your connection was interrupted." : "Opening notification…"}</p>
-    {error && <Link href="/notifications" className="inline-flex min-h-[var(--control-h)] items-center text-body font-semibold text-accent">Back to notifications</Link>}
+    {error && <Link prefetch={false} href="/notifications" className="inline-flex min-h-[var(--control-h)] items-center text-body font-semibold text-accent">Back to notifications</Link>}
   </AppShell>;
 }

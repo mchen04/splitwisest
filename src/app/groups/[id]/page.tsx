@@ -105,13 +105,14 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
     api<{ detail: string; list: string; recurringDue: boolean }>(`/api/groups/${tickGroup}/version`)
       .then((v) => {
         const now = latest.current;
-        if (now.groupId !== tickGroup) return;
+        if (document.hidden || now.groupId !== tickGroup) return;
         if (!now.detailSettled) deferred.current.detail = { version: v.detail, due: v.recurringDue };
         else if (v.recurringDue || v.detail !== now.detail?.version) pollBalancePreview();
         if (!now.listSettled) deferred.current.list = v.list;
         else if (v.list !== now.list?.version) pollGroupBalanceList();
       })
       .catch(() => {
+        if (document.hidden) return;
         pollBalancePreview();
         pollGroupBalanceList();
       })
@@ -342,7 +343,7 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
     return (
       <AppShell title="Group">
         {query}
-        <EmptyState title={loadError} action={<Link href="/groups"><Button variant="secondary">Back to groups</Button></Link>} />
+        <EmptyState title={loadError} action={<Link prefetch={false} href="/groups"><Button variant="secondary">Back to groups</Button></Link>} />
       </AppShell>
     );
   }
@@ -409,9 +410,9 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
 
   const suggestionText = (s: { from: number; to: number }) => (
     <>
-      <Link href={`/people/${s.from}`} className="font-semibold hover:text-accent-dark hover:underline">{s.from === me?.id ? "You" : memberName(s.from)}</Link>
+      <Link prefetch={false} href={`/people/${s.from}`} className="font-semibold hover:text-accent-dark hover:underline">{s.from === me?.id ? "You" : memberName(s.from)}</Link>
       {s.from === me?.id ? " pay " : " should pay "}
-      <Link href={`/people/${s.to}`} className="font-semibold hover:text-accent-dark hover:underline">{s.to === me?.id ? "you" : memberName(s.to)}</Link>
+      <Link prefetch={false} href={`/people/${s.to}`} className="font-semibold hover:text-accent-dark hover:underline">{s.to === me?.id ? "you" : memberName(s.to)}</Link>
     </>
   );
 
@@ -820,9 +821,9 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
                   <HandCoins className="h-4 w-4 shrink-0 text-owed" />
                   <span className="min-w-0 flex-1">
                     <span className="block text-body">
-                      <Link href={`/people/${s.payerId}`} className="font-semibold hover:text-accent-dark hover:underline">{s.payerName}</Link>{" "}
+                      <Link prefetch={false} href={`/people/${s.payerId}`} className="font-semibold hover:text-accent-dark hover:underline">{s.payerName}</Link>{" "}
                       paid{" "}
-                      <Link href={`/people/${s.recipientId}`} className="font-semibold hover:text-accent-dark hover:underline">{s.recipientName}</Link>
+                      <Link prefetch={false} href={`/people/${s.recipientId}`} className="font-semibold hover:text-accent-dark hover:underline">{s.recipientName}</Link>
                     </span>
                     <RowMeta>
                       {fmtDate(s.date)}
@@ -1060,7 +1061,7 @@ function MemberNets({ balances, currency, meId, compact = false }: {
     <ul className="divide-y divide-line">
       {balances.map((b) => (
         <li key={b.userId}>
-          <Link href={`/people/${b.userId}`} className={`flex min-h-[var(--control-h)] items-center gap-2 hover:bg-subtle ${compact ? "px-3 py-1" : "px-4 py-1.5"}`}>
+          <Link prefetch={false} href={`/people/${b.userId}`} className={`flex min-h-[var(--control-h)] items-center gap-2 hover:bg-subtle ${compact ? "px-3 py-1" : "px-4 py-1.5"}`}>
             <Avatar name={b.displayName} size="sm" />
             <span className={`min-w-0 flex-1 truncate font-medium ${compact ? "text-body" : "text-row"}`} title={b.displayName}>
               {b.displayName}{b.userId === meId && !compact ? " (you)" : ""}
@@ -1184,7 +1185,7 @@ function GroupSwitcher({
             {groups.length === 0 ? (
               <p role="status" className="px-3 py-2.5 text-body text-ink-faint">Loading groups…</p>
             ) : groups.map((g) => (
-              <Link
+              <Link prefetch={false}
                 key={g.id}
                 href={`/groups/${g.id}`}
                 role="option"
@@ -1207,7 +1208,7 @@ function GroupSwitcher({
               </Link>
             ))}
           </div>
-          <Link href="/groups" className="mt-1 flex min-h-[var(--control-h)] items-center border-t border-line px-3 text-body font-medium text-accent hover:bg-subtle">
+          <Link prefetch={false} href="/groups" className="mt-1 flex min-h-[var(--control-h)] items-center border-t border-line px-3 text-body font-medium text-accent hover:bg-subtle">
             All groups
           </Link>
         </div>

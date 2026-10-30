@@ -40,11 +40,13 @@ export async function api<T = unknown>(
       clearReadCache(path.endsWith("/logout"));
       lastSync = null;
       syncAccountVersion++;
-      if (path.endsWith("/logout")) {
+      syncLoggedOut = path.endsWith("/logout");
+      if (syncLoggedOut) {
         const { forgetPushDevice } = await import("./push-client");
         forgetPushDevice();
       }
     }
+    if (!syncLoggedOut) requestSync(true);
   }
   return json as T;
 }
@@ -289,37 +291,88 @@ export function markRead(scope: string, lastId: number) {
 // own polling loop, so a busy page issued the same request several times per
 // tick. The loop runs only while at least one subscriber is mounted.
 const SYNC_INTERVAL_MS = 4000;
+const SYNC_IDLE_MS = 120_000;
+const INPUT_EVENTS = ["pointerdown", "keydown", "touchstart", "scroll", "wheel"] as const;
+const RESUME_EVENTS = ["pageshow", "focus", "online"] as const;
 const syncListeners = new Set<(c: SyncCursors) => void>();
 let lastSync: SyncCursors | null = null;
 let syncAccountVersion = 0;
 let syncLoopRunning = false;
-let syncWake: (() => void) | null = null;
+let syncLoggedOut = false;
+let syncInFlight = false;
+let syncRequested = false;
+let syncTimer: ReturnType<typeof setTimeout> | null = null;
+let lastInputAt: number | null = null;
+
+function clearSyncTimer() {
+  if (syncTimer !== null) clearTimeout(syncTimer);
+  syncTimer = null;
+}
+
+function hasRecentInput() {
+  return lastInputAt !== null && Date.now() - lastInputAt < SYNC_IDLE_MS;
+}
+
+function requestSync(afterCurrent = false) {
+  if (!syncLoopRunning || syncLoggedOut || syncInFlight && !afterCurrent) return;
+  syncRequested = true;
+  clearSyncTimer();
+  void pollSync();
+}
+
+async function pollSync() {
+  clearSyncTimer();
+  if (!syncLoopRunning || syncLoggedOut || syncInFlight || document.hidden) return;
+  if (!syncRequested && !hasRecentInput()) return;
+  syncRequested = false;
+  syncInFlight = true;
+  const accountVersion = syncAccountVersion;
+  try {
+    const c = await api<SyncCursors>("/api/sync");
+    if (accountVersion === syncAccountVersion && !syncLoggedOut) {
+      lastSync = c;
+      if (!document.hidden) for (const listener of [...syncListeners]) listener(c);
+    }
+  } catch (error) {
+    if (error instanceof ApiClientError && error.status === 401 && accountVersion === syncAccountVersion) {
+      syncLoggedOut = true;
+      lastSync = null;
+      syncAccountVersion++;
+    }
+  } finally {
+    syncInFlight = false;
+    if (syncLoopRunning && !syncLoggedOut && !document.hidden) {
+      if (syncRequested) void pollSync();
+      else if (hasRecentInput()) {
+        syncTimer = setTimeout(() => void pollSync(), Math.min(SYNC_INTERVAL_MS, SYNC_IDLE_MS - (Date.now() - lastInputAt!)));
+      }
+    }
+  }
+}
+
+function onSyncInput() {
+  if (document.hidden) return;
+  const wasActive = hasRecentInput();
+  lastInputAt = Date.now();
+  if (!wasActive) requestSync();
+}
+
+function onSyncResume() {
+  if (document.hidden) {
+    clearSyncTimer();
+    return;
+  }
+  lastInputAt = Date.now();
+  requestSync();
+}
 
 function ensureSyncLoop() {
   if (syncLoopRunning) return;
   syncLoopRunning = true;
-  (async () => {
-    while (syncListeners.size > 0) {
-      try {
-        const accountVersion = syncAccountVersion;
-        const c = await api<SyncCursors>("/api/sync");
-        if (accountVersion !== syncAccountVersion) continue;
-        lastSync = c;
-        for (const l of [...syncListeners]) l(c);
-      } catch {
-        // offline or logged out; keep trying quietly
-      }
-      await new Promise<void>((resolve) => {
-        const t = setTimeout(resolve, document.hidden ? SYNC_INTERVAL_MS * 4 : SYNC_INTERVAL_MS);
-        syncWake = () => {
-          clearTimeout(t);
-          resolve();
-        };
-      });
-      syncWake = null;
-    }
-    syncLoopRunning = false;
-  })();
+  for (const event of INPUT_EVENTS) window.addEventListener(event, onSyncInput, { passive: true, capture: true });
+  for (const event of RESUME_EVENTS) window.addEventListener(event, onSyncResume);
+  document.addEventListener("visibilitychange", onSyncResume);
+  requestSync();
 }
 
 function subscribeSync(listener: (c: SyncCursors) => void): () => void {
@@ -327,7 +380,13 @@ function subscribeSync(listener: (c: SyncCursors) => void): () => void {
   ensureSyncLoop();
   return () => {
     syncListeners.delete(listener);
-    if (syncListeners.size === 0) syncWake?.();
+    if (syncListeners.size > 0) return;
+    syncLoopRunning = false;
+    syncRequested = false;
+    clearSyncTimer();
+    for (const event of INPUT_EVENTS) window.removeEventListener(event, onSyncInput, true);
+    for (const event of RESUME_EVENTS) window.removeEventListener(event, onSyncResume);
+    document.removeEventListener("visibilitychange", onSyncResume);
   };
 }
 

@@ -186,7 +186,7 @@ export default function BalancesPage() {
                 <Avatar name={r.displayName} />
                 <span className="min-w-0 flex-1 basis-48">
                   <span className="block text-body">
-                    <Link href={`/people/${r.userId}`} className="font-semibold hover:text-accent-dark hover:underline">{r.displayName}</Link> wants to be friends
+                    <Link prefetch={false} href={`/people/${r.userId}`} className="font-semibold hover:text-accent-dark hover:underline">{r.displayName}</Link> wants to be friends
                   </span>
                   <RowMeta>@{r.username}</RowMeta>
                 </span>
@@ -227,7 +227,7 @@ export default function BalancesPage() {
                 <Avatar name={r.displayName} />
                 <span className="min-w-0 flex-1">
                   <span className="block text-body">
-                    Request sent to <Link href={`/people/${r.userId}`} className="font-semibold hover:text-accent-dark hover:underline">{r.displayName}</Link>
+                    Request sent to <Link prefetch={false} href={`/people/${r.userId}`} className="font-semibold hover:text-accent-dark hover:underline">{r.displayName}</Link>
                   </span>
                   <RowMeta>@{r.username} · waiting for them to accept</RowMeta>
                 </span>

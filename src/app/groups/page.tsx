@@ -85,7 +85,7 @@ export default function GroupsPage() {
           <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
             {groups.map((g) => (
               <li key={g.id}>
-                <Link href={`/groups/${g.id}`} className={`group-choice group-hue-${g.id % 6} flex min-h-16 items-center gap-3 rounded-xl border border-line bg-card px-3.5 py-2 shadow-card transition-colors hover:bg-subtle`}>
+                <Link prefetch={false} href={`/groups/${g.id}`} className={`group-choice group-hue-${g.id % 6} flex min-h-16 items-center gap-3 rounded-xl border border-line bg-card px-3.5 py-2 shadow-card transition-colors hover:bg-subtle`}>
                   <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--group-soft)] text-[var(--group-ink)]">
                     <Users className="h-5 w-5" />
                   </span>
