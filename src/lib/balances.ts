@@ -1,4 +1,5 @@
 import { sql } from "./db";
+import type { NeonQueryFunctionInTransaction } from "@neondatabase/serverless";
 import { simplifyDebts, Transfer } from "./money";
 
 // All balance math uses converted_cents (the expense amount converted to the
@@ -60,7 +61,16 @@ export async function friendGroupObligationsSnapshot(
   onlyFriendId?: number
 ): Promise<{ byFriend: Map<number, FriendObligation[]>; snapshots: GroupBalanceSnapshot[] }> {
   const friendFilter = onlyFriendId ?? null;
-  const groupRows = await sql`
+  const groupRows = await friendGroupRows(userId, friendFilter);
+  return groupObligationsSnapshot(groupRows, userId, friendFilter);
+}
+
+function friendGroupRows(
+  userId: number,
+  friendFilter: number | null,
+  query: NeonQueryFunctionInTransaction<false, false> = sql
+) {
+  return query`
     SELECT g.id AS group_id, g.name AS group_name, g.currency,
       b.user_id, b.display_name, b.net_cents
     FROM groups g
@@ -71,7 +81,13 @@ export async function friendGroupObligationsSnapshot(
       WHERE them.group_id = g.id AND them.user_id = ${friendFilter}
     )
     ORDER BY g.id, b.user_id`;
+}
 
+function groupObligationsSnapshot(
+  groupRows: Record<string, unknown>[],
+  userId: number,
+  friendFilter: number | null
+) {
   const byFriend = new Map<number, FriendObligation[]>();
   const grouped = new Map<number, typeof groupRows>();
   for (const row of groupRows) {
@@ -107,9 +123,9 @@ export async function friendGroupObligationsSnapshot(
 
 export async function friendObligations(userId: number, onlyFriendId?: number): Promise<Map<number, FriendObligation[]>> {
   const friendFilter = onlyFriendId ?? null;
-  const [groupData, directRows] = await Promise.all([
-    friendGroupObligationsSnapshot(userId, onlyFriendId),
-    sql`
+  const [groupRows, directRows] = await sql.transaction((tx) => [
+    friendGroupRows(userId, friendFilter, tx),
+    tx`
     SELECT CASE WHEN payer_id = ${userId} THEN recipient_id ELSE payer_id END AS friend_id,
       currency,
       SUM(CASE WHEN payer_id = ${userId} THEN converted_cents ELSE -converted_cents END) AS net_cents
@@ -118,8 +134,8 @@ export async function friendObligations(userId: number, onlyFriendId?: number): 
       AND (payer_id = ${userId} OR recipient_id = ${userId})
       AND (${friendFilter}::bigint IS NULL OR payer_id = ${friendFilter} OR recipient_id = ${friendFilter})
     GROUP BY friend_id, currency`,
-  ]);
-  const byFriend = groupData.byFriend;
+  ], { readOnly: true });
+  const byFriend = groupObligationsSnapshot(groupRows, userId, friendFilter).byFriend;
 
   for (const row of directRows) {
     const friendId = Number(row.friend_id);

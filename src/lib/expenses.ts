@@ -43,7 +43,15 @@ export async function validateExpenseActors(
   userId: number,
   input: { payerId: number; categoryId?: number | null; participants?: { userId: number }[]; participantIds?: number[] }
 ): Promise<Set<number>> {
-  const memberIds = await loadGroupMemberIds(groupId);
+  const members = input.categoryId ? await sql`
+    SELECT gm.user_id, EXISTS (
+      SELECT 1 FROM categories
+      WHERE id = ${input.categoryId} AND (owner_id IS NULL OR owner_id = ${userId})
+    ) AS category_allowed
+    FROM group_members gm WHERE gm.group_id = ${groupId}` : null;
+  const memberIds = members
+    ? new Set(members.map((member) => Number(member.user_id)))
+    : await loadGroupMemberIds(groupId);
   if (!memberIds.has(input.payerId)) badRequest("Payer must be a group member");
   const participantIds = input.participants?.map((p) => p.userId) ?? input.participantIds ?? [];
   for (const userId of participantIds) {
@@ -52,11 +60,7 @@ export async function validateExpenseActors(
   const uniq = new Set(participantIds);
   if (uniq.size !== participantIds.length) badRequest("Duplicate participants");
 
-  if (input.categoryId) {
-    const cat = await sql`
-      SELECT 1 FROM categories WHERE id = ${input.categoryId} AND (owner_id IS NULL OR owner_id = ${userId})`;
-    if (cat.length === 0) badRequest("Unknown category");
-  }
+  if (input.categoryId && !members?.[0]?.category_allowed) badRequest("Unknown category");
   return memberIds;
 }
 
@@ -331,12 +335,14 @@ async function nextExpenseSnapshot(
   shares: Map<number, number>
 ): Promise<ExpenseSnapshot> {
   const userIds = [...new Set([input.payerId, ...shares.keys()])];
-  const [people, categories] = await Promise.all([
-    sql`SELECT id, display_name FROM users WHERE id = ANY(${userIds})`,
-    input.categoryId
-      ? sql`SELECT name FROM categories WHERE id = ${input.categoryId}`
-      : Promise.resolve([] as Record<string, unknown>[]),
-  ]);
+  const [context] = await sql`
+    SELECT (
+      SELECT jsonb_agg(jsonb_build_object('id', id, 'display_name', display_name))
+      FROM users WHERE id = ANY(${userIds})
+    ) AS people, (
+      SELECT name FROM categories WHERE id = ${input.categoryId ?? null}
+    ) AS category_name`;
+  const people = (context.people ?? []) as { id: number; display_name: string }[];
   const nameById = new Map(people.map((p) => [Number(p.id), p.display_name as string]));
   const rawByUser = new Map(input.participants.map((p) => [p.userId, p.value ?? null]));
   return {
@@ -345,7 +351,7 @@ async function nextExpenseSnapshot(
     currency: input.currency,
     date: input.date,
     payerName: nameById.get(input.payerId) ?? "",
-    categoryName: (categories[0]?.name as string | undefined) ?? null,
+    categoryName: (context.category_name as string | null) ?? null,
     notes: input.notes,
     splitMethod: input.splitMethod,
     shares: [...shares.entries()].map(([userId, cents]) => ({
