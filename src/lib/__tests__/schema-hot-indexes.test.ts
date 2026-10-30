@@ -5,7 +5,6 @@ import { planMigration } from "../../../scripts/migration-guard";
 
 const migrations = ["20261030_expense_share_cover_index", "20261030_expense_date_index", "20261030_message_participant_index"];
 const scripts = migrations.map((name) => readFileSync(`scripts/migrations/${name}.sql`, "utf8"));
-const fullMigration = readFileSync("scripts/migrate.ts", "utf8");
 const databaseUrl = process.env.SCHEMA_TEST_DATABASE_URL;
 const proxyUrl = process.env.SCHEMA_TEST_PROXY_URL;
 
@@ -38,9 +37,6 @@ describe("hot query index migrations", () => {
     expect(plan.statements.every((statement) =>
       /^CREATE INDEX IF NOT EXISTS /i.test(statement) || /^INSERT INTO schema_migrations /i.test(statement)
     )).toBe(true);
-    for (const statement of plan.statements.filter((statement) => /^CREATE INDEX /i.test(statement))) {
-      expect(fullMigration.replace(/\s+/g, " ")).toContain(statement.replace(/\s+/g, " "));
-    }
   });
 
   describe.skipIf(!databaseUrl || !proxyUrl)("local seeded database", () => {

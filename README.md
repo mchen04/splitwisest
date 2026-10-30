@@ -1,103 +1,87 @@
 # SplitWisest
 
-**Live:** https://splitwisest-kappa.vercel.app
+[Live app](https://splitwisest-kappa.vercel.app)
 
-A private, friend-group expense tracker inspired by Splitwise. Track shared expenses, see who owes who, simplify debts, record offline settlements, and chat in context. **Not a payment app** — no bank connections, cards, or payment processing; settlements are ledger records of payments that happened offline.
+SplitWisest tracks shared expenses, group balances, and payments made outside the app.
+It never moves money or connects to banks.
+Groups support multiple currencies, five expense split methods, recurring expenses, chat, and receipt attachments.
+The app also provides friend balances, an activity feed, CSV export, an inbox, and optional Web Push.
 
-## Features
+The stack uses Next.js App Router, React, TypeScript, Tailwind CSS, Neon PostgreSQL, and Vitest.
 
-- Username/password auth (scrypt-hashed, session cookies), optional invite-code onboarding
-- Groups (trips, apartments, dinners, bills) with per-group currency
-- Expenses show payer, date, and category before advanced split choices
-- Equal, exact, percentage, shares, and itemized splits; custom categories, notes, and receipt attachments
-- Group balances with separate owes and receives allocations; equal, exact, percentage, and shares on each side
-- Multi-currency with automatic conversion (rates snapshotted per expense)
-- Home shows who owes who per friend and, on phones, one-tap group chips; group headers show who you pay or who pays you
-- Group + friend balances with exact minimum-payment plans for up to 18 active balances
-- Offline settlement recording (group or direct between friends)
-- Recurring expenses (weekly/monthly, lazily materialized)
-- Search & filtering by group, friend, date, category, payer, text
-- Activity log (grouped by day), CSV export, SVG charts
-- Notification inbox, per-category phone preferences, and opt-in Web Push with durable retries
-- Group chat + direct friend chat with link rendering and search
-- Realtime via lightweight polling sync cursor (serverless-friendly)
-- Modern, clean UI with one token system, tabular money, and synchronized light and dark controls
-- The saved theme wins. Without a saved choice, the app follows the OS preference.
-- Installable PWA with safe-area support, a stable app frame, responsive layouts, and a matching offline screen
-- Deploy updates wait while an open form contains unsaved text or choices
-- Expense, chat, and comment drafts survive app switching, locking, and reloads; an interrupted expense form reopens with its values
-- Picks up a new deploy on its own — the client compares its build id against the server's and reloads once
+## Run locally
 
-## Stack
+Use Node.js 24, pnpm 10, and Docker Desktop, as the CI setup does.
+Start Docker Desktop, then run:
 
-Next.js (App Router, TypeScript), Tailwind CSS v4, Lucide icons, Neon PostgreSQL via `@neondatabase/serverless`, Zod validation, Vitest.
-
-## Setup
-
-```bash
-pnpm install
+```sh
+pnpm install --frozen-lockfile
 pnpm db:local
 export DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5433/splitwisest
 export NEON_LOCAL_PROXY=http://127.0.0.1:4444/sql
 pnpm dev
 ```
 
-Docker Desktop must be running. `db:local` starts local Postgres and its HTTP proxy, then applies both migrations.
-Repeated runs preserve local data. `pnpm db:local:down` removes the containers and local data.
-Use the printed environment lines if you select different ports.
-You can copy `.env.example` to `.env.local` for Next.js; export the same values for QA scripts.
-Local commands, including production builds, refuse Neon URLs unless you set `ALLOW_REMOTE_DB=1` explicitly.
-See [database setup](docs/DATABASE.md) and the [script directory](docs/DEVELOPMENT.md).
+Use the environment lines printed by `db:local` if you change its ports.
+The command starts Postgres and its HTTP proxy, then applies the base and notification migrations.
+Repeated runs preserve data.
+`pnpm db:local:down` removes this checkout's containers and database volume.
+See [database setup](docs/DATABASE.md) for port overrides and migration rules.
 
-### Environment variables
+Next.js can read local values from `.env.local`, using [.env.example](.env.example) as a template.
+Export the values separately for scripts.
+Local commands reject Neon hosts unless `VERCEL=1` or `ALLOW_REMOTE_DB=1`.
+Use the local database for development and tests.
+
+## Environment
 
 | Variable | Purpose |
 |---|---|
-| `DATABASE_URL` | Local Postgres URL by default; production uses a Neon connection string. |
-| `NEON_LOCAL_PROXY` | Local SQL-over-HTTP endpoint. Leave unset for production Neon. |
-| `ALLOW_REMOTE_DB` | Set to `1` for intentional Neon access from any local command, including production builds and migrations. |
-| `SIGNUP_CODE` | Optional bootstrap invite code. Friend and group invite codes also work during signup. |
+| `DATABASE_URL` | Postgres connection string. |
+| `NEON_LOCAL_PROXY` | Local SQL-over-HTTP endpoint; leave unset on Vercel. |
+| `ALLOW_REMOTE_DB` | Set to `1` only for intended remote Neon access. |
+| `SIGNUP_CODE` | Optional accepted invite code; setting it does not close signup. |
 
-## Testing
+Personal invite codes connect new users to their inviter.
+Group invite codes join new users to a group.
+See [notification setup](docs/NOTIFICATIONS.md#setup) for push variables and scheduler secrets.
 
-```bash
-pnpm vitest run          # unit and regression tests
-pnpm exec tsc --noEmit   # typecheck
-pnpm verify:ui-tokens    # design-token rules
-pnpm lint                # lint
-pnpm build               # production build
+## Test
+
+Choose checks for the changed feature.
+CI runs the full Vitest suite, type check, lint, token check, monthly database checks, and build.
+
+```sh
+pnpm exec vitest run src/lib/__tests__/money.test.ts
+pnpm exec tsc --noEmit
+pnpm lint
+pnpm verify:ui-tokens
+pnpm build
 ```
 
-The money checks require the dedicated loopback database `splitwisest_money_qa` and its local app and proxy.
-Generate one password before launching the ledger and browser checks from the same shell:
+| Command | Coverage |
+|---|---|
+| `pnpm verify:core` | Core flows through HTTP and SQL. |
+| `pnpm verify:profiles` | Profile access through app routes. |
+| `pnpm verify:money-ledger` | Stored money, API results, and SQL balances. |
+| `pnpm verify:money-form` | Browser previews, saves, and edits. |
+| `pnpm verify:notifications` | Notification events, access, and delivery. |
+| `pnpm verify:monthly-reminders` | Monthly eligibility, concurrency, and delivery. |
 
-```bash
-export SPLITWISEST_MONEY_QA_PASSWORD="$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("hex"))')"
-pnpm verify:money-ledger
-pnpm verify:money-form
-unset SPLITWISEST_MONEY_QA_PASSWORD
-```
+HTTP checks need a running app and the same database exports.
+`SPLITWISEST_BASE_URL` selects the app origin.
+Use disposable local data: these checks create and delete fixtures.
+Money and notification checks need dedicated databases; see [database checks](docs/DATABASE.md#database-checks).
+See [PWA checks](docs/PWA.md) for mobile layouts, drafts, and updates across builds.
 
-Separate shells must receive the same value through their private local environment configuration.
-Without this variable, each process generates its own password and cannot share the ledger login.
+## Deploy
 
-Browser checks cover desktop WebKit and realistic phone sizes. The iPhone gate adds the physical-device steps in `docs/PWA.md`.
+Set `DATABASE_URL` in Vercel and leave `NEON_LOCAL_PROXY` unset.
+Apply the required [migrations](docs/DATABASE.md#production-migrations) before deploying dependent code.
+Vercel handles Brotli compression.
+Configure push and its two schedulers with the [notification guide](docs/NOTIFICATIONS.md).
 
-## Deployment (Vercel)
+## Design references
 
-```bash
-vercel --prod
-```
-
-Set the production `DATABASE_URL` in Vercel. Leave `NEON_LOCAL_PROXY` unset there.
-Add `SIGNUP_CODE` only if you want a bootstrap invite code.
-Only `VERCEL=1` or an explicit `ALLOW_REMOTE_DB=1` permits remote Neon access.
-Follow [production migration instructions](docs/DATABASE.md#production-migrations) before first use.
-
-## Documentation
-
-- `docs/ARCHITECTURE.md` — auth, balance math, settlements, realtime, chat, deployment
-- `docs/DATABASE.md` — schema and migration notes for Neon
-- `docs/PWA.md` — iPhone layout contract and Safari release checks
-- `docs/USAGE.md` — user-facing workflow guide
-- `docs/NOTIFICATIONS.md` — event coverage, device setup, delivery, and rollout
+- [Architecture](docs/ARCHITECTURE.md): money rules, access, sync, and recurring expenses.
+- [Interface rules](.interface-design/system.md): tokens, controls, and layout.

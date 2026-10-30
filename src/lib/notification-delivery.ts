@@ -3,13 +3,23 @@ import { sql } from "./db";
 import { allowedPushUsers, pushKeys, sendPush } from "./web-push";
 import { monthlyBalanceOutstanding } from "./monthly-reminders";
 
-export async function deliverNotifications(send = sendPush) {
+export async function deliverNotifications(send = sendPush, { cleanup = false } = {}) {
   const keys = pushKeys();
   const allowed = allowedPushUsers();
   const totals = { accepted: 0, retried: 0, removed: 0, skipped: 0, failed: 0 };
-  if (!keys || allowed?.length === 0) return totals;
+  const cleanupQueries = cleanup ? [
+    sql`DELETE FROM notifications WHERE id IN
+      (SELECT id FROM notifications WHERE created_at < now() - interval '90 days' ORDER BY id LIMIT 500)`,
+    sql`DELETE FROM push_subscriptions WHERE id IN
+      (SELECT s.id FROM push_subscriptions s JOIN sessions sess ON sess.token = s.session_token
+        WHERE sess.expires_at <= now() ORDER BY s.id LIMIT 100)`,
+  ] : [];
+  if (!keys || allowed?.length === 0) {
+    if (cleanupQueries.length) await sql.transaction(cleanupQueries);
+    return totals;
+  }
   const lease = randomUUID();
-  const jobs = await sql`
+  const claim = sql`
     WITH due AS (
       SELECT d.notification_id, d.subscription_id
       FROM notification_deliveries d
@@ -26,6 +36,7 @@ export async function deliverNotifications(send = sendPush) {
       lease_until = now() + interval '2 minutes', lease_token = ${lease}, updated_at = now()
     FROM due WHERE d.notification_id = due.notification_id AND d.subscription_id = due.subscription_id
     RETURNING d.notification_id, d.subscription_id, d.attempts`;
+  const jobs = cleanupQueries.length ? (await sql.transaction([claim, ...cleanupQueries]))[0] : await claim;
 
   // Four sends at a time keep a 24-job batch within a 60-second function budget.
   for (let i = 0; i < jobs.length; i += 4) {
