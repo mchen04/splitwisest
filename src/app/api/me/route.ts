@@ -1,12 +1,13 @@
+import { privateHandler, privateJson } from "@/app/api/_lib/private-json";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { sql } from "@/lib/db";
 import { handler, badRequest } from "@/lib/api";
 import { requireUser } from "@/lib/auth";
 
-export const GET = handler(async () => {
+export const GET = privateHandler(async (req?: NextRequest) => {
   const user = await requireUser();
-  return NextResponse.json({ user });
+  return privateJson(req, { user });
 });
 
 const PatchBody = z.object({

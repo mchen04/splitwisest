@@ -1,16 +1,17 @@
+import { privateHandler, privateJson } from "@/app/api/_lib/private-json";
+import { readSession } from "@/app/api/_lib/read-session";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { sql } from "@/lib/db";
 import { handler, badRequest } from "@/lib/api";
 import { requireUser } from "@/lib/auth";
 
-export const GET = handler(async () => {
-  const user = await requireUser();
-  const rows = await sql`
+export const GET = privateHandler(async (req?: NextRequest) => {
+  const { rows: [rows] } = await readSession((userId) => [sql`
     SELECT id, name, icon, owner_id FROM categories
-    WHERE owner_id IS NULL OR owner_id = ${user.id}
-    ORDER BY owner_id NULLS FIRST, name`;
-  return NextResponse.json({
+    WHERE owner_id IS NULL OR owner_id = ${userId}
+    ORDER BY owner_id NULLS FIRST, name`]);
+  return privateJson(req, {
     categories: rows.map((c) => ({
       id: Number(c.id),
       name: c.name,

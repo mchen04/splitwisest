@@ -1,3 +1,5 @@
+import { privateHandler, privateJson } from "@/app/api/_lib/private-json";
+import { readGroup } from "@/app/api/_lib/read-group";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { sql } from "@/lib/db";
@@ -17,22 +19,19 @@ const Body = z.object({
   ...settlementFields,
 });
 
-export const GET = handler(async (req: NextRequest, { params }: Ctx) => {
-  const user = await requireUser();
-  const groupId = parseGroupId((await params).id);
-  await requireGroupMember(groupId, user.id);
+export const GET = privateHandler(async (req: NextRequest, { params }: Ctx) => {
   const limit = Math.min(Math.max(Number(req.nextUrl.searchParams.get("limit")) || 50, 1), 200);
-  const rows = await sql`
+  const { rows: [rows] } = await readGroup((await params).id, (groupId) => [sql`
     SELECT s.id, s.payer_id, s.recipient_id, s.amount_cents, s.currency, s.converted_cents,
       s.settled_date, s.note, s.updated_at,
       to_char(s.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS updated_at_token,
       p.display_name AS payer_name, r.display_name AS recipient_name
     FROM settlements s
     JOIN users p ON p.id = s.payer_id JOIN users r ON r.id = s.recipient_id
-    WHERE s.group_id = ${groupId} ORDER BY s.settled_date DESC, s.id DESC LIMIT ${limit + 1}`;
+    WHERE s.group_id = ${groupId} ORDER BY s.settled_date DESC, s.id DESC LIMIT ${limit + 1}`]);
   const hasMore = rows.length > limit;
   const page = hasMore ? rows.slice(0, limit) : rows;
-  return NextResponse.json({
+  return privateJson(req, {
     hasMore,
     settlements: page.map((s) => ({
       id: Number(s.id),

@@ -1,3 +1,4 @@
+import { privateHandler, privateJson } from "@/app/api/_lib/private-json";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { badRequest, handler, forbidden } from "@/lib/api";
@@ -10,7 +11,7 @@ import {
 
 type Ctx = { params: Promise<{ id: string }> };
 
-export const GET = handler(async (_req: NextRequest, { params }: Ctx) => {
+export const GET = privateHandler(async (req: NextRequest, { params }: Ctx) => {
   let group = await requireGroupViewerVersions((await params).id, true);
   const groupId = group.id;
 
@@ -21,7 +22,7 @@ export const GET = handler(async (_req: NextRequest, { params }: Ctx) => {
   const { members, balances } = group;
   const suggestions = suggestSettlements(balances);
 
-  return NextResponse.json({
+  return privateJson(req, {
     group: {
       id: groupId,
       name: group.name,

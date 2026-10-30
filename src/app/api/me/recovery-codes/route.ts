@@ -1,3 +1,5 @@
+import { privateHandler, privateJson } from "@/app/api/_lib/private-json";
+import { readSession } from "@/app/api/_lib/read-session";
 import { NextRequest, NextResponse } from "next/server";
 import { sql } from "@/lib/db";
 import { handler } from "@/lib/api";
@@ -7,10 +9,9 @@ import { assertAuthRateLimit } from "@/lib/rate-limit";
 const CODE_COUNT = 8;
 
 // How many unused recovery codes the caller has left.
-export const GET = handler(async () => {
-  const user = await requireUser();
-  const rows = await sql`SELECT COUNT(*)::int AS n FROM recovery_codes WHERE user_id = ${user.id} AND used_at IS NULL`;
-  return NextResponse.json({ remaining: rows[0].n });
+export const GET = privateHandler(async (req?: NextRequest) => {
+  const { rows: [rows] } = await readSession((userId) => [sql`SELECT COUNT(*)::int AS n FROM recovery_codes WHERE user_id = ${userId} AND used_at IS NULL`]);
+  return privateJson(req, { remaining: rows[0].n });
 });
 
 // Regenerate the full set. Invalidates any prior codes and returns the fresh

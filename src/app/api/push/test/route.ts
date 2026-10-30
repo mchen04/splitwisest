@@ -1,3 +1,4 @@
+import { readSession } from "@/app/api/_lib/read-session";
 import { after, NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -10,11 +11,12 @@ import { deliverNotifications } from "@/lib/notification-delivery";
 
 export const maxDuration = 60;
 export const GET = handler(async (req: NextRequest) => {
-  const user = await requireUser();
-  const id = z.coerce.number().int().positive().parse(req.nextUrl.searchParams.get("id"));
-  const rows = await sql`SELECT d.state, d.attempts FROM notifications n
+  const { rows: [rows] } = await readSession((userId) => {
+    const id = z.coerce.number().int().positive().parse(req.nextUrl.searchParams.get("id"));
+    return [sql`SELECT d.state, d.attempts FROM notifications n
     LEFT JOIN notification_deliveries d ON d.notification_id = n.id
-    WHERE n.id = ${id} AND n.user_id = ${user.id} AND n.category = 'test'`;
+    WHERE n.id = ${id} AND n.user_id = ${userId} AND n.category = 'test'`];
+  });
   if (!rows.length) throw new ApiError("Test not found", 404);
   return NextResponse.json({ state: rows[0].state ?? "failed", attempts: Number(rows[0].attempts ?? 0) },
     { headers: { "Cache-Control": "private, no-store" } });

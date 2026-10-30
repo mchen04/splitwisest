@@ -2,27 +2,34 @@ import { NextRequest, NextResponse } from "next/server";
 import { sql } from "@/lib/db";
 import { handler, notFound, forbidden } from "@/lib/api";
 import { requireUser } from "@/lib/auth";
-import { isGroupMember } from "@/lib/balances";
+import { readSession } from "@/app/api/_lib/read-session";
 import { attachmentContentDisposition } from "@/lib/attachments";
 import { deleteExpenseAttachment } from "@/lib/attachment-writes";
 
 type Ctx = { params: Promise<{ id: string }> };
 
-async function loadWithAccess(id: number, userId: number) {
-  const rows = await sql`
-    SELECT a.id, a.filename, a.mime, a.data, e.group_id
+async function loadWithAccess(rawId: string) {
+  const id = Number(rawId);
+  if (!Number.isInteger(id)) {
+    await requireUser();
+    notFound();
+  }
+  const { rows: [rows] } = await readSession((userId) => [sql`
+    SELECT a.id, a.filename, a.mime, CASE WHEN access.is_member THEN a.data END AS data,
+      e.group_id, access.is_member
     FROM attachments a JOIN expenses e ON e.id = a.expense_id
-    WHERE a.id = ${id}`;
+    CROSS JOIN LATERAL (
+      SELECT EXISTS (SELECT 1 FROM group_members gm
+        WHERE gm.group_id = e.group_id AND gm.user_id = ${userId}) AS is_member
+    ) access
+    WHERE a.id = ${id}`]);
   if (rows.length === 0) notFound("Attachment not found");
-  if (!(await isGroupMember(Number(rows[0].group_id), userId))) forbidden();
+  if (!rows[0].is_member) forbidden();
   return rows[0];
 }
 
 export const GET = handler(async (_req: NextRequest, { params }: Ctx) => {
-  const user = await requireUser();
-  const id = Number((await params).id);
-  if (!Number.isInteger(id)) notFound();
-  const a = await loadWithAccess(id, user.id);
+  const a = await loadWithAccess((await params).id);
   // neon returns bytea as \x-prefixed hex string
   const raw = a.data as unknown;
   const buf =

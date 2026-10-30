@@ -1,3 +1,5 @@
+import { privateHandler, privateJson } from "@/app/api/_lib/private-json";
+import { readGroup } from "@/app/api/_lib/read-group";
 import { NextRequest, NextResponse } from "next/server";
 import { sql } from "@/lib/db";
 import { handler, intParam, likeEscape, dateParam } from "@/lib/api";
@@ -10,12 +12,11 @@ import { currencyStep } from "@/lib/currencies";
 
 type Ctx = { params: Promise<{ id: string }> };
 
-export const GET = handler(async (req: NextRequest, { params }: Ctx) => {
-  const user = await requireUser();
-  const groupId = parseGroupId((await params).id);
-  const group = await requireGroupMember(groupId, user.id);
+export const GET = privateHandler(async (req: NextRequest, { params }: Ctx) => {
+  const { group, recurringDue } = await readGroup((await params).id);
+  const groupId = group.id;
   const step = currencyStep(group.currency);
-  await materializeRecurring(groupId);
+  if (recurringDue) await materializeRecurring(groupId);
 
   const q = req.nextUrl.searchParams;
   const text = likeEscape(q.get("q"));
@@ -34,7 +35,7 @@ export const GET = handler(async (req: NextRequest, { params }: Ctx) => {
       JOIN users p ON p.id = e.payer_id
       LEFT JOIN categories c ON c.id = e.category_id
       WHERE e.group_id = ${groupId}`;
-    return NextResponse.json({
+    return privateJson(req, {
       hasMore: false,
       expenses: rows.map((e) => ({
         convertedCents: Number(e.converted_cents),
@@ -78,7 +79,7 @@ export const GET = handler(async (req: NextRequest, { params }: Ctx) => {
 
   const page = finishGroupExpensePage(rows, pageRequest);
 
-  return NextResponse.json({
+  return privateJson(req, {
     hasMore: page.hasMore,
     expenses: page.items.map((e) => ({
       id: Number(e.id),

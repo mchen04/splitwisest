@@ -1,12 +1,12 @@
-import { NextResponse } from "next/server";
+import { privateHandler, privateJson } from "@/app/api/_lib/private-json";
+import { NextRequest } from "next/server";
 import { sql } from "@/lib/db";
-import { handler } from "@/lib/api";
 import { AuthError, markSessionOwner, requireSessionToken } from "@/lib/auth";
 
 // Lightweight polling cursor: returns the max activity and message ids visible
 // to this user, plus unread counts derived from per-user read_state markers.
 // Clients poll this and refetch the affected views when a cursor advances.
-export const GET = handler(async () => {
+export const GET = privateHandler(async (req?: NextRequest) => {
   const token = await requireSessionToken();
   // One round-trip: cursors are computed once in the `cur` CTE and reused by the
   // unread expressions (the activity-unread compares against cur.act rather than a
@@ -75,7 +75,7 @@ export const GET = handler(async () => {
   if (r.viewer_id === null) throw new AuthError();
   await markSessionOwner(Number(r.viewer_id));
 
-  return NextResponse.json({
+  return privateJson(req, {
     activityCursor: Number(r.act),
     messageCursor: Number(r.msg),
     nudgeCursor: Number(r.nudge),

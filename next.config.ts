@@ -11,6 +11,9 @@ const nextConfig: NextConfig = {
   // Hide the floating dev-tools indicator so it never overlaps the app chrome
   // (it was being mistaken for the user avatar in design review captures).
   devIndicators: false,
+  experimental: {
+    turbopackSourceMaps: process.env.NODE_ENV !== "production",
+  },
   generateBuildId: async () => id,
   env: {
     NEXT_PUBLIC_BUILD_ID: id,

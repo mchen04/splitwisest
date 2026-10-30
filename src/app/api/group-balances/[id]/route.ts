@@ -1,3 +1,4 @@
+import { privateHandler, privateJson } from "@/app/api/_lib/private-json";
 import { NextRequest, NextResponse } from "next/server";
 import { ApiError, badRequest, handler, notFound } from "@/lib/api";
 import { requireUser } from "@/lib/auth";
@@ -13,10 +14,10 @@ function balanceId(raw: string) {
   return id;
 }
 
-export const GET = handler(async (_req: NextRequest, { params }: Ctx) => {
+export const GET = privateHandler(async (req: NextRequest, { params }: Ctx) => {
   const user = await requireUser();
   const balance = await loadGroupObligation(balanceId((await params).id), user.id);
-  return NextResponse.json({ balance });
+  return privateJson(req, { balance });
 });
 
 export const PATCH = handler(async (req: NextRequest, { params }: Ctx) => {

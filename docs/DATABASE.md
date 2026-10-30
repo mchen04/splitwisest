@@ -179,3 +179,125 @@ Recreate and migrate it before another ledger run. Never use a database that con
 - Group balance creates use a UUID scoped to the group and creator. A retry with the same payload returns the first record. A changed payload or deleted record rejects the reused UUID. The receipt table retains that decision after edits and deletes.
 - `expenses.recurring_id` has an FK to `recurring_expenses(id)` (`ON DELETE SET NULL`) so already-materialized expenses survive a rule deletion.
 - Zero-decimal currencies (JPY/KRW) are stored as whole units (multiples of 100 cents) and split in whole units, so a share is never an unpayable fraction of a yen/won.
+
+## Hot query index audit — 2026-10-30
+
+Apply these scoped files to an existing database before the next app release:
+
+```bash
+pnpm migrate:apply scripts/migrations/20261030_expense_share_cover_index.sql
+pnpm migrate:apply scripts/migrations/20261030_expense_date_index.sql
+pnpm migrate:apply scripts/migrations/20261030_message_participant_index.sql
+```
+
+The full migration also creates these indexes and records their ledger entries.
+Each scoped file creates one index and records its ledger entry.
+The files do not update, delete, or backfill application rows.
+The existing guidance on concurrent builds for large production tables still applies.
+
+| Index | Read path | Reason |
+|---|---|---|
+| `expense_shares_cover_idx (expense_id) INCLUDE (user_id, share_cents)` | Group detail and friend balances | Reads shares without fetching their table rows. |
+| `expenses_date_idx (expense_date DESC, id DESC)` | Cross-group expense list | Stops after finding one page in date order. |
+| `messages_dm_b_idx (dm_b, dm_a, id) INCLUDE (sender_id) WHERE channel = 'dm'` | Sync unread conversations | Finds messages for either participant through indexes. |
+
+The share index supplements the primary key; it does not replace its uniqueness check.
+The date index supplements the group-first index, which still serves group pages and balances.
+The message index supplements the first-participant index, which still serves conversation reads.
+No exact duplicate indexes remain in the measured catalog.
+The existing removal of `expenses_group_idx` and `settlements_group_idx` stays in the full migration.
+No other index is removed based only on an unused scan counter.
+The three new indexes use about 7.7 MiB on this fixture. Insert and update latency is not measured.
+
+### Measurement method
+
+The disposable local database uses PostgreSQL 16.15, 240 users, 60 groups, 30,000 expenses, and 150,000 expense shares.
+It also contains 60,000 messages, 60,000 activity rows, 6,000 settlements, 1,200 group balances, and 7,200 balance allocations.
+There are 5,000 attachments, 300 recurring templates, 2,400 nudges, 240 friend requests, and 4,800 notifications.
+One group has 4,000 expenses; other groups have about 440 expenses.
+The busy viewer belongs to ten groups. The typical viewer belongs to three.
+Expense dates cover 300 days. Each expense has five shares with valid integer totals.
+The sample uses USD. The queries retain the existing currency allocation arithmetic.
+
+Queries come from `src/lib/groups.ts`, `src/lib/balances.ts`, `src/lib/expenses.ts`, and their API routes.
+The harness binds synthetic viewer and group values into the existing query text.
+Every query uses `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)`.
+The baseline has seven timed runs after a warm-up.
+Each hypothesis has seven alternating baseline/candidate pairs, with a warm-up before each timed query.
+Trials create or drop indexes inside transactions that roll back; their data stays fixed.
+The final comparison removes all three new indexes for its baseline.
+It then compares that baseline with all three indexes together.
+
+The noise limit is the largest of 5%, the initial baseline spread, and the paired baseline spread.
+A spread is `(maximum time - minimum time) / median time`.
+A change passes only when its target improves beyond that limit and no measured query regresses beyond its limit.
+Docker shares this machine with other work. Some small queries have large relative noise.
+The times below measure local database execution, excluding HTTP and response serialization.
+
+### Round log
+
+| Change | Query | Before ms | After ms | Gain | Noise limit | Decision |
+|---|---|---:|---:|---:|---:|---|
+| Remove existing group date index | group-expenses-heavy | 0.997 | 5.487 | -450.4% | 125.9% | rejected |
+| Cover expense shares | friend-balances | 240.951 | 111.586 | 53.7% | 23.9% | kept |
+| Order expenses across groups | expenses-all | 6.266 | 0.274 | 95.6% | 24.5% | kept |
+| Index second message participant | sync-heavy | 5.164 | 2.146 | 58.4% | 42.0% | kept |
+| Cover expense balance columns | friend-balances | 111.152 | 104.565 | 5.9% | 24.1% | rejected |
+| Cover group balance allocations | friend-balances | 116.439 | 106.257 | 8.7% | 23.9% | rejected |
+
+The negative control proves the time gate rejects a slower plan.
+Both final balance hypotheses fail the gate, so neither index ships.
+All fifteen query result hashes match across every comparison.
+
+### Final paired results
+
+Times are medians in milliseconds. Ranges show the seven observed execution times.
+Buffer hits come from the plan nearest each median; all plans have zero shared reads after warming.
+
+| Query | Before ms (range) | After ms (range) | Noise limit | Buffer hits before → after | Gain beyond noise |
+|---|---:|---:|---:|---:|---|
+| sync-heavy | 5.189 (4.592–6.373) | 2.268 (2.012–3.552) | 41.9% | 1450 → 510 | yes |
+| detail-heavy | 60.066 (51.869–93.527) | 50.547 (45.596–56.887) | 69.4% | 9219 → 20343 | no |
+| group-expenses-heavy | 1.083 (0.743–1.924) | 0.983 (0.769–1.133) | 109.0% | 666 → 319 | no |
+| balance-heavy | 55.291 (50.638–66.259) | 57.590 (49.797–66.154) | 35.9% | 1328 → 1328 | no |
+| sync-typical | 4.455 (3.418–4.719) | 1.075 (0.739–1.373) | 78.3% | 1421 → 483 | no |
+| detail-typical | 19.440 (17.308–22.253) | 6.778 (6.259–8.164) | 38.0% | 1900 → 2277 | yes |
+| group-expenses-typical | 1.118 (0.728–1.602) | 1.046 (0.856–1.193) | 78.2% | 656 → 403 | no |
+| balance-typical | 19.534 (17.044–22.358) | 6.417 (6.155–11.001) | 27.2% | 1842 → 2219 | yes |
+| expenses-all | 5.331 (4.273–6.162) | 0.277 (0.242–0.312) | 35.4% | 7590 → 376 | yes |
+| expenses-filtered | 2.097 (1.938–2.818) | 2.447 (1.988–3.206) | 42.0% | 3037 → 3037 | no |
+| expenses-friend | 15.363 (11.551–18.880) | 5.406 (4.598–6.208) | 93.1% | 31501 → 1518 | no |
+| friend-balances | 238.373 (211.124–270.482) | 105.833 (98.884–116.776) | 24.9% | 26062 → 40561 | yes |
+| activity-all | 0.119 (0.085–0.148) | 0.103 (0.075–0.178) | 52.9% | 38 → 38 | no |
+| activity-group | 0.100 (0.072–0.174) | 0.089 (0.068–0.182) | 102.0% | 113 → 113 | no |
+| recurring | 0.012 (0.007–0.018) | 0.011 (0.006–0.035) | 100.0% | 2 → 2 | no |
+
+The final measured gains are 94.8% for cross-group expenses, 56.3% for busy-viewer sync, and 55.6% for friend balances.
+Typical group detail improves by 65.1%, and typical group balances improve by 67.1%.
+The typical balance plan replaces a 150,000-row share scan with five index entries per expense.
+The busy group still uses a share scan where PostgreSQL estimates it is cheaper.
+Its allocation arithmetic remains the largest single-group cost.
+Activity already uses the existing group or primary-key indexes; its changes stay within noise.
+
+### Verification
+
+The local checks compare complete row hashes before and after migration, excluding the migration ledger.
+They run the full migration twice on fresh, populated, and origin/main-upgraded databases.
+They apply each scoped file twice through the guarded runner on a populated local copy.
+The origin/main script runs with its environment-file loader removed; it uses only the explicit local connection.
+The new regression tests cover index plans, unchanged expense and balance rows, and agreement between migration paths.
+They fail when each new index is removed, then pass after it is restored.
+
+Run the focused tests with explicit local test URLs:
+
+```bash
+SCHEMA_TEST_DATABASE_URL=postgres://postgres:postgres@127.0.0.1:55445/splitwisest \
+SCHEMA_TEST_PROXY_URL=http://127.0.0.1:54455/sql \
+pnpm vitest run src/lib/__tests__/schema-hot-indexes.test.ts src/lib/__tests__/migration-guard.test.ts
+```
+
+The live checks require the seeded local fixture. Without both test URLs, only the migration-plan checks run.
+Both test URLs must use loopback hosts.
+The SQL migration files map to these two focused test files when the test selector reports them as unknown.
+The focused run passes 14 tests. Lint passes with three existing warnings, and the TypeScript check passes.
+The full test suite remains the orchestrator’s check; this lane runs only the covering tests.

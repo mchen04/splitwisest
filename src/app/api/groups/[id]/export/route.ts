@@ -1,8 +1,7 @@
+import { readGroup } from "@/app/api/_lib/read-group";
 import { NextRequest } from "next/server";
 import { sql } from "@/lib/db";
 import { handler } from "@/lib/api";
-import { requireUser } from "@/lib/auth";
-import { parseGroupId, requireGroupMember } from "@/lib/groups";
 import { currencyFractionDigits } from "@/lib/currencies";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -14,11 +13,8 @@ function csvCell(v: unknown): string {
 }
 
 export const GET = handler(async (_req: NextRequest, { params }: Ctx) => {
-  const user = await requireUser();
-  const groupId = parseGroupId((await params).id);
-  const group = await requireGroupMember(groupId, user.id);
 
-  const rows = await sql`
+  const { group, rows: [rows] } = await readGroup((await params).id, (groupId) => [sql`
     SELECT to_char(e.expense_date, 'YYYY-MM-DD') AS expense_date, e.title, e.amount_cents, e.currency, e.converted_cents,
       p.display_name AS payer, c.name AS category, e.split_method, e.notes,
       (SELECT string_agg(u.display_name || ': ' || to_char(
@@ -30,7 +26,7 @@ export const GET = handler(async (_req: NextRequest, { params }: Ctx) => {
     JOIN users p ON p.id = e.payer_id
     LEFT JOIN categories c ON c.id = e.category_id
     WHERE e.group_id = ${groupId}
-    ORDER BY e.expense_date, e.id`;
+    ORDER BY e.expense_date, e.id`]);
   const header = ["Date", "Title", "Amount", "Currency", `Amount (${group.currency})`, "Paid by", "Category", "Split", "Notes", "Shares"];
   const lines = [header.join(",")];
   for (const r of rows) {

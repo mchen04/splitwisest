@@ -1,3 +1,4 @@
+import { privateHandler, privateJson } from "@/app/api/_lib/private-json";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { sql } from "@/lib/db";
@@ -11,7 +12,7 @@ import {
   requestOrAcceptFriendship,
 } from "@/lib/relationships";
 
-export const GET = handler(async () => {
+export const GET = privateHandler(async (req?: NextRequest) => {
   const user = await requireUser();
   // These four reads only depend on user.id and are mutually independent —
   // run them as a single parallel level rather than four serial round-trips.
@@ -44,7 +45,7 @@ export const GET = handler(async () => {
     friendObligations(user.id),
   ]);
 
-  return NextResponse.json({
+  return privateJson(req, {
     friends: rows.map((f) => ({
       id: Number(f.id),
       displayName: f.display_name,

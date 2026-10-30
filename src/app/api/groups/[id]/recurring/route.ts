@@ -1,3 +1,5 @@
+import { privateHandler, privateJson } from "@/app/api/_lib/private-json";
+import { readGroup } from "@/app/api/_lib/read-group";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { sql } from "@/lib/db";
@@ -10,18 +12,15 @@ import { versionToken } from "@/lib/versions";
 
 type Ctx = { params: Promise<{ id: string }> };
 
-export const GET = handler(async (_req: NextRequest, { params }: Ctx) => {
-  const user = await requireUser();
-  const groupId = parseGroupId((await params).id);
-  await requireGroupMember(groupId, user.id);
-  const rows = await sql`
+export const GET = privateHandler(async (req: NextRequest, { params }: Ctx) => {
+  const { rows: [rows] } = await readGroup((await params).id, (groupId) => [sql`
     SELECT r.*, to_char(r.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS updated_at_token,
       u.display_name AS payer_name, c.name AS category_name
     FROM recurring_expenses r
     JOIN users u ON u.id = r.payer_id
     LEFT JOIN categories c ON c.id = r.category_id
-    WHERE r.group_id = ${groupId} ORDER BY r.id`;
-  return NextResponse.json({
+    WHERE r.group_id = ${groupId} ORDER BY r.id`]);
+  return privateJson(req, {
     recurring: rows.map((r) => ({
       id: Number(r.id),
       title: r.title,
