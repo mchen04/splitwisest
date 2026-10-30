@@ -112,13 +112,16 @@ function useInsightExpenses(groupId: number, enabled: boolean) {
   return { insightExpenses: data?.expenses ?? null, insightError: error, reloadInsightExpenses };
 }
 
-function useSettlements(groupId: number, limit: number) {
+function useSettlements(groupId: number, limit: number, enabled: boolean) {
   const { data, reload } = useApiData<{ settlements: Settlement[]; hasMore: boolean }>(
     `/api/groups/${groupId}/settlements?limit=${limit}`,
     0,
-    { sync: false }
+    { sync: false, enabled }
   );
-  return { settlements: data?.settlements ?? null, hasMoreSettlements: data?.hasMore ?? false, reloadSettlements: reload };
+  const reloadSettlements = useCallback(() => {
+    if (enabled) reload();
+  }, [enabled, reload]);
+  return { settlements: data?.settlements ?? null, hasMoreSettlements: data?.hasMore ?? false, reloadSettlements };
 }
 
 export function useGroupPageData({
@@ -127,19 +130,23 @@ export function useGroupPageData({
   expenseLimit,
   settlementLimit,
   insightsEnabled,
+  activityEnabled,
+  balancesEnabled,
 }: {
   groupId: number;
   filters: { q: string; cat: string; payer: string; from: string; to: string };
   expenseLimit: number;
   settlementLimit: number;
   insightsEnabled: boolean;
+  activityEnabled: boolean;
+  balancesEnabled: boolean;
 }) {
   const detailState = useApiData<GroupDetail>(`/api/groups/${groupId}`, 0, { sync: false });
   const recurringState = useApiData<{ recurring: Recurring[] }>(`/api/groups/${groupId}/recurring`, 0, { sync: false });
-  const activityState = useApiData<{ activity: GroupActivity[] }>(`/api/groups/${groupId}/activity`, 0, { sync: false });
+  const activityState = useApiData<{ activity: GroupActivity[] }>(`/api/groups/${groupId}/activity`, 0, { sync: false, enabled: activityEnabled });
   const { expenses, hasMoreExpenses, reloadExpenses } = useExpenses(groupId, filters, expenseLimit);
   const { insightExpenses, insightError, reloadInsightExpenses } = useInsightExpenses(groupId, insightsEnabled);
-  const { settlements, hasMoreSettlements, reloadSettlements } = useSettlements(groupId, settlementLimit);
+  const { settlements, hasMoreSettlements, reloadSettlements } = useSettlements(groupId, settlementLimit, balancesEnabled);
   const [refreshKey, setRefreshKey] = useState(0);
   // Wait for the group detail before blaming a side request, so a missing or
   // forbidden group always reports the detail's own error.
@@ -151,9 +158,9 @@ export function useGroupPageData({
     if (freshDetail) detailState.reloadFresh();
     else detailState.reload();
     recurringState.reload();
-    activityState.reload();
+    if (activityEnabled) activityState.reload();
     reloadSettlements();
-  }, [detailState, recurringState, activityState, reloadSettlements]);
+  }, [detailState, recurringState, activityState, activityEnabled, reloadSettlements]);
 
   const refreshAll = useCallback((freshDetail = false) => {
     reloadOverview(freshDetail);

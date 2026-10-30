@@ -1,3 +1,5 @@
+import { privateHandler, privateJson } from "@/app/api/_lib/private-json";
+import { readSession } from "@/app/api/_lib/read-session";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { sql } from "@/lib/db";
@@ -7,17 +9,16 @@ import { upsertNudge } from "@/lib/nudges";
 
 // Reminders the caller has received (newest first). Drives the "settle up"
 // nudge notifications.
-export const GET = handler(async () => {
-  const user = await requireUser();
-  const rows = await sql`
+export const GET = privateHandler(async (req?: NextRequest) => {
+  const { rows: [rows] } = await readSession((userId) => [sql`
     SELECT n.id, n.from_id, n.group_id, n.note, n.seen_at, n.created_at,
       u.display_name AS from_name, g.name AS group_name
     FROM nudges n
     JOIN users u ON u.id = n.from_id
     LEFT JOIN groups g ON g.id = n.group_id
-    WHERE n.to_id = ${user.id}
-    ORDER BY n.id DESC LIMIT 50`;
-  return NextResponse.json({
+    WHERE n.to_id = ${userId}
+    ORDER BY n.id DESC LIMIT 50`]);
+  return privateJson(req, {
     nudges: rows.map((n) => ({
       id: Number(n.id),
       fromId: Number(n.from_id),

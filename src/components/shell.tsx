@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { usePathname, useRouter } from "next/navigation";
 import { ReactNode, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
@@ -12,9 +13,10 @@ import { useTheme } from "@/lib/theme";
 import { syncExistingPush } from "@/lib/push-client";
 import { defaultExpenseGroup, readExpenseGroup } from "@/lib/last-group";
 import { clearAllDrafts } from "@/lib/drafts";
-import { readExpenseDraft } from "./expense-form";
+import { readExpenseDraft } from "./expense-draft";
 import { Avatar, ConfirmHost, IconButton, ToastRegion } from "./ui";
-import { QuickAddExpense } from "./quick-add-expense";
+
+const QuickAddExpense = dynamic(() => import("./quick-add-expense").then((m) => m.QuickAddExpense));
 
 interface GroupRef {
   id: number;
@@ -322,7 +324,7 @@ export function AppShell({ title, children }: { title?: string; children: ReactN
         ))}
       </nav>
 
-      <QuickAddExpense
+      {quickAdd.step !== "closed" && <QuickAddExpense
         step={quickAdd.step}
         groupId={quickAdd.groupId}
         groups={groupsData?.groups ?? null}
@@ -330,7 +332,7 @@ export function AppShell({ title, children }: { title?: string; children: ReactN
         onRetryGroups={reloadGroups}
         onPick={(groupId) => setQuickAdd({ step: "form", groupId })}
         onClose={() => setQuickAdd({ step: "closed", groupId: null })}
-      />
+      />}
       <ConfirmHost />
       <ToastRegion />
     </div>

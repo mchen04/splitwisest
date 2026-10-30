@@ -1,14 +1,16 @@
+import { readSession } from "@/app/api/_lib/read-session";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { handler, notFound } from "@/lib/api";
-import { requireUser } from "@/lib/auth";
 import { sql } from "@/lib/db";
 import { mapNotification } from "@/lib/notifications";
 
 export const GET = handler(async (_req: NextRequest, { params }: { params: Promise<{ id: string }> }) => {
-  const user = await requireUser();
-  const id = z.coerce.number().int().positive().max(Number.MAX_SAFE_INTEGER).parse((await params).id);
-  const rows = await sql`SELECT * FROM notifications n WHERE id = ${id} AND user_id = ${user.id} AND notification_visible(n)`;
+  const rawId = (await params).id;
+  const { rows: [rows] } = await readSession((userId) => {
+    const id = z.coerce.number().int().positive().max(Number.MAX_SAFE_INTEGER).parse(rawId);
+    return [sql`SELECT * FROM notifications n WHERE id = ${id} AND user_id = ${userId} AND notification_visible(n)`];
+  });
   if (!rows[0]) notFound("This notification is no longer available");
   const notification = mapNotification(rows[0]);
   const target = new URL(notification.href, "https://splitwisest.invalid");

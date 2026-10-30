@@ -205,6 +205,9 @@ async function main() {
   await sql`CREATE INDEX IF NOT EXISTS expenses_group_date_idx
     ON expenses (group_id, expense_date DESC, id DESC)`;
   await sql`DROP INDEX IF EXISTS expenses_group_idx`;
+  await sql`CREATE INDEX IF NOT EXISTS expenses_date_idx
+    ON expenses (expense_date DESC, id DESC)`;
+  await markMigration("20261030_expense_date_index");
   await sql`CREATE INDEX IF NOT EXISTS expenses_title_search_idx
     ON expenses USING gin (title gin_trgm_ops)`;
   await sql`CREATE INDEX IF NOT EXISTS expenses_notes_search_idx
@@ -220,6 +223,10 @@ async function main() {
     raw_input NUMERIC,
     PRIMARY KEY (expense_id, user_id)
   )`;
+
+  await sql`CREATE INDEX IF NOT EXISTS expense_shares_cover_idx
+    ON expense_shares (expense_id) INCLUDE (user_id, share_cents)`;
+  await markMigration("20261030_expense_share_cover_index");
 
   await sql`CREATE TABLE IF NOT EXISTS expense_items (
     id BIGSERIAL PRIMARY KEY,
@@ -498,6 +505,9 @@ async function main() {
   )`;
   await sql`CREATE INDEX IF NOT EXISTS messages_group_idx ON messages (group_id, id)`;
   await sql`CREATE INDEX IF NOT EXISTS messages_dm_idx ON messages (dm_a, dm_b, id)`;
+  await sql`CREATE INDEX IF NOT EXISTS messages_dm_b_idx
+    ON messages (dm_b, dm_a, id) INCLUDE (sender_id) WHERE channel = 'dm'`;
+  await markMigration("20261030_message_participant_index");
   await sql`CREATE INDEX IF NOT EXISTS messages_body_search_idx
     ON messages USING gin (body gin_trgm_ops)`;
 

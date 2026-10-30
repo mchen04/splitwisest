@@ -13,7 +13,7 @@
 //   on this worker's build (stale chunks then serve no one).
 // - splitwisest-meta-v3: build tags for the two caches above.
 //
-// The cache NAMES are constants but no longer need hand-bumping per release:
+// The shared cache names no longer need hand-bumping per release:
 // cross-build reuse is intentional, and per-entry staleness is handled by the
 // build tags. Bump a name only when an entry's stored SHAPE changes.
 
@@ -21,13 +21,15 @@ const BUILD_ID = "__BUILD_ID__";
 const STATIC_CACHE = "splitwisest-static-v8";
 const PAGE_CACHE = "splitwisest-pages-v8";
 const META_CACHE = "splitwisest-meta-v3";
-const CURRENT_CACHES = [STATIC_CACHE, PAGE_CACHE, META_CACHE];
+const RSC_CACHE = "splitwisest-rsc-v1-" + BUILD_ID;
+const CURRENT_CACHES = [STATIC_CACHE, PAGE_CACHE, META_CACHE, RSC_CACHE];
 const OFFLINE_URL = "/offline.html";
 const START_URL = "/";
 const SHELL_PRECACHE = [OFFLINE_URL, "/icon.svg", "/icon-192.png", "/icon-512.png", "/manifest.json"];
 const NAV_TIMEOUT_MS = 3500;
 const PAGE_MAX_ENTRIES = 24;
 const STATIC_MAX_ENTRIES = 150;
+const RSC_MAX_ENTRIES = 150;
 const STATIC_TAG = "/__tag_static__";
 const PAGE_TAG = "/__tag_page__";
 
@@ -224,6 +226,57 @@ async function handlePrecached(event) {
   return fetch(event.request);
 }
 
+function freshRsc(response) {
+  const maxAge = /(?:^|,)\s*s-maxage=([1-9]\d*)(?:\s*(?:,|$))/i.exec(response.headers.get("cache-control") || "");
+  const age = Number(response.headers.get("age") || 0);
+  return maxAge !== null && Number.isFinite(age) && age >= 0 && age < Number(maxAge[1])
+    && Date.now() < Date.parse(response.headers.get("date") || "") + Number(maxAge[1]) * 1000;
+}
+
+function cacheableRsc(response) {
+  const control = response.headers.get("cache-control") || "";
+  const vary = response.headers.get("vary") || "";
+  return response.ok
+    && !response.redirected
+    && response.type === "basic"
+    && response.status !== 206
+    && response.headers.get("x-build-id") === BUILD_ID
+    && response.headers.get("x-nextjs-prerender") === "1"
+    && (response.headers.get("content-type") || "").includes("text/x-component")
+    && freshRsc(response)
+    && !/(?:^|,)\s*(?:private|no-store|no-cache)\b/i.test(control)
+    && !/(?:^|,)\s*(?:\*|cookie|authorization)\s*(?:,|$)/i.test(vary)
+    && !response.headers.has("set-cookie");
+}
+
+async function handleRsc(event) {
+  const { request } = event;
+  // Compare against the REQUESTING PAGE's build when it has reported one:
+  // right after this worker updates, the old page is still running and must
+  // not be fed the new build's payloads either.
+  const pageBuild = clientBuilds.get(event.clientId) || BUILD_ID;
+  const canCache = pageBuild === BUILD_ID && !request.headers.has("authorization");
+  const cache = canCache ? await caches.open(RSC_CACHE).catch(() => null) : null;
+  if (cache) {
+    const cached = await cache.match(request).catch(() => null);
+    if (cached && freshRsc(cached)) return cached;
+  }
+  const response = await fetch(request);
+  const serverBuild = response.headers.get("x-build-id");
+  if (serverBuild && serverBuild !== pageBuild) return Response.error();
+  if (cache && cacheableRsc(response)) {
+    const copy = response.clone();
+    event.waitUntil((async () => {
+      await cache.put(request, copy);
+      const keys = await cache.keys();
+      for (const key of keys.slice(0, Math.max(0, keys.length - RSC_MAX_ENTRIES))) {
+        await cache.delete(key);
+      }
+    })().catch(() => {}));
+  }
+  return response;
+}
+
 self.addEventListener("fetch", (event) => {
   const { request } = event;
   if (request.method !== "GET") return;
@@ -231,23 +284,8 @@ self.addEventListener("fetch", (event) => {
   if (url.origin !== self.location.origin) return;
   // Never touch user-scoped API traffic.
   if (url.pathname.startsWith("/api/")) return;
-  // RSC payloads go straight to the network and are never cached: a payload
-  // from one build must never be replayed into another build's router, and a
-  // document must never answer an RSC request (or the reverse). A payload the
-  // server minted for a DIFFERENT build is refused outright — the router
-  // treats the failure as a hard navigation, which network-first serves fresh.
   if (request.headers.get("RSC") === "1" || url.searchParams.has("_rsc")) {
-    // Compare against the REQUESTING PAGE's build when it has reported one:
-    // right after this worker updates, the old page is still running and must
-    // not be fed the new build's payloads either.
-    const pageBuild = clientBuilds.get(event.clientId) || BUILD_ID;
-    event.respondWith(
-      fetch(request).then((response) => {
-        const serverBuild = response.headers.get("x-build-id");
-        if (serverBuild && serverBuild !== pageBuild) return Response.error();
-        return response;
-      })
-    );
+    event.respondWith(handleRsc(event));
     return;
   }
 

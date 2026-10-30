@@ -1,11 +1,11 @@
-import { NextRequest, NextResponse } from "next/server";
+import { privateHandler, privateJson } from "@/app/api/_lib/private-json";
+import { readSession } from "@/app/api/_lib/read-session";
+import { NextRequest } from "next/server";
 import { sql } from "@/lib/db";
-import { handler, intParam, likeEscape, dateParam } from "@/lib/api";
-import { requireUser } from "@/lib/auth";
+import { intParam, likeEscape, dateParam } from "@/lib/api";
 
 // Cross-group expense search for the current user.
-export const GET = handler(async (req: NextRequest) => {
-  const user = await requireUser();
+export const GET = privateHandler(async (req: NextRequest) => {
   const q = req.nextUrl.searchParams;
   const text = likeEscape(q.get("q"));
   const groupId = intParam(q.get("groupId"));
@@ -16,7 +16,7 @@ export const GET = handler(async (req: NextRequest) => {
   const to = dateParam(q.get("to"));
   const limit = Math.min(Math.max(Number(q.get("limit")) || 50, 1), 200);
 
-  const rows = await sql`
+  const { rows: [rows] } = await readSession((userId) => [sql`
     SELECT e.id, e.group_id, g.name AS group_name, e.title, e.amount_cents, e.currency,
       e.converted_cents, e.expense_date, e.payer_id, p.display_name AS payer_name,
       c.name AS category_name, e.split_method
@@ -24,7 +24,7 @@ export const GET = handler(async (req: NextRequest) => {
     JOIN groups g ON g.id = e.group_id
     JOIN users p ON p.id = e.payer_id
     LEFT JOIN categories c ON c.id = e.category_id
-    WHERE e.group_id IN (SELECT group_id FROM group_members WHERE user_id = ${user.id})
+    WHERE e.group_id IN (SELECT group_id FROM group_members WHERE user_id = ${userId})
       AND (${text}::text IS NULL OR e.title ILIKE '%' || ${text} || '%' ESCAPE '\' OR e.notes ILIKE '%' || ${text} || '%' ESCAPE '\')
       AND (${groupId}::bigint IS NULL OR e.group_id = ${groupId})
       AND (${categoryId}::bigint IS NULL OR e.category_id = ${categoryId})
@@ -34,12 +34,12 @@ export const GET = handler(async (req: NextRequest) => {
       AND (${from}::date IS NULL OR e.expense_date >= ${from}::date)
       AND (${to}::date IS NULL OR e.expense_date <= ${to}::date)
     ORDER BY e.expense_date DESC, e.id DESC
-    LIMIT ${limit + 1}`;
+    LIMIT ${limit + 1}`]);
 
   const hasMore = rows.length > limit;
   const page = hasMore ? rows.slice(0, limit) : rows;
 
-  return NextResponse.json({
+  return privateJson(req, {
     hasMore,
     expenses: page.map((e) => ({
       id: Number(e.id),

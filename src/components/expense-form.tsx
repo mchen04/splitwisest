@@ -6,11 +6,14 @@ import {
   api, ApiClientError, fmtMoney, todayStr, CURRENCIES, amountInputToCents, useApiData, refreshExpenseDetails,
 } from "@/lib/client";
 import { rememberExpenseGroup } from "@/lib/last-group";
-import { readDraft, writeDraft, clearDraft } from "@/lib/drafts";
+import { writeDraft, clearDraft } from "@/lib/drafts";
 import { currencyStep } from "@/lib/currencies";
 import { splitPercentage } from "@/lib/money";
 import { ActionError, Button, Field, Input, Select, Textarea, Modal, ErrorNote, toast, confirmAction, radioGroupKeyDown, radioTabIndex } from "./ui";
 import { ParticipantSplit, ItemizedSplit, Method, METHOD_LABELS, ItemRow } from "./expense-splits";
+import { EXPENSE_DRAFT_KEY, readExpenseDraft, type ExpenseDraft, type ExpenseFields } from "./expense-draft";
+export { EXPENSE_DRAFT_KEY, readExpenseDraft } from "./expense-draft";
+export type { ExpenseDraft } from "./expense-draft";
 
 const CALIFORNIA_TAX_RATE = "7.25";
 
@@ -46,39 +49,6 @@ interface ExistingExpense {
   shares: { userId: number; shareCents: number; rawInput: number | null }[];
   items: { name: string; amountCents: number; participantIds: number[] }[];
   attachments: { id: number; filename: string; mime: string }[];
-}
-
-export const EXPENSE_DRAFT_KEY = "expense";
-
-interface ExpenseFields {
-  title: string;
-  amount: string;
-  currency: string;
-  date: string;
-  payerId: number;
-  categoryId: number | "";
-  notes: string;
-  showDetails: boolean;
-  method: Method;
-  selected: number[];
-  values: Record<number, string>;
-  items: ItemRow[];
-  taxEnabled: boolean;
-  taxRate: string;
-  tipEnabled: boolean;
-  tipRate: string;
-}
-
-export interface ExpenseDraft {
-  mode: "new" | "edit";
-  groupId: number;
-  expenseId?: number;
-  updatedAt?: string;
-  fields: ExpenseFields;
-}
-
-export function readExpenseDraft(meId: number): ExpenseDraft | null {
-  return readDraft<ExpenseDraft>(meId, EXPENSE_DRAFT_KEY);
 }
 
 function adjustmentRate(adjustmentCents: number, subtotalCents: number, fallback: string): string {

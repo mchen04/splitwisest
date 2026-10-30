@@ -60,7 +60,8 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
     detail, expenses, insightExpenses, insightError, hasMoreExpenses, recurring, settlements, hasMoreSettlements,
     activity, refreshKey, loadError, loadDetail, reloadInsights, refreshAll, refreshBalancePreview, pollBalancePreview, detailSettled,
     refreshGroupBalanceMutation,
-  } = useGroupPageData({ groupId, filters, expenseLimit, settlementLimit, insightsEnabled: tab === "insights" });
+  } = useGroupPageData({ groupId, filters, expenseLimit, settlementLimit, insightsEnabled: tab === "insights",
+    activityEnabled: tab === "activity", balancesEnabled: tab === "balances" });
 
   // modals
   const [expenseOpen, setExpenseOpen] = useState(false);

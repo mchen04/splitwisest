@@ -1,3 +1,4 @@
+import { readSession } from "@/app/api/_lib/read-session";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { handler } from "@/lib/api";
@@ -6,16 +7,17 @@ import { sql } from "@/lib/db";
 import { mapNotification } from "@/lib/notifications";
 
 export const GET = handler(async (req: NextRequest) => {
-  const user = await requireUser();
-  const before = z.coerce.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional().parse(req.nextUrl.searchParams.get("before") ?? undefined);
-  const unread = req.nextUrl.searchParams.get("unread") === "1";
-  const [items, counts] = await sql.transaction((tx) => [
-    tx`SELECT * FROM notifications n WHERE user_id = ${user.id} AND notification_visible(n)
+  const { rows: [items, counts] } = await readSession((userId) => {
+    const before = z.coerce.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional().parse(req.nextUrl.searchParams.get("before") ?? undefined);
+    const unread = req.nextUrl.searchParams.get("unread") === "1";
+    return [
+      sql`SELECT * FROM notifications n WHERE user_id = ${userId} AND notification_visible(n)
       AND (${before ?? null}::bigint IS NULL OR id < ${before ?? null})
       AND (NOT ${unread} OR read_at IS NULL) ORDER BY id DESC LIMIT 51`,
-    tx`SELECT count(*)::int AS unread FROM notifications n
-      WHERE user_id = ${user.id} AND read_at IS NULL AND notification_visible(n)`,
-  ]);
+      sql`SELECT count(*)::int AS unread FROM notifications n
+      WHERE user_id = ${userId} AND read_at IS NULL AND notification_visible(n)`,
+    ];
+  });
   return NextResponse.json({ notifications: items.slice(0, 50).map(mapNotification),
     unreadCount: counts[0].unread, nextBefore: items.length > 50 ? Number(items[49].id) : null },
     { headers: { "Cache-Control": "private, no-store" } });

@@ -1,3 +1,5 @@
+import { privateHandler, privateJson } from "@/app/api/_lib/private-json";
+import { readSession } from "@/app/api/_lib/read-session";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { sql } from "@/lib/db";
@@ -6,25 +8,24 @@ import { requireUser } from "@/lib/auth";
 import { CURRENCIES } from "@/lib/fx";
 import { createGroup } from "@/lib/groups";
 
-export const GET = handler(async () => {
-  const user = await requireUser();
+export const GET = privateHandler(async (req?: NextRequest) => {
   // One round-trip: the viewer's own net per group comes from a LATERAL over
   // group_balance_rows(g.id) filtered to this user, folded into the group-list
   // query — replacing the previous N+1 of one balance round-trip per group.
-  const groups = await sql`
+  const { rows: [groups] } = await readSession((userId) => [sql`
     SELECT g.id, g.name, g.currency, g.invite_code,
       (SELECT COUNT(*) FROM group_members m WHERE m.group_id = g.id) AS member_count,
       (SELECT COUNT(*) FROM expenses e WHERE e.group_id = g.id) AS expense_count,
       (SELECT COALESCE(MAX(m.id), 0) FROM messages m
-        WHERE m.channel = 'group' AND m.group_id = g.id AND m.sender_id <> ${user.id}) AS last_message_id,
+        WHERE m.channel = 'group' AND m.group_id = g.id AND m.sender_id <> ${userId}) AS last_message_id,
       COALESCE((SELECT rs.last_id FROM read_state rs
-        WHERE rs.user_id = ${user.id} AND rs.scope = 'msg:group:' || g.id), 0) AS read_message_id,
+        WHERE rs.user_id = ${userId} AND rs.scope = 'msg:group:' || g.id), 0) AS read_message_id,
       COALESCE(b.net_cents, 0) AS my_net_cents
     FROM groups g JOIN group_members gm ON gm.group_id = g.id
-    LEFT JOIN LATERAL group_balance_rows(g.id) b ON b.user_id = ${user.id}
-    WHERE gm.user_id = ${user.id}
-    ORDER BY (SELECT MAX(a.id) FROM activity a WHERE a.group_id = g.id) DESC NULLS LAST, g.created_at DESC`;
-  return NextResponse.json({
+    LEFT JOIN LATERAL group_balance_rows(g.id) b ON b.user_id = ${userId}
+    WHERE gm.user_id = ${userId}
+    ORDER BY (SELECT MAX(a.id) FROM activity a WHERE a.group_id = g.id) DESC NULLS LAST, g.created_at DESC`]);
+  return privateJson(req, {
     groups: groups.map((g) => ({
       id: Number(g.id),
       name: g.name,
