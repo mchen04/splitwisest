@@ -105,13 +105,14 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
     api<{ detail: string; list: string; recurringDue: boolean }>(`/api/groups/${tickGroup}/version`)
       .then((v) => {
         const now = latest.current;
-        if (now.groupId !== tickGroup) return;
+        if (document.hidden || now.groupId !== tickGroup) return;
         if (!now.detailSettled) deferred.current.detail = { version: v.detail, due: v.recurringDue };
         else if (v.recurringDue || v.detail !== now.detail?.version) pollBalancePreview();
         if (!now.listSettled) deferred.current.list = v.list;
         else if (v.list !== now.list?.version) pollGroupBalanceList();
       })
       .catch(() => {
+        if (document.hidden) return;
         pollBalancePreview();
         pollGroupBalanceList();
       })

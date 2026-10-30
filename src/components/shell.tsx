@@ -116,7 +116,7 @@ export function AppShell({ title, children }: { title?: string; children: ReactN
 
   useEffect(() => {
     if (!me) return;
-    const refresh = () => { void syncExistingPush(me.id).catch(() => {}); };
+    const refresh = () => { if (!document.hidden) void syncExistingPush(me.id).catch(() => {}); };
     refresh();
     window.addEventListener("pageshow", refresh);
     window.addEventListener("focus", refresh);
