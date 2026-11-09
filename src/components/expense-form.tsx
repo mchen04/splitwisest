@@ -9,6 +9,7 @@ import { rememberExpenseGroup } from "@/lib/last-group";
 import { writeDraft, clearDraft } from "@/lib/drafts";
 import { currencyStep } from "@/lib/currencies";
 import { splitPercentage } from "@/lib/money";
+import { shareInputValue } from "@/lib/share-input";
 import { ActionError, Button, Field, Input, Select, Textarea, Modal, ErrorNote, toast, confirmAction, radioGroupKeyDown, radioTabIndex } from "./ui";
 import { ParticipantSplit, ItemizedSplit, Method, METHOD_LABELS, ItemRow } from "./expense-splits";
 import { EXPENSE_DRAFT_KEY, readExpenseDraft, type ExpenseDraft, type ExpenseFields } from "./expense-draft";
@@ -351,7 +352,7 @@ export function ExpenseForm({
         : { ok: false, msg: `Currently ${sum.toFixed(1)}% — must equal 100%` };
     }
     if (method === "shares") {
-      const sum = participantList.reduce((s, m) => s + (parseFloat(values[m.id] || "0") || 0), 0);
+      const sum = participantList.reduce((s, m) => s + shareInputValue(values[m.id]), 0);
       return sum > 0 ? { ok: true, msg: `${sum} total shares` } : { ok: false, msg: "Add at least one share" };
     }
     if (method === "itemized") {
@@ -409,7 +410,9 @@ export function ExpenseForm({
           ? undefined
           : method === "exact"
             ? amountInputToCents(values[m.id] || "0") ?? 0
-            : parseFloat(values[m.id] || "0") || 0,
+            : method === "shares"
+              ? shareInputValue(values[m.id])
+              : parseFloat(values[m.id] || "0") || 0,
     }));
   }
 
