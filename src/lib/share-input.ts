@@ -1,3 +1,3 @@
 export function shareInputValue(value: string | undefined): number {
-  return parseFloat(value || "0") || 0;
+  return parseFloat(value || "1") || 0;
 }
