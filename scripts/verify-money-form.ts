@@ -62,7 +62,7 @@ async function capture(page: Page, name: string) {
 }
 
 async function verifyShares(context: BrowserContext, page: Page) {
-  async function stored(group: FixtureGroup, id: number, expected: number[], weights: number[], label: string) {
+  async function stored(group: FixtureGroup, id: number, expected: readonly number[], weights: number[], label: string) {
     const { expense } = await api(context, `/api/expenses/${id}`);
     const ordered = users.map((user) => expense.shares.find((s: { userId: number }) => s.userId === user.id));
     const actual = ordered.map((s) => s.shareCents);
@@ -115,7 +115,7 @@ async function verifyShares(context: BrowserContext, page: Page) {
     assert.equal(saved.status(), 200, await saved.text());
     const id = (await saved.json()).id;
     await page.getByRole("button", { name: `View ${title}`, exact: true }).waitFor();
-    await stored(group, id, [...expected], [2, 1, 1], `${currency} blank shares save`);
+    await stored(group, id, expected, [2, 1, 1], `${currency} blank shares save`);
     await capture(page, currency === "USD" ? "after-saved" : "yen-saved");
     await page.getByRole("tab", { name: "Balances", exact: true }).click();
     for (const user of users.slice(1)) {
@@ -130,7 +130,7 @@ async function verifyShares(context: BrowserContext, page: Page) {
     await edit.getByRole("button", { name: "Save changes", exact: true }).click();
     assert.equal((await updated).status(), 200);
     await page.reload();
-    await stored(group, id, [...expected], [2, 1, 1], `${currency} unchanged edit and reload`);
+    await stored(group, id, expected, [2, 1, 1], `${currency} unchanged edit and reload`);
     edit = await openEdit(title, ["2", "1", "1"]);
     await capture(page, currency === "USD" ? "after-edit-reload" : "yen-edit-reload");
     await edit.getByLabel("Shares for Ben", { exact: true }).fill("9");

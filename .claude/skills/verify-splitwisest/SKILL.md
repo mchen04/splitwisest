@@ -16,7 +16,6 @@ This checkout uses PostgreSQL on 55433, its HTTP proxy on 54444, and Next on 339
 The helper finds Docker inside `/Applications/Docker.app` when needed.
 
 ```sh
-export SPLITWISEST_VERIFY_DIR="$HOME/.cache/splitwisest/t_a5ac96f3"
 export SPLITWISEST_CHROMIUM_PATH="$HOME/Library/Caches/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-mac-arm64/chrome-headless-shell"
 .claude/skills/verify-splitwisest/scripts/control.mjs launch
 ```
@@ -66,7 +65,8 @@ Do not replace those writes with API expense creation or internal setters when p
 
 ## Evidence
 
-Proof files stay in `$SPLITWISEST_VERIFY_DIR/evidence/`.
+The helper stores proof files under `~/.cache/splitwisest/verify-<checkout hash>/evidence/` by default.
+Set `SPLITWISEST_VERIFY_DIR` to override the parent directory.
 
 - `after-form.png` and `.aria.txt` show 2 plus two empty boxes and four total shares.
 - `after-saved.png` and `.aria.txt` show the saved USD expense.
@@ -112,12 +112,12 @@ The underlying harness can also run against an already owned instance:
 DATABASE_URL=postgres://postgres:postgres@127.0.0.1:55433/splitwisest_money_qa \
 NEON_LOCAL_PROXY=http://127.0.0.1:54444/sql \
 SPLITWISEST_BROWSER_URL=http://localhost:3391 \
-SPLITWISEST_EVIDENCE_DIR="$SPLITWISEST_VERIFY_DIR/evidence" \
+SPLITWISEST_EVIDENCE_DIR="$HOME/.cache/splitwisest/money-form/evidence" \
 SPLITWISEST_MONEY_FORM_FEATURE=shares \
 pnpm exec tsx scripts/verify-money-form.ts
 ```
 
 Keep `SPLITWISEST_CHROMIUM_PATH` exported for this command.
 Do not run `pnpm build` or the full suite on this Mac.
-For this fix, run the changed regression plus `money.test.ts`, `money-invariants.test.ts`, `tsc --noEmit`, and `pnpm lint`.
+For money-form changes, run `share-input.test.ts`, `money.test.ts`, `money-invariants.test.ts`, `tsc --noEmit`, and `pnpm lint`.
 Use `/maintain-verification-skill` when routes, controls, or money rules change.
