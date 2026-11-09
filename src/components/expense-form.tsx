@@ -9,6 +9,7 @@ import { rememberExpenseGroup } from "@/lib/last-group";
 import { writeDraft, clearDraft } from "@/lib/drafts";
 import { currencyStep } from "@/lib/currencies";
 import { splitPercentage } from "@/lib/money";
+import { shareInputValue } from "@/lib/share-input";
 import { ActionError, Button, Field, Input, Select, Textarea, Modal, ErrorNote, toast, confirmAction, radioGroupKeyDown, radioTabIndex } from "./ui";
 import { ParticipantSplit, ItemizedSplit, Method, METHOD_LABELS, ItemRow } from "./expense-splits";
 import { EXPENSE_DRAFT_KEY, readExpenseDraft, type ExpenseDraft, type ExpenseFields } from "./expense-draft";
@@ -176,22 +177,6 @@ export function ExpenseForm({
       : stored.mode === "new" && stored.groupId === groupId));
   }
 
-  useEffect(() => {
-    if (!open || !baseline || baseline.cycle !== cycle.current) return;
-    const stored = readExpenseDraft(meId);
-    const owned = Boolean(stored && (editId !== null
-      ? stored.mode === "edit" && stored.expenseId === editId
-      : stored.mode === "new" && stored.groupId === groupId));
-    if (fieldsJson === baseline.json) {
-      if (owned) clearDraft(meId, EXPENSE_DRAFT_KEY);
-      return;
-    }
-    const context: Omit<ExpenseDraft, "fields"> = editId !== null
-      ? { mode: "edit", groupId, expenseId: editId, updatedAt: editVersion ?? undefined }
-      : { mode: "new", groupId };
-    writeDraft(meId, EXPENSE_DRAFT_KEY, { ...context, fields: JSON.parse(fieldsJson) } satisfies ExpenseDraft);
-  }, [open, baseline, fieldsJson, groupId, editId, editVersion, meId]);
-
   function closeForm() {
     if (ownsStoredDraft()) clearDraft(meId, EXPENSE_DRAFT_KEY);
     onClose();
@@ -281,6 +266,22 @@ export function ExpenseForm({
   }, [open, existing?.id]);
 
   useEffect(() => {
+    if (!open || !baseline || baseline.cycle !== cycle.current) return;
+    const stored = readExpenseDraft(meId);
+    const owned = Boolean(stored && (editId !== null
+      ? stored.mode === "edit" && stored.expenseId === editId
+      : stored.mode === "new" && stored.groupId === groupId));
+    if (fieldsJson === baseline.json) {
+      if (owned) clearDraft(meId, EXPENSE_DRAFT_KEY);
+      return;
+    }
+    const context: Omit<ExpenseDraft, "fields"> = editId !== null
+      ? { mode: "edit", groupId, expenseId: editId, updatedAt: editVersion ?? undefined }
+      : { mode: "new", groupId };
+    writeDraft(meId, EXPENSE_DRAFT_KEY, { ...context, fields: JSON.parse(fieldsJson) } satisfies ExpenseDraft);
+  }, [open, baseline, fieldsJson, groupId, editId, editVersion, meId]);
+
+  useEffect(() => {
     if (shownGroup.current === groupId) return;
     shownGroup.current = groupId;
     if (!open || existing) return;
@@ -351,7 +352,7 @@ export function ExpenseForm({
         : { ok: false, msg: `Currently ${sum.toFixed(1)}% — must equal 100%` };
     }
     if (method === "shares") {
-      const sum = participantList.reduce((s, m) => s + (parseFloat(values[m.id] || "0") || 0), 0);
+      const sum = participantList.reduce((s, m) => s + shareInputValue(values[m.id]), 0);
       return sum > 0 ? { ok: true, msg: `${sum} total shares` } : { ok: false, msg: "Add at least one share" };
     }
     if (method === "itemized") {
@@ -409,7 +410,9 @@ export function ExpenseForm({
           ? undefined
           : method === "exact"
             ? amountInputToCents(values[m.id] || "0") ?? 0
-            : parseFloat(values[m.id] || "0") || 0,
+            : method === "shares"
+              ? shareInputValue(values[m.id])
+              : parseFloat(values[m.id] || "0") || 0,
     }));
   }
 
