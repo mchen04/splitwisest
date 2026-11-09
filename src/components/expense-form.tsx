@@ -177,22 +177,6 @@ export function ExpenseForm({
       : stored.mode === "new" && stored.groupId === groupId));
   }
 
-  useEffect(() => {
-    if (!open || !baseline || baseline.cycle !== cycle.current) return;
-    const stored = readExpenseDraft(meId);
-    const owned = Boolean(stored && (editId !== null
-      ? stored.mode === "edit" && stored.expenseId === editId
-      : stored.mode === "new" && stored.groupId === groupId));
-    if (fieldsJson === baseline.json) {
-      if (owned) clearDraft(meId, EXPENSE_DRAFT_KEY);
-      return;
-    }
-    const context: Omit<ExpenseDraft, "fields"> = editId !== null
-      ? { mode: "edit", groupId, expenseId: editId, updatedAt: editVersion ?? undefined }
-      : { mode: "new", groupId };
-    writeDraft(meId, EXPENSE_DRAFT_KEY, { ...context, fields: JSON.parse(fieldsJson) } satisfies ExpenseDraft);
-  }, [open, baseline, fieldsJson, groupId, editId, editVersion, meId]);
-
   function closeForm() {
     if (ownsStoredDraft()) clearDraft(meId, EXPENSE_DRAFT_KEY);
     onClose();
@@ -280,6 +264,22 @@ export function ExpenseForm({
     // sync replaces members/categories references and must not wipe live input.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, existing?.id]);
+
+  useEffect(() => {
+    if (!open || !baseline || baseline.cycle !== cycle.current) return;
+    const stored = readExpenseDraft(meId);
+    const owned = Boolean(stored && (editId !== null
+      ? stored.mode === "edit" && stored.expenseId === editId
+      : stored.mode === "new" && stored.groupId === groupId));
+    if (fieldsJson === baseline.json) {
+      if (owned) clearDraft(meId, EXPENSE_DRAFT_KEY);
+      return;
+    }
+    const context: Omit<ExpenseDraft, "fields"> = editId !== null
+      ? { mode: "edit", groupId, expenseId: editId, updatedAt: editVersion ?? undefined }
+      : { mode: "new", groupId };
+    writeDraft(meId, EXPENSE_DRAFT_KEY, { ...context, fields: JSON.parse(fieldsJson) } satisfies ExpenseDraft);
+  }, [open, baseline, fieldsJson, groupId, editId, editVersion, meId]);
 
   useEffect(() => {
     if (shownGroup.current === groupId) return;
