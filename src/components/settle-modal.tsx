@@ -169,12 +169,12 @@ export function SettleModal({
         {activeUnit && <p className="text-meta text-ink-faint">Recording in {activeUnit.name}.</p>}
         <p className="text-meta text-ink-faint">Records a payment made outside SplitWisest, such as cash or a bank transfer. No money moves.</p>
         <ErrorNote message={error} />
-        <div className="flex justify-end gap-2">
-          <Button type="button" variant="secondary" onClick={onClose}>
+        <div className="flex min-w-0 justify-end gap-2">
+          <Button type="button" variant="secondary" onClick={onClose} className="shrink-0">
             Cancel
           </Button>
-          <Button type="submit" busy={busy} data-autofocus>
-            {existing ? "Save changes" : `Record ${amount ? amountText(amountInputToCents(amount) ?? 0) : ""}`}
+          <Button type="submit" busy={busy} data-autofocus className="min-w-0 !shrink">
+            <span className="truncate">{existing ? "Save changes" : `Record ${amount ? amountText(amountInputToCents(amount) ?? 0) : ""}`}</span>
           </Button>
         </div>
       </form>

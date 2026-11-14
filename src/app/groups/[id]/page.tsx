@@ -27,7 +27,7 @@ import { ChatPane } from "@/components/chat";
 import { SpendCharts } from "@/components/spend-charts";
 import { ActivitySummary } from "@/components/activity-summary";
 import { Expense, Settlement, useGroupPageData } from "./use-group-page-data";
-import { formatUnitAmount } from "@/lib/units";
+import { formatUnitAmount, formatUnitQuantity } from "@/lib/units";
 
 type Tab = "expenses" | "balances" | "insights" | "chat" | "activity";
 type GroupBalanceSummary = { id: number; title: string; amountCents: number; updatedAt: string };
@@ -794,58 +794,43 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
           )}
         </Card>
 
-        {detail.unitBalances.length > 0 && (
-          <Card>
-            <CardHeader title="Unit balances" />
-            <div className="divide-y divide-line">
-              {detail.unitBalances.map((unit) => {
-                const rows = unit.reconcile
-                  ? unit.transfers.map((row) => ({ ...row, directed: true }))
-                  : unit.obligations.map((row) => ({ ...row, directed: true }));
-                return (
-                  <div key={unit.unitId} className="px-4 py-2">
-                    <p className="text-body font-semibold">{unit.name}</p>
-                    {rows.length === 0 ? (
-                      <p className="text-body text-ink-faint">Settled up</p>
-                    ) : (
-                      <ul className="mt-1 space-y-1">
-                        {rows.map((row, index) => {
-                          const mine = me?.id === row.from || me?.id === row.to;
-                          return (
-                            <li key={index} className="flex min-h-[var(--control-h-sm)] items-center gap-2 text-body">
-                              <span className="min-w-0 flex-1">
-                                {row.from === me?.id ? "You" : memberName(row.from)} pay{row.from === me?.id ? "" : "s"}{" "}
-                                {row.to === me?.id ? "you" : memberName(row.to)}
-                              </span>
-                              <span className="tnum max-w-[45%] shrink-0 break-words text-right font-semibold">{formatUnitAmount(row.amountCents, unit.name)}</span>
-                              {mine && (
-                                <Button
-                                  size="sm"
-                                  variant="secondary"
-                                  onClick={() => openUnitSettle({ id: unit.unitId, name: unit.name }, row.from, row.to, row.amountCents)}
-                                  aria-label={`Record ${unit.name} payment: ${memberName(row.from)} pays ${memberName(row.to)}`}
-                                >
-                                  <HandCoins className="h-4 w-4" /> Record
-                                </Button>
-                              )}
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    )}
-                    <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-meta text-ink-faint">
-                      {unit.nets.filter((row) => row.netCents !== 0).map((row) => (
-                        <span key={row.userId} className="tnum">
-                          {row.displayName}: {formatUnitAmount(row.netCents, unit.name)}
+        {detail.unitBalances.map((unit) => {
+          const rows = unit.reconcile ? unit.transfers : unit.obligations;
+          return (
+            <Card key={unit.unitId}>
+              <CardHeader title={unit.name} meta={unit.reconcile ? "simplified" : "not simplified"} />
+              {rows.length === 0 ? (
+                <p className="px-4 py-3 text-body text-ink-faint">Nobody owes any {unit.name}.</p>
+              ) : (
+                <ul className="divide-y divide-line">
+                  {rows.map((row) => {
+                    const mine = me?.id === row.from || me?.id === row.to;
+                    return (
+                      <li key={`${row.from}:${row.to}`} className="flex min-h-[var(--row-h)] items-center gap-3 px-4 py-1.5">
+                        <Avatar name={memberName(row.from)} size="sm" />
+                        <span className="min-w-0 flex-1 text-body">{suggestionText(row)}</span>
+                        <span className={`flex min-w-0 max-w-[40%] shrink-0 flex-col items-end text-right ${row.from === me?.id ? "text-owe" : row.to === me?.id ? "text-owed" : ""}`}>
+                          <span className="tnum text-row font-semibold">{formatUnitQuantity(row.amountCents)}</span>
+                          <span className="max-w-full truncate text-meta">{unit.name}</span>
                         </span>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </Card>
-        )}
+                        {mine && (
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={() => openUnitSettle({ id: unit.unitId, name: unit.name }, row.from, row.to, row.amountCents)}
+                            aria-label={`Record ${unit.name} payment: ${memberName(row.from)} pays ${memberName(row.to)}`}
+                          >
+                            <HandCoins className="h-4 w-4" /> <span className="hidden sm:inline">Record payment</span><span className="sm:hidden">Record</span>
+                          </Button>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </Card>
+          );
+        })}
 
         {/* Below lg there is no members rail, so each member's net lives here. */}
         <Card className="lg:hidden">
