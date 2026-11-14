@@ -27,6 +27,7 @@ import { ChatPane } from "@/components/chat";
 import { SpendCharts } from "@/components/spend-charts";
 import { ActivitySummary } from "@/components/activity-summary";
 import { Expense, Settlement, useGroupPageData } from "./use-group-page-data";
+import { formatUnitAmount } from "@/lib/units";
 
 type Tab = "expenses" | "balances" | "insights" | "chat" | "activity";
 type GroupBalanceSummary = { id: number; title: string; amountCents: number; updatedAt: string };
@@ -132,6 +133,7 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
     extraGroupBalancePage.changeCursor === groupBalancesData?.changeCursor ? extraGroupBalancePage : null;
   const [editing, setEditing] = useState<Parameters<typeof ExpenseForm>[0]["existing"]>(null);
   const [settleOpen, setSettleOpen] = useState(false);
+  const [settleUnit, setSettleUnit] = useState<{ id: number; name: string } | null>(null);
   const [settlePrefill, setSettlePrefill] = useState<{ payerId: number; recipientId: number; amountCents: number } | null>(null);
   const [settleStart, setSettleStart] = useState<{ payerId: number; recipientId: number } | null>(null);
   const [settleChooserOpen, setSettleChooserOpen] = useState(false);
@@ -284,10 +286,12 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
     }
   }
 
-  async function deleteExpense(expense: Pick<Expense, "id" | "title" | "amountCents" | "currency" | "updatedAt">) {
+  async function deleteExpense(expense: Pick<Expense, "id" | "title" | "amountCents" | "currency" | "unitId" | "unitName" | "updatedAt">) {
     if (!(await confirmAction({
       title: "Delete expense?",
-      message: <>Delete <strong className="text-ink">{expense.title}</strong> ({fmtMoney(expense.amountCents, expense.currency)})? Balances will update for everyone. This can&apos;t be undone.</>,
+      message: <>Delete <strong className="text-ink">{expense.title}</strong> ({expense.unitId && expense.unitName
+        ? formatUnitAmount(expense.amountCents, expense.unitName)
+        : fmtMoney(expense.amountCents, expense.currency)})? Balances will update for everyone. This can&apos;t be undone.</>,
       confirmLabel: "Delete expense",
       danger: true,
     }))) return;
@@ -325,7 +329,9 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
   async function deletePayment(s: Settlement) {
     if (!(await confirmAction({
       title: "Delete payment?",
-      message: `Delete the recorded payment of ${fmtMoney(s.amountCents, s.currency)} from ${s.payerName} to ${s.recipientName}? Balances will update.`,
+      message: `Delete the recorded payment of ${s.unitId && s.unitName
+        ? formatUnitAmount(s.amountCents, s.unitName)
+        : fmtMoney(s.amountCents, s.currency)} from ${s.payerName} to ${s.recipientName}? Balances will update.`,
       confirmLabel: "Delete payment",
       danger: true,
     }))) return;
@@ -386,6 +392,7 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
   const currency = detail?.group.currency ?? "USD";
 
   function openSettle() {
+    setSettleUnit(null);
     // The suggested payments already know who pays whom and how much. With one,
     // open it ready to record; with several, let the user pick; with none, start blank.
     if (mySuggestions.length === 1) {
@@ -400,8 +407,15 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
     }
   }
   function settleCustom() {
+    setSettleUnit(null);
     setSettleChooserOpen(false);
     setSettlePrefill(null);
+    setSettleOpen(true);
+  }
+
+  function openUnitSettle(unit: { id: number; name: string }, from: number, to: number, amountCents: number) {
+    setSettleUnit(unit);
+    setSettlePrefill({ payerId: from, recipientId: to, amountCents });
     setSettleOpen(true);
   }
 
@@ -530,7 +544,15 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
           ) : visibleBalances.length === 0 ? (
             <p className="px-3 py-3 text-body text-ink-faint">No members match.</p>
           ) : (
-            <MemberNets balances={visibleBalances} currency={detail.group.currency} meId={me?.id} compact />
+            <>
+              <MemberNets balances={visibleBalances} currency={detail.group.currency} meId={me?.id} compact />
+              {detail.unitBalances.length > 0 && (
+                <div className="border-t border-line">
+                  <SectionLabel className="px-3 py-1.5">Units</SectionLabel>
+                  <UnitNets units={detail.unitBalances} meId={me?.id} />
+                </div>
+              )}
+            </>
           )}
         </div>
       </Card>
@@ -659,11 +681,15 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
                           <RowMeta>
                             {e.payerId === me?.id ? "You" : e.payerName} paid
                             {e.categoryName ? ` · ${e.categoryName}` : ""}
-                            {e.currency !== detail?.group.currency && ` · ${fmtMoney(e.amountCents, e.currency)}`}
+                            {e.unitId && e.unitName
+                              ? ` · ${formatUnitAmount(e.amountCents, e.unitName)}`
+                              : e.currency !== detail?.group.currency && ` · ${fmtMoney(e.amountCents, e.currency)}`}
                           </RowMeta>
                         </span>
-                        <span className="shrink-0 text-right">
-                          <span className="tnum block text-body font-semibold">{fmtMoney(e.convertedCents, detail?.group.currency ?? e.currency)}</span>
+                        <span className="max-w-[45%] shrink-0 text-right">
+                          <span className="tnum block text-body font-semibold">{e.unitId && e.unitName
+                            ? formatUnitAmount(e.convertedCents, e.unitName)
+                            : fmtMoney(e.convertedCents, detail?.group.currency ?? e.currency)}</span>
                           <span className={`block text-meta font-medium ${
                             me && e.payerId === me.id && e.convertedCents - myShare > 0
                               ? "text-owed"
@@ -672,9 +698,13 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
                                 : "text-ink-faint"
                           }`}>
                             {me && e.payerId === me.id
-                              ? `you lent ${fmtMoney(e.convertedCents - myShare, detail?.group.currency ?? e.currency)}`
+                              ? `you lent ${e.unitId && e.unitName
+                                ? formatUnitAmount(e.convertedCents - myShare, e.unitName)
+                                : fmtMoney(e.convertedCents - myShare, detail?.group.currency ?? e.currency)}`
                               : myShare > 0
-                                ? `your share ${fmtMoney(myShare, detail?.group.currency ?? e.currency)}`
+                                ? `your share ${e.unitId && e.unitName
+                                  ? formatUnitAmount(myShare, e.unitName)
+                                  : fmtMoney(myShare, detail?.group.currency ?? e.currency)}`
                                 : "not involved"}
                           </span>
                         </span>
@@ -721,7 +751,7 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
             </Card>
           )}
           {insightExpenses && insightExpenses.length > 0 && detail && (
-            <SpendCharts expenses={insightExpenses} currency={detail.group.currency} />
+            <SpendCharts expenses={insightExpenses.filter((expense) => !expense.unitId)} currency={detail.group.currency} />
           )}
           {insightExpenses?.length === 0 && (
             <Card><EmptyState icon={<PieChart className="h-6 w-6" />} title="No insights yet" hint="Add a few expenses to see spending by category, over time, and by person." /></Card>
@@ -763,6 +793,59 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
             </ul>
           )}
         </Card>
+
+        {detail.unitBalances.length > 0 && (
+          <Card>
+            <CardHeader title="Unit balances" />
+            <div className="divide-y divide-line">
+              {detail.unitBalances.map((unit) => {
+                const rows = unit.reconcile
+                  ? unit.transfers.map((row) => ({ ...row, directed: true }))
+                  : unit.obligations.map((row) => ({ ...row, directed: true }));
+                return (
+                  <div key={unit.unitId} className="px-4 py-2">
+                    <p className="text-body font-semibold">{unit.name}</p>
+                    {rows.length === 0 ? (
+                      <p className="text-body text-ink-faint">Settled up</p>
+                    ) : (
+                      <ul className="mt-1 space-y-1">
+                        {rows.map((row, index) => {
+                          const mine = me?.id === row.from || me?.id === row.to;
+                          return (
+                            <li key={index} className="flex min-h-[var(--control-h-sm)] items-center gap-2 text-body">
+                              <span className="min-w-0 flex-1">
+                                {row.from === me?.id ? "You" : memberName(row.from)} pay{row.from === me?.id ? "" : "s"}{" "}
+                                {row.to === me?.id ? "you" : memberName(row.to)}
+                              </span>
+                              <span className="tnum max-w-[45%] shrink-0 break-words text-right font-semibold">{formatUnitAmount(row.amountCents, unit.name)}</span>
+                              {mine && (
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  onClick={() => openUnitSettle({ id: unit.unitId, name: unit.name }, row.from, row.to, row.amountCents)}
+                                  aria-label={`Record ${unit.name} payment: ${memberName(row.from)} pays ${memberName(row.to)}`}
+                                >
+                                  <HandCoins className="h-4 w-4" /> Record
+                                </Button>
+                              )}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                    <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-meta text-ink-faint">
+                      {unit.nets.filter((row) => row.netCents !== 0).map((row) => (
+                        <span key={row.userId} className="tnum">
+                          {row.displayName}: {formatUnitAmount(row.netCents, unit.name)}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+        )}
 
         {/* Below lg there is no members rail, so each member's net lives here. */}
         <Card className="lg:hidden">
@@ -829,12 +912,16 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
                     <RowMeta>
                       {fmtDate(s.date)}
                       {s.note ? ` · ${s.note}` : ""}
-                      {s.currency !== detail.group.currency ? ` · ${fmtMoney(s.amountCents, s.currency)}` : ""}
+                      {s.unitId && s.unitName
+                        ? ` · ${formatUnitAmount(s.amountCents, s.unitName)}`
+                        : s.currency !== detail.group.currency ? ` · ${fmtMoney(s.amountCents, s.currency)}` : ""}
                     </RowMeta>
                   </span>
                   {updating
                     ? <span role="status" className="shrink-0 text-meta text-ink-faint">Updating…</span>
-                    : <span className="tnum shrink-0 text-body font-semibold">{fmtMoney(s.amountCents, s.currency)}</span>}
+                    : <span className="tnum shrink-0 text-body font-semibold">{s.unitId && s.unitName
+                      ? formatUnitAmount(s.amountCents, s.unitName)
+                      : fmtMoney(s.amountCents, s.currency)}</span>}
                   <IconButton size="sm" variant="accent" label="Edit payment" onClick={() => setEditingSettlement(s)}>
                     <Pencil className="h-4 w-4" />
                   </IconButton>
@@ -937,14 +1024,17 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
                   <RowTitle>{r.title}</RowTitle>
                   <RowMeta>{r.cadence === "weekly" ? "Weekly" : "Monthly"} · next {fmtDate(r.nextDate)} · {r.payerName} pays</RowMeta>
                 </span>
-                <span className="tnum shrink-0 text-body font-semibold">{fmtMoney(r.amountCents, r.currency)}</span>
+                <span className="tnum shrink-0 text-body font-semibold">{r.unitId && r.unitName
+                  ? formatUnitAmount(r.amountCents, r.unitName)
+                  : fmtMoney(r.amountCents, r.currency)}</span>
                 <IconButton
                   size="sm"
                   variant="accent"
                   label={`Edit ${r.title}`}
                   onClick={() => setEditingRecurring({
                     id: r.id, title: r.title, amountCents: r.amountCents, payerId: r.payerId,
-                    currency: r.currency, categoryId: r.categoryId, participantIds: r.participantIds,
+                    currency: r.currency, unitId: r.unitId, unitName: r.unitName,
+                    categoryId: r.categoryId, participantIds: r.participantIds,
                     notes: r.notes, cadence: r.cadence as "weekly" | "monthly", nextDate: r.nextDate,
                     anchorDay: r.anchorDay, active: r.active, updatedAt: r.updatedAt,
                   })}
@@ -974,6 +1064,8 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
             onClose={() => setExpenseOpen(false)}
             onSaved={refreshAll}
             onCategoryAdded={reloadCategories}
+            units={detail.units}
+            onUnitAdded={loadDetail}
           />
           <GroupBalanceForm
             groupId={groupId} groupName={detail.group.name} currency={detail.group.currency}
@@ -989,7 +1081,7 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
           />
           <SettleModal
             open={settleOpen}
-            onClose={() => { setSettleOpen(false); setSettleStart(null); }}
+            onClose={() => { setSettleOpen(false); setSettleStart(null); setSettleUnit(null); }}
             onSaved={refreshAll}
             groupId={groupId}
             members={detail.members}
@@ -997,6 +1089,7 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
             defaultCurrency={detail.group.currency}
             prefill={settlePrefill}
             start={settleStart}
+            unit={settleUnit}
             onCustom={settleCustom}
           />
           <SettleModal
@@ -1021,6 +1114,7 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
             meId={me.id}
             defaultCurrency={detail.group.currency}
             existing={editingRecurring}
+            units={detail.units}
           />
           <GroupSettingsModal
             open={settingsOpen}
@@ -1028,6 +1122,8 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
             group={{ id: groupId, name: detail.group.name, createdBy: detail.group.createdBy }}
             members={detail.members}
             meId={me.id}
+            units={detail.units}
+            autoReconcileUnits={detail.group.autoReconcileUnits}
             onChanged={() => { loadDetail(); }}
             onGone={() => router.push("/groups")}
           />
@@ -1080,6 +1176,27 @@ function MemberNets({ balances, currency, meId, compact = false }: {
           </Link>
         </li>
       ))}
+    </ul>
+  );
+}
+
+function UnitNets({ units, meId }: {
+  units: { unitId: number; name: string; nets: { userId: number; netCents: number }[] }[];
+  meId?: number;
+}) {
+  return (
+    <ul className="divide-y divide-line">
+      {units.map((unit) => {
+        const mine = unit.nets.find((row) => row.userId === meId)?.netCents ?? 0;
+        return (
+          <li key={unit.unitId} className="flex min-h-[var(--control-h-sm)] items-center gap-2 px-3 py-1 text-body">
+            <span className="min-w-0 flex-1 truncate font-medium">{unit.name}</span>
+            <span className={`tnum shrink-0 font-semibold ${mine > 0 ? "text-owed" : mine < 0 ? "text-owe" : "text-ink-faint"}`}>
+              {mine === 0 ? "settled" : formatUnitAmount(mine, unit.name)}
+            </span>
+          </li>
+        );
+      })}
     </ul>
   );
 }

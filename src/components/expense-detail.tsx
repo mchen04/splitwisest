@@ -7,12 +7,15 @@ import { api, ApiClientError, fmtDate, fmtMoney, fmtTime, useApiData } from "@/l
 import { Change, describeChange } from "@/lib/activity-diff";
 import { useTextDraft } from "@/lib/drafts";
 import { Modal, Button, Avatar, Input, SectionLabel, LoadError, ActionError } from "./ui";
+import { formatUnitAmount } from "@/lib/units";
 
 interface Detail {
   id: number;
   title: string;
   amountCents: number;
   currency: string;
+  unitId: number | null;
+  unitName: string | null;
   date: string;
   payerId: number;
   notes: string;
@@ -71,7 +74,8 @@ export function ExpenseDetailModal({
   onClose: () => void;
   onEdit: (id: number) => void;
   /** Receives the loaded record, so delete works even when the list page does not hold it. */
-  onDelete: (expense: { id: number; title: string; amountCents: number; currency: string; updatedAt: string }) => void;
+  onDelete: (expense: { id: number; title: string; amountCents: number; currency: string;
+    unitId: number | null; unitName: string | null; updatedAt: string }) => void;
 }) {
   const enabled = open && expenseId !== null;
   const { data: detailData, error: detailError, reload: reloadDetail } = useApiData<{ expense: Detail }>(
@@ -85,6 +89,9 @@ export function ExpenseDetailModal({
   );
   const edits = historyData?.edits ?? null;
   const detail = detailData?.expense ?? null;
+  const amountText = (cents: number) => detail?.unitId && detail.unitName
+    ? formatUnitAmount(cents, detail.unitName)
+    : fmtMoney(cents, detail?.currency ?? "USD");
   const [localComments, setLocalComments] = useState<{ expenseId: number; comments: Comment[] } | null>(null);
   const comments = localComments?.expenseId === expenseId
     ? localComments.comments
@@ -176,7 +183,7 @@ export function ExpenseDetailModal({
           {/* Header summary */}
           <div>
             <div className="flex flex-wrap items-baseline justify-between gap-x-3">
-              <p className="tnum text-amount font-semibold tracking-tight">{fmtMoney(detail.amountCents, detail.currency)}</p>
+              <p className="tnum text-amount font-semibold tracking-tight">{amountText(detail.amountCents)}</p>
               <p className="text-body text-ink-soft">{fmtDate(detail.date)} · {METHOD_LABEL[detail.splitMethod] ?? detail.splitMethod}</p>
             </div>
             <p className="text-body text-ink-soft">
@@ -202,7 +209,7 @@ export function ExpenseDetailModal({
                       {s.displayName}{s.userId === meId ? " (you)" : ""}
                     </Link>
                   </span>
-                  <span className="tnum font-medium">{fmtMoney(s.shareCents, detail.currency)}</span>
+                  <span className="tnum font-medium">{amountText(s.shareCents)}</span>
                 </li>
               ))}
             </ul>
@@ -219,7 +226,7 @@ export function ExpenseDetailModal({
                       <span className="block truncate">{i.name}</span>
                       <span className="block text-meta text-ink-faint">{itemOwners(i.participantIds)}</span>
                     </span>
-                    <span className="tnum font-medium">{fmtMoney(i.amountCents, detail.currency)}</span>
+                    <span className="tnum font-medium">{amountText(i.amountCents)}</span>
                   </li>
                 ))}
               </ul>
@@ -227,12 +234,12 @@ export function ExpenseDetailModal({
                 {receiptLines(detail).map(([label, cents]) => (
                   <div key={label} className="flex justify-between gap-2 text-ink-soft">
                     <dt>{label}</dt>
-                    <dd className="tnum">{fmtMoney(cents, detail.currency)}</dd>
+                    <dd className="tnum">{amountText(cents)}</dd>
                   </div>
                 ))}
                 <div className="flex justify-between gap-2 font-semibold">
                   <dt>Total</dt>
-                  <dd className="tnum">{fmtMoney(detail.amountCents, detail.currency)}</dd>
+                  <dd className="tnum">{amountText(detail.amountCents)}</dd>
                 </div>
               </dl>
             </div>

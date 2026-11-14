@@ -18,6 +18,7 @@ export function SettleFields({
   lockAmount = false,
   lockCurrency = false,
   showAmount = true,
+  unitName = null,
 }: {
   amount: string;
   setAmount: (v: string) => void;
@@ -32,10 +33,11 @@ export function SettleFields({
   lockCurrency?: boolean;
   /** False when a summary above already states the (locked) amount. */
   showAmount?: boolean;
+  unitName?: string | null;
 }) {
   return (
     <>
-      {showAmount && <div className="grid grid-cols-[1fr_auto] gap-2">
+      {showAmount && <div className={unitName ? "grid grid-cols-1 gap-2" : "grid grid-cols-[1fr_auto] gap-2"}>
         <Field label="Amount">
           <Input
             inputMode="decimal"
@@ -43,11 +45,11 @@ export function SettleFields({
             onChange={(e) => setAmount(e.target.value)}
             readOnly={lockAmount}
             required
-            placeholder="0.00"
+            placeholder={unitName ? "0" : "0.00"}
             data-autofocus={lockAmount ? undefined : true}
           />
         </Field>
-        <Field label="Currency">
+        {!unitName && <Field label="Currency">
           <Select
             value={currency}
             onChange={(e) => setCurrency(e.target.value)}
@@ -58,7 +60,7 @@ export function SettleFields({
               <option key={c}>{c}</option>
             ))}
           </Select>
-        </Field>
+        </Field>}
       </div>}
       <div className="grid grid-cols-[minmax(0,10rem)_minmax(0,1fr)] gap-2">
         <Field label="Date">

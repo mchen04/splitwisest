@@ -29,7 +29,7 @@ export const PATCH = handler(async (req: NextRequest, { params }: Ctx) => {
   // shift a recorded balance, violating "later rate changes never alter recorded
   // balances". Direct settlements are always kept in their own currency.
   let convertedCents = s.convertedCents;
-  const reconvert = body.amountCents !== s.amountCents || body.currency !== s.currency;
+  const reconvert = body.unitId == null && (body.amountCents !== s.amountCents || body.currency !== s.currency);
   if (reconvert) {
     if (s.groupId !== null) {
       const group = await sql`SELECT currency FROM groups WHERE id = ${s.groupId}`;

@@ -5,6 +5,7 @@ import { api, todayStr, fmtMoney, useFormState, amountInputToCents } from "@/lib
 import { Button, Field, Select, Modal, ErrorNote, toast } from "./ui";
 import { SettleFields } from "./settle-fields";
 import { Member } from "./expense-form";
+import { formatUnitAmount } from "@/lib/units";
 
 // Records an offline payment — purely a ledger entry, no money moves here.
 export function SettleModal({
@@ -19,6 +20,7 @@ export function SettleModal({
   start,
   existing,
   onCustom,
+  unit,
 }: {
   open: boolean;
   onClose: () => void;
@@ -30,9 +32,11 @@ export function SettleModal({
   prefill?: { payerId: number; recipientId: number; amountCents: number } | null;
   /** Who pays whom, with the amount left editable (a partial payment opened from another page). */
   start?: { payerId: number; recipientId: number } | null;
-  existing?: { id: number; payerId: number; recipientId: number; amountCents: number; currency: string; date: string; note: string; updatedAt: string } | null;
+  existing?: { id: number; payerId: number; recipientId: number; amountCents: number; currency: string;
+    unitId?: number | null; unitName?: string | null; date: string; note: string; updatedAt: string } | null;
   /** Unlocks a suggested payment so the user can change who or how much. */
   onCustom?: () => void;
+  unit?: { id: number; name: string } | null;
 }) {
   const [payerId, setPayerId] = useState(meId);
   const [recipientId, setRecipientId] = useState(0);
@@ -42,6 +46,12 @@ export function SettleModal({
   const [note, setNote] = useState("");
   const { error, setError, busy, run } = useFormState();
   const nameOf = (id: number) => members.find((m) => m.id === id)?.displayName ?? "Someone";
+  const activeUnit = unit ?? (existing?.unitId && existing.unitName
+    ? { id: existing.unitId, name: existing.unitName }
+    : null);
+  const amountText = (cents: number) => activeUnit
+    ? formatUnitAmount(cents, activeUnit.name)
+    : fmtMoney(cents, currency);
 
   useEffect(() => {
     if (!open) return;
@@ -89,15 +99,15 @@ export function SettleModal({
       if (existing) {
         await api(`/api/settlements/${existing.id}`, {
           method: "PATCH",
-          body: { amountCents, currency, date, note, expectedUpdatedAt: existing.updatedAt },
+          body: { amountCents, currency, unitId: activeUnit?.id ?? null, date, note, expectedUpdatedAt: existing.updatedAt },
         });
       } else {
         await api(`/api/groups/${groupId}/settlements`, {
-          body: { payerId, recipientId, amountCents, currency, date, note, settleFullBalance: Boolean(prefill) },
+          body: { payerId, recipientId, amountCents, currency, unitId: activeUnit?.id ?? null, date, note, settleFullBalance: Boolean(prefill) },
         });
       }
       onSaved();
-      toast(existing ? "Payment updated" : `Payment of ${fmtMoney(amountCents, currency)} recorded`);
+      toast(existing ? "Payment updated" : `Payment of ${amountText(amountCents)} recorded`);
       onClose();
     }, existing ? "Could not update settlement" : "Could not record settlement");
   }
@@ -115,9 +125,9 @@ export function SettleModal({
               <strong className="text-ink">{prefill.recipientId === meId ? "you" : nameOf(prefill.recipientId)}</strong>
             </p>
             <p className={`tnum text-amount font-semibold tracking-tight ${prefill.payerId === meId ? "text-owe" : prefill.recipientId === meId ? "text-owed" : "text-ink"}`}>
-              {fmtMoney(prefill.amountCents, defaultCurrency)}
+              {activeUnit ? formatUnitAmount(prefill.amountCents, activeUnit.name) : fmtMoney(prefill.amountCents, defaultCurrency)}
             </p>
-            {onCustom && (
+            {onCustom && !activeUnit && (
               <button type="button" onClick={onCustom} className="-ml-1 mt-0.5 inline-flex min-h-[var(--control-h-sm)] items-center rounded-lg px-1 text-body font-medium text-accent hover:bg-accent-soft">
                 Change amount or people
               </button>
@@ -154,7 +164,9 @@ export function SettleModal({
           lockAmount={Boolean(prefill && !existing)}
           lockCurrency={Boolean(prefill && !existing)}
           showAmount={!(prefill && !existing)}
+          unitName={activeUnit?.name ?? null}
         />
+        {activeUnit && <p className="text-meta text-ink-faint">Recording in {activeUnit.name}.</p>}
         <p className="text-meta text-ink-faint">Records a payment made outside SplitWisest, such as cash or a bank transfer. No money moves.</p>
         <ErrorNote message={error} />
         <div className="flex justify-end gap-2">
@@ -162,7 +174,7 @@ export function SettleModal({
             Cancel
           </Button>
           <Button type="submit" busy={busy} data-autofocus>
-            {existing ? "Save changes" : `Record ${amount ? fmtMoney(amountInputToCents(amount) ?? 0, currency) : ""}`}
+            {existing ? "Save changes" : `Record ${amount ? amountText(amountInputToCents(amount) ?? 0) : ""}`}
           </Button>
         </div>
       </form>

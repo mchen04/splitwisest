@@ -19,11 +19,12 @@ export const GET = privateHandler(async (req: NextRequest) => {
   const { rows: [rows] } = await readSession((userId) => [sql`
     SELECT e.id, e.group_id, g.name AS group_name, e.title, e.amount_cents, e.currency,
       e.converted_cents, e.expense_date, e.payer_id, p.display_name AS payer_name,
-      c.name AS category_name, e.split_method
+      c.name AS category_name, e.split_method, e.unit_id, gu.name AS unit_name
     FROM expenses e
     JOIN groups g ON g.id = e.group_id
     JOIN users p ON p.id = e.payer_id
     LEFT JOIN categories c ON c.id = e.category_id
+    LEFT JOIN group_units gu ON gu.id = e.unit_id
     WHERE e.group_id IN (SELECT group_id FROM group_members WHERE user_id = ${userId})
       AND (${text}::text IS NULL OR e.title ILIKE '%' || ${text} || '%' ESCAPE '\' OR e.notes ILIKE '%' || ${text} || '%' ESCAPE '\')
       AND (${groupId}::bigint IS NULL OR e.group_id = ${groupId})
@@ -54,6 +55,8 @@ export const GET = privateHandler(async (req: NextRequest) => {
       payerName: e.payer_name,
       categoryName: e.category_name,
       splitMethod: e.split_method,
+      unitId: e.unit_id === null ? null : Number(e.unit_id),
+      unitName: e.unit_name ?? null,
     })),
   });
 });

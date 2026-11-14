@@ -16,7 +16,7 @@ export interface DirectSettleFriend {
 
 export function obligationKey(obligation: FriendObligation): string {
   const direction = obligation.netCents < 0 ? "pay" : "receive";
-  return `${obligation.groupId ?? "direct"}:${obligation.currency}:${direction}`;
+  return `${obligation.groupId ?? "direct"}:${obligation.currency}:${obligation.unitId ?? "money"}:${direction}`;
 }
 
 export function DirectSettleModal({
@@ -65,7 +65,7 @@ function DirectSettleForm({
   initialKey?: string;
 }) {
   const me = useMe();
-  const obligations = friend.obligations.filter((item) => item.netCents !== 0);
+  const obligations = friend.obligations.filter((item) => item.netCents !== 0 && item.kind !== "unit");
   const pickedIndex = initialKey ? obligations.findIndex((item) => obligationKey(item) === initialKey) : -1;
   const initialIndex = pickedIndex >= 0 ? pickedIndex : Math.max(
     0,

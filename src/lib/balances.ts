@@ -1,6 +1,7 @@
 import { sql } from "./db";
 import type { NeonQueryFunctionInTransaction } from "@neondatabase/serverless";
 import { simplifyDebts, Transfer } from "./money";
+import { computeUnitBalances, parseUnitLedger } from "./units";
 
 // All balance math uses converted_cents (the expense amount converted to the
 // group's currency at entry time). Settlements likewise.
@@ -32,6 +33,9 @@ export interface FriendObligation {
   groupName: string | null;
   currency: string;
   netCents: number; // positive = friend owes viewer, negative = viewer owes friend
+  kind?: "money" | "unit";
+  unitId?: number;
+  unitName?: string;
 }
 
 export interface FriendBalance {
@@ -50,6 +54,7 @@ export interface GroupBalanceSnapshot {
 export function netObligations(obligations: FriendObligation[]): Record<string, number> {
   const net: Record<string, number> = {};
   for (const obligation of obligations) {
+    if (obligation.kind === "unit") continue;
     net[obligation.currency] = (net[obligation.currency] ?? 0) + obligation.netCents;
     if (net[obligation.currency] === 0) delete net[obligation.currency];
   }
@@ -71,7 +76,28 @@ function friendGroupRows(
   query: NeonQueryFunctionInTransaction<false, false> = sql
 ) {
   return query`
-    SELECT g.id AS group_id, g.name AS group_name, g.currency,
+    SELECT g.id AS group_id, g.name AS group_name, g.currency, g.auto_reconcile_units,
+      COALESCE((
+        SELECT jsonb_agg(jsonb_build_object(
+          'unitId', gu.id, 'name', gu.name,
+          'expenses', COALESCE((
+            SELECT jsonb_agg(jsonb_build_object(
+              'payerId', e.payer_id, 'amountCents', e.amount_cents,
+              'shares', COALESCE((
+                SELECT jsonb_agg(jsonb_build_object('userId', es.user_id, 'shareCents', es.share_cents))
+                FROM expense_shares es WHERE es.expense_id = e.id
+              ), '[]'::jsonb)
+            ))
+            FROM expenses e WHERE e.group_id = gu.group_id AND e.unit_id = gu.id
+          ), '[]'::jsonb),
+          'settlements', COALESCE((
+            SELECT jsonb_agg(jsonb_build_object(
+              'payerId', s.payer_id, 'recipientId', s.recipient_id, 'amountCents', s.amount_cents))
+            FROM settlements s WHERE s.group_id = gu.group_id AND s.unit_id = gu.id
+          ), '[]'::jsonb)
+        ) ORDER BY gu.name, gu.id)
+        FROM group_units gu WHERE gu.group_id = g.id
+      ), '[]'::jsonb) AS unit_ledger,
       b.user_id, b.display_name, b.net_cents
     FROM groups g
     JOIN group_members me ON me.group_id = g.id AND me.user_id = ${userId}
@@ -117,6 +143,31 @@ function groupObligationsSnapshot(
       });
       byFriend.set(friendId, obligations);
     }
+
+    const memberIds = rows.map((row) => Number(row.user_id));
+    const reconcile = Boolean(rows[0].auto_reconcile_units);
+    for (const unit of parseUnitLedger(rows[0].unit_ledger)) {
+      const result = computeUnitBalances(memberIds, unit.expenses, unit.settlements, reconcile);
+      const unitTransfers = reconcile
+        ? result.transfers
+        : result.obligations.map((row) => ({ from: row.from, to: row.to, amountCents: row.amountCents }));
+      for (const transfer of unitTransfers) {
+        if (transfer.from !== userId && transfer.to !== userId) continue;
+        const friendId = transfer.from === userId ? transfer.to : transfer.from;
+        if (friendFilter !== null && friendId !== friendFilter) continue;
+        const obligations = byFriend.get(friendId) ?? [];
+        obligations.push({
+          groupId,
+          groupName: String(rows[0].group_name),
+          currency: String(rows[0].currency),
+          netCents: transfer.to === userId ? transfer.amountCents : -transfer.amountCents,
+          kind: "unit",
+          unitId: unit.unitId,
+          unitName: unit.name,
+        });
+        byFriend.set(friendId, obligations);
+      }
+    }
   }
   return { byFriend, snapshots };
 }
@@ -149,6 +200,8 @@ export async function friendObligations(userId: number, onlyFriendId?: number): 
   for (const obligations of byFriend.values()) {
     obligations.sort((a, b) =>
       (a.groupName ?? "").localeCompare(b.groupName ?? "") ||
+      (a.kind ?? "money").localeCompare(b.kind ?? "money") ||
+      (a.unitName ?? "").localeCompare(b.unitName ?? "") ||
       a.currency.localeCompare(b.currency) ||
       a.netCents - b.netCents
     );

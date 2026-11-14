@@ -15,6 +15,7 @@ const eslintConfig = defineConfig([
     // Local two-build harness artifacts and the generated worker script.
     ".pwa-harness/**",
     "public/sw.js",
+    ".claude/**",
   ]),
 ]);
 

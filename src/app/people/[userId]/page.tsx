@@ -7,6 +7,7 @@ import {
   ArrowLeft, Bell, HandCoins, MessageSquare, Receipt, Search, UserMinus, UserPlus, Users, X,
 } from "lucide-react";
 import { api, ApiClientError, fmtDate, fmtMoney, useApiData, useMe } from "@/lib/client";
+import { formatUnitAmount } from "@/lib/units";
 import { AppShell } from "@/components/shell";
 import { Avatar, Button, Card, CardHeader, EmptyState, IconButton, Input, Menu, MenuItem, RowMeta, RowTitle, confirmAction, toast } from "@/components/ui";
 import { DirectPaymentsModal } from "@/components/direct-payments-modal";
@@ -141,15 +142,28 @@ export default function PersonPage({ params }: { params: Promise<{ userId: strin
                   <ul className="divide-y divide-line">
                     {profile.obligations.map((item) => {
                       const owe = item.netCents < 0;
-                      const canSettleThis = profile.canSettleDirectly || item.groupId !== null;
+                      const isUnit = item.kind === "unit";
+                      const canSettleThis = !isUnit && (profile.canSettleDirectly || item.groupId !== null);
                       return (
                         <li key={obligationKey(item)} className="flex min-h-[var(--row-h)] items-center gap-3 px-4 py-2">
                           <span className="min-w-0 flex-1">
-                            <RowMeta>{item.groupName ?? "Direct balance"} · {owe ? "You owe" : "Owes you"}</RowMeta>
+                            <RowMeta>
+                              {item.groupName ?? "Direct balance"}{isUnit && item.unitName ? ` · ${item.unitName}` : ""} · {owe ? "You owe" : "Owes you"}
+                            </RowMeta>
                             <span className={`tnum block text-amount font-semibold tracking-tight ${owe ? "text-owe" : "text-owed"}`}>
-                              {fmtMoney(Math.abs(item.netCents), item.currency)}
+                              {isUnit && item.unitName
+                                ? formatUnitAmount(Math.abs(item.netCents), item.unitName)
+                                : fmtMoney(Math.abs(item.netCents), item.currency)}
                             </span>
                           </span>
+                          {isUnit && item.groupId !== null && (
+                            <Link
+                              href={`/groups/${item.groupId}?tab=balances`}
+                              className="inline-flex min-h-[var(--control-h-sm)] items-center gap-1 rounded-lg border border-line px-2.5 text-body font-medium text-ink-soft hover:border-line-strong hover:text-ink"
+                            >
+                              <HandCoins className="h-4 w-4" /> Open group
+                            </Link>
+                          )}
                           {owe && canSettleThis && (
                             <Button size="sm" variant="secondary" onClick={() => { setSettleKey(obligationKey(item)); setSettleSign(-1); }}>
                               <HandCoins className="h-4 w-4" /> Settle up
@@ -304,14 +318,18 @@ function ProfileActions({
 
 function HistoryList({ profile, meId, query }: { profile: PersonProfile; meId: number; query: string }) {
   const normalizedQuery = query.trim().toLowerCase();
+  const amountText = (item: { amountCents: number; currency: string; unitId?: number | null; unitName?: string | null }) =>
+    item.unitId && item.unitName
+      ? formatUnitAmount(item.amountCents, item.unitName)
+      : fmtMoney(item.amountCents, item.currency);
   const rows = [
     ...profile.recentExpenses.map((e) => ({ type: "expense" as const, key: `e-${e.id}`, date: e.date, item: e })),
     ...profile.recentPayments.map((p) => ({ type: "payment" as const, key: `p-${p.id}`, date: p.date, item: p })),
   ].filter((row) => {
     if (!normalizedQuery) return true;
     const text = row.type === "expense"
-      ? `${row.item.title} ${row.item.groupName} ${row.item.payerName} ${row.item.currency}`
-      : `${row.item.payerName} ${row.item.recipientName} ${row.item.groupName ?? "direct"} ${row.item.note} ${row.item.currency}`;
+      ? `${row.item.title} ${row.item.groupName} ${row.item.payerName} ${row.item.currency} ${row.item.unitName ?? ""}`
+      : `${row.item.payerName} ${row.item.recipientName} ${row.item.groupName ?? "direct"} ${row.item.note} ${row.item.currency} ${row.item.unitName ?? ""}`;
     return text.toLowerCase().includes(normalizedQuery);
   }).sort((a, b) => String(b.date).localeCompare(String(a.date))).slice(0, 30);
 
@@ -334,7 +352,7 @@ function HistoryList({ profile, meId, query }: { profile: PersonProfile; meId: n
                 {row.item.groupName} · paid by {row.item.payerId === meId ? "you" : row.item.payerName} · {fmtDate(row.item.date)}
               </RowMeta>
             </span>
-            <span className="tnum text-body font-semibold">{fmtMoney(row.item.amountCents, row.item.currency)}</span>
+            <span className="tnum text-body font-semibold">{amountText(row.item)}</span>
           </Link>
         </li>
       ) : (
@@ -349,7 +367,7 @@ function HistoryList({ profile, meId, query }: { profile: PersonProfile; meId: n
               {row.item.groupName ?? "Direct"} · {fmtDate(row.item.date)}{row.item.note ? ` · ${row.item.note}` : ""}
             </RowMeta>
           </span>
-          <span className="tnum text-body font-semibold">{fmtMoney(row.item.amountCents, row.item.currency)}</span>
+          <span className="tnum text-body font-semibold">{amountText(row.item)}</span>
         </li>
       ))}
     </ul>

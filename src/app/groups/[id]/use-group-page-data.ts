@@ -5,11 +5,20 @@ import { useApiData, useSync } from "@/lib/client";
 import type { Member } from "@/components/expense-form";
 
 export interface GroupDetail {
-  group: { id: number; name: string; currency: string; inviteCode: string; createdBy: number };
+  group: { id: number; name: string; currency: string; inviteCode: string; createdBy: number; autoReconcileUnits: boolean };
   version: string;
   members: (Member & { username: string })[];
   balances: { userId: number; displayName: string; netCents: number }[];
   suggestions: { from: number; to: number; amountCents: number }[];
+  units: { id: number; name: string }[];
+  unitBalances: {
+    unitId: number;
+    name: string;
+    reconcile: boolean;
+    nets: { userId: number; displayName: string; netCents: number }[];
+    transfers: { from: number; to: number; amountCents: number }[];
+    obligations: { from: number; to: number; amountCents: number }[];
+  }[];
 }
 
 export interface Expense {
@@ -17,6 +26,8 @@ export interface Expense {
   title: string;
   amountCents: number;
   currency: string;
+  unitId: number | null;
+  unitName: string | null;
   convertedCents: number;
   date: string;
   payerId: number;
@@ -32,6 +43,8 @@ export interface Recurring {
   title: string;
   amountCents: number;
   currency: string;
+  unitId: number | null;
+  unitName: string | null;
   payerId: number;
   payerName: string;
   categoryId: number | null;
@@ -52,6 +65,8 @@ export interface Settlement {
   recipientName: string;
   amountCents: number;
   currency: string;
+  unitId: number | null;
+  unitName: string | null;
   date: string;
   note: string;
   updatedAt: string;
@@ -84,6 +99,8 @@ interface InsightExpense {
   date: string;
   payerName: string;
   convertedCents: number;
+  unitId: number | null;
+  unitName: string | null;
 }
 
 function useExpenses(

@@ -7,6 +7,7 @@ import { api, ApiClientError, fmtMoney } from "@/lib/client";
 import type { FriendObligation } from "@/lib/balances";
 import { obligationKey } from "./direct-settle-modal";
 import { Avatar, Button, RowMeta, RowTitle, toast } from "./ui";
+import { formatUnitAmount } from "@/lib/units";
 
 export interface FriendWithBalances {
   id: number;
@@ -43,6 +44,15 @@ export function useRemind() {
 
 function ObligationText({ obligation, amount, stacked = false }: { obligation: FriendObligation; amount: string; stacked?: boolean }) {
   const owe = obligation.netCents < 0;
+  const groupLabel = obligation.kind === "unit" && obligation.groupId !== null ? (
+    <Link href={`/groups/${obligation.groupId}?tab=balances`} className="underline">
+      {obligation.groupName ?? "Group"}{obligation.unitName ? ` · ${obligation.unitName}` : ""}
+    </Link>
+  ) : (
+    <>
+      {obligation.groupName ?? "Direct"}{obligation.kind === "unit" && obligation.unitName ? ` · ${obligation.unitName}` : ""}
+    </>
+  );
   const direction = (
     <span className={`whitespace-nowrap ${owe ? "text-owe" : "text-owed"}`}>
       {owe ? "you owe " : "owes you "}
@@ -52,14 +62,18 @@ function ObligationText({ obligation, amount, stacked = false }: { obligation: F
   if (stacked) {
     return (
       <span className="block min-w-0 text-body">
-        <span className="block truncate text-meta text-ink-faint">{obligation.groupName ?? "Direct"}</span>
+        <span className="block truncate text-meta text-ink-faint">
+          {groupLabel}
+        </span>
         {direction}
       </span>
     );
   }
   return (
     <span className="flex min-w-0 items-baseline gap-1 text-body">
-      <span className="min-w-0 truncate text-ink-faint">{obligation.groupName ?? "Direct"}</span>
+      <span className="min-w-0 truncate text-ink-faint">
+        {groupLabel}
+      </span>
       <span className="shrink-0 text-ink-faint">·</span>
       {direction}
     </span>
@@ -84,8 +98,22 @@ export function FriendBalanceRow({
   const open = friend.obligations.filter((o) => o.netCents !== 0);
   const theyOweMe = open.some((o) => o.netCents > 0);
   const single = open.length === 1 ? open[0] : null;
+  const amountText = (o: FriendObligation) => o.kind === "unit" && o.unitName
+    ? formatUnitAmount(Math.abs(o.netCents), o.unitName)
+    : fmtMoney(Math.abs(o.netCents), o.currency);
   const settleButton = (o: FriendObligation) => {
-    const amount = fmtMoney(Math.abs(o.netCents), o.currency);
+    const amount = amountText(o);
+    if (o.kind === "unit" && o.groupId !== null) {
+      return (
+        <Link
+          href={`/groups/${o.groupId}?tab=balances`}
+          className="inline-flex min-h-[var(--control-h-sm)] items-center gap-1 rounded-lg border border-line px-2.5 text-body font-medium text-ink-soft hover:border-line-strong hover:text-ink"
+          aria-label={`Open ${o.groupName ?? "the group"} to settle ${amount}`}
+        >
+          <HandCoins className="h-4 w-4" /> Open group
+        </Link>
+      );
+    }
     return (
       <Button
         size="sm"
@@ -124,7 +152,7 @@ export function FriendBalanceRow({
             return (
               <li key={obligationKey(o)} className={`flex items-center gap-2 ${ownButton ? "min-h-[var(--control-h-sm)]" : "py-0.5"}`}>
                 <span className="min-w-0 flex-1">
-                  <ObligationText obligation={o} amount={fmtMoney(Math.abs(o.netCents), o.currency)} stacked={ownButton} />
+                  <ObligationText obligation={o} amount={amountText(o)} stacked={ownButton} />
                 </span>
                 {ownButton && settleButton(o)}
               </li>

@@ -30,10 +30,11 @@ export const GET = privateHandler(async (req: NextRequest, { params }: Ctx) => {
   if (pageRequest.complete) {
     const rows = await sql`
       SELECT e.converted_cents, e.expense_date, p.display_name AS payer_name,
-        c.name AS category_name
+        c.name AS category_name, e.unit_id, gu.name AS unit_name
       FROM expenses e
       JOIN users p ON p.id = e.payer_id
       LEFT JOIN categories c ON c.id = e.category_id
+      LEFT JOIN group_units gu ON gu.id = e.unit_id
       WHERE e.group_id = ${groupId}`;
     return privateJson(req, {
       hasMore: false,
@@ -42,6 +43,8 @@ export const GET = privateHandler(async (req: NextRequest, { params }: Ctx) => {
         date: e.expense_date,
         payerName: e.payer_name,
         categoryName: e.category_name,
+        unitId: e.unit_id === null ? null : Number(e.unit_id),
+        unitName: e.unit_name ?? null,
       })),
     });
   }
@@ -51,6 +54,7 @@ export const GET = privateHandler(async (req: NextRequest, { params }: Ctx) => {
       e.payer_id,
       to_char(e.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS updated_at_token,
       p.display_name AS payer_name, c.name AS category_name,
+      e.unit_id, gu.name AS unit_name,
       (SELECT COUNT(*) FROM attachments a WHERE a.expense_id = e.id) AS attachment_count,
       (SELECT json_agg(json_build_object('userId', a.user_id, 'shareCents', a.share_cents,
         'convertedShareCents', a.converted_share_cents))
@@ -68,6 +72,7 @@ export const GET = privateHandler(async (req: NextRequest, { params }: Ctx) => {
     FROM expenses e
     JOIN users p ON p.id = e.payer_id
     LEFT JOIN categories c ON c.id = e.category_id
+    LEFT JOIN group_units gu ON gu.id = e.unit_id
     WHERE e.group_id = ${groupId}
       AND (${text}::text IS NULL OR e.title ILIKE '%' || ${text} || '%' ESCAPE '\' OR e.notes ILIKE '%' || ${text} || '%' ESCAPE '\')
       AND (${categoryId}::bigint IS NULL OR e.category_id = ${categoryId})
@@ -91,6 +96,8 @@ export const GET = privateHandler(async (req: NextRequest, { params }: Ctx) => {
       payerId: Number(e.payer_id),
       payerName: e.payer_name,
       categoryName: e.category_name,
+      unitId: e.unit_id === null ? null : Number(e.unit_id),
+      unitName: e.unit_name ?? null,
       updatedAt: versionToken(e.updated_at_token),
       attachmentCount: Number(e.attachment_count),
       shares: e.shares ?? [],

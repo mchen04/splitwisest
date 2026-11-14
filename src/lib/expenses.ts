@@ -6,6 +6,8 @@ import { convert, CURRENCIES } from "./fx";
 import { currencyStep, validateCurrencyAmount } from "./currencies";
 import { ApiError, badRequest, forbidden, notFound } from "./api";
 import { loadGroupMemberIds } from "./balances";
+import { requireGroupUnit } from "./group-units";
+import { formatDenomination } from "./units";
 import { activityData } from "./activity";
 import { Change, diffExpense, ExpenseSnapshot } from "./activity-diff";
 import { VersionToken, versionToken } from "./versions";
@@ -14,6 +16,7 @@ export const ExpenseBody = z.object({
   title: z.string().trim().min(1, "Title is required").max(120),
   amountCents: z.number().int().positive("Amount must be positive").max(100_000_000_000),
   currency: z.string().refine((c) => CURRENCIES.includes(c), "Unsupported currency"),
+  unitId: z.number().int().positive().nullable().optional(),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Invalid date"),
   payerId: z.number().int().positive(),
   categoryId: z.number().int().positive().nullable().optional(),
@@ -37,6 +40,12 @@ export const ExpenseBody = z.object({
 });
 
 export type ExpenseInput = z.infer<typeof ExpenseBody>;
+
+async function groupCurrencyFor(groupId: number): Promise<string> {
+  const rows = await sql`SELECT currency FROM groups WHERE id = ${groupId}`;
+  if (rows.length === 0) notFound();
+  return rows[0].currency as string;
+}
 
 export async function validateExpenseActors(
   groupId: number,
@@ -65,12 +74,14 @@ export async function validateExpenseActors(
 }
 
 export async function validateExpense(groupId: number, userId: number, input: ExpenseInput) {
+  if (input.unitId != null) await requireGroupUnit(groupId, input.unitId);
   const memberIds = await validateExpenseActors(groupId, userId, input);
   return validateExpenseShares(memberIds, input);
 }
 
 function validateExpenseShares(memberIds: Set<number>, input: ExpenseInput) {
-  validateCurrencyAmount(input.amountCents, input.currency);
+  const unit = input.unitId != null;
+  if (!unit) validateCurrencyAmount(input.amountCents, input.currency);
   let shares: Map<number, number>;
   if (input.splitMethod === "itemized") {
     if (!input.items || input.items.length === 0) badRequest("Itemized expenses need at least one item");
@@ -94,7 +105,7 @@ function validateExpenseShares(memberIds: Set<number>, input: ExpenseInput) {
       input.amountCents,
       input.items!,
       { taxCents: input.itemizedTaxCents, tipCents: input.itemizedTipCents },
-      currencyStep(input.currency)
+      unit ? 1 : currencyStep(input.currency)
     );
   } else {
     // Zero-decimal currencies (JPY/KRW) have no sub-unit: snap the amount to a
@@ -102,7 +113,7 @@ function validateExpenseShares(memberIds: Set<number>, input: ExpenseInput) {
     // share is produced. Mutating input.amountCents here keeps the stored amount,
     // the FX conversion, and the share sum consistent (the same input object is
     // used for storage and convert()). step === 1 leaves 2-decimal flows untouched.
-    const step = currencyStep(input.currency);
+    const step = unit ? 1 : currencyStep(input.currency);
     shares = computeShares(input.splitMethod as SplitMethod, input.amountCents, input.participants, step);
   }
   return shares;
@@ -163,10 +174,14 @@ export async function insertExpense(
   } = {}
 ): Promise<number | null> {
   const recurringId = opts.recurring?.id ?? null;
+  const unit = input.unitId != null ? await requireGroupUnit(groupId, input.unitId) : null;
+  const effectiveInput = unit ? { ...input, currency: groupCurrency } : input;
   const shares = recurringId === null
-    ? await validateExpense(groupId, createdBy, input)
-    : validateExpenseShares(await loadGroupMemberIds(groupId), input);
-  const { cents: convertedCents, rate } = await convert(input.amountCents, input.currency, groupCurrency);
+    ? validateExpenseShares(await validateExpenseActors(groupId, createdBy, effectiveInput), effectiveInput)
+    : validateExpenseShares(await loadGroupMemberIds(groupId), effectiveInput);
+  const { cents: convertedCents, rate } = unit
+    ? { cents: input.amountCents, rate: 1 }
+    : await convert(input.amountCents, input.currency, groupCurrency);
   const summary = opts.activity ? `${opts.activity.actorName} ${opts.activity.actionText}` : null;
   const data = opts.activity ? activityData({}, opts.activity.actionText) : "{}";
   const recurringCurrentDate = opts.recurring?.currentDate ?? null;
@@ -180,14 +195,14 @@ export async function insertExpense(
     tx`
     WITH share_rows AS (
       SELECT x.user_id, x.share_cents, x.raw_input
-      FROM jsonb_to_recordset(${sharesJson(shares, input)}::jsonb)
+      FROM jsonb_to_recordset(${sharesJson(shares, effectiveInput)}::jsonb)
         AS x(user_id bigint, share_cents bigint, raw_input numeric)
     ),
     members_ok AS (
       SELECT 1
       WHERE EXISTS (
         SELECT 1 FROM group_members
-        WHERE group_id = ${groupId} AND user_id = ${input.payerId}
+        WHERE group_id = ${groupId} AND user_id = ${effectiveInput.payerId}
       )
       AND (
         ${recurringId}::bigint IS NOT NULL OR ${activityType}::text IS NULL OR EXISTS (
@@ -196,9 +211,9 @@ export async function insertExpense(
         )
       )
       AND (
-        ${recurringId}::bigint IS NULL OR ${input.categoryId ?? null}::bigint IS NULL OR EXISTS (
+        ${recurringId}::bigint IS NULL OR ${effectiveInput.categoryId ?? null}::bigint IS NULL OR EXISTS (
           SELECT 1 FROM categories
-          WHERE id = ${input.categoryId ?? null}
+          WHERE id = ${effectiveInput.categoryId ?? null}
         )
       )
       AND NOT EXISTS (
@@ -217,12 +232,13 @@ export async function insertExpense(
       WHERE id = ${recurringId}
         AND next_date = ${recurringCurrentDate}
         AND active
-        AND title = ${input.title}
-        AND amount_cents = ${input.amountCents}
-        AND currency = ${input.currency}
-        AND payer_id = ${input.payerId}
-        AND category_id IS NOT DISTINCT FROM ${input.categoryId ?? null}
-        AND notes = ${input.notes}
+        AND title = ${effectiveInput.title}
+        AND amount_cents = ${effectiveInput.amountCents}
+        AND currency = ${effectiveInput.currency}
+        AND unit_id IS NOT DISTINCT FROM ${effectiveInput.unitId ?? null}
+        AND payer_id = ${effectiveInput.payerId}
+        AND category_id IS NOT DISTINCT FROM ${effectiveInput.categoryId ?? null}
+        AND notes = ${effectiveInput.notes}
         AND cadence = ${recurringCadence}
         AND anchor_day IS NOT DISTINCT FROM ${recurringStoredAnchorDay}
         AND NOT EXISTS (
@@ -241,11 +257,11 @@ export async function insertExpense(
     e AS (
       INSERT INTO expenses (group_id, title, amount_cents, currency, converted_cents, fx_rate,
         expense_date, payer_id, category_id, notes, split_method, itemized_tax_cents,
-        itemized_tip_cents, recurring_id, created_by)
-      SELECT ${groupId}, ${input.title}, ${input.amountCents}, ${input.currency}, ${convertedCents},
-        ${rate}, ${input.date}, ${input.payerId}, ${input.categoryId ?? null}, ${input.notes},
-        ${input.splitMethod}, ${itemizedTaxCents(input)}, ${itemizedTipCents(input)},
-        insert_gate.recurring_id, ${createdBy}
+        itemized_tip_cents, recurring_id, unit_id, created_by)
+      SELECT ${groupId}, ${effectiveInput.title}, ${effectiveInput.amountCents}, ${effectiveInput.currency}, ${convertedCents},
+        ${rate}, ${effectiveInput.date}, ${effectiveInput.payerId}, ${effectiveInput.categoryId ?? null}, ${effectiveInput.notes},
+        ${effectiveInput.splitMethod}, ${itemizedTaxCents(effectiveInput)}, ${itemizedTipCents(effectiveInput)},
+        insert_gate.recurring_id, ${effectiveInput.unitId ?? null}, ${createdBy}
       FROM insert_gate
       RETURNING id
     ),
@@ -259,7 +275,7 @@ export async function insertExpense(
       INSERT INTO expense_items (expense_id, name, amount_cents, participant_ids)
       SELECT e.id, x.name, x.amount_cents,
         ARRAY(SELECT jsonb_array_elements_text(x.participant_ids)::bigint)
-      FROM e, jsonb_to_recordset(${itemsJson(input)}::jsonb)
+      FROM e, jsonb_to_recordset(${itemsJson(effectiveInput)}::jsonb)
         AS x(name text, amount_cents bigint, participant_ids jsonb)
       RETURNING 1
     ),
@@ -282,7 +298,11 @@ export async function createExpenseWithActivity(
   createdBy: { id: number; displayName: string },
   input: ExpenseInput
 ): Promise<number> {
-  const actionText = `added "${input.title}" (${fmtMoney(input.amountCents, input.currency)})`;
+  const unit = input.unitId != null ? await requireGroupUnit(groupId, input.unitId) : null;
+  const amountText = formatDenomination(input.amountCents, unit
+    ? { kind: "unit", unitId: unit.id, name: unit.name }
+    : { kind: "money", currency: input.currency });
+  const actionText = `added "${input.title}" (${amountText})`;
   const id = await insertExpense(groupId, groupCurrency, createdBy.id, input, {
     activity: { actorName: createdBy.displayName, type: "expense.added", actionText },
   });
@@ -293,7 +313,7 @@ export async function createExpenseWithActivity(
 /** Reads the expense as it stands, with the display names the activity feed needs. */
 async function loadExpenseSnapshot(expenseId: number): Promise<ExpenseSnapshot | null> {
   const rows = await sql`
-    SELECT e.title, e.amount_cents, e.currency, e.notes, e.split_method,
+    SELECT e.title, e.amount_cents, e.currency, e.notes, e.split_method, gu.name AS unit_name,
       to_char(e.expense_date, 'YYYY-MM-DD') AS date,
       pu.display_name AS payer_name, c.name AS category_name,
       COALESCE(
@@ -304,16 +324,18 @@ async function loadExpenseSnapshot(expenseId: number): Promise<ExpenseSnapshot |
     FROM expenses e
     JOIN users pu ON pu.id = e.payer_id
     LEFT JOIN categories c ON c.id = e.category_id
+    LEFT JOIN group_units gu ON gu.id = e.unit_id
     LEFT JOIN expense_shares es ON es.expense_id = e.id
     LEFT JOIN users su ON su.id = es.user_id
     WHERE e.id = ${expenseId}
-    GROUP BY e.id, pu.display_name, c.name`;
+    GROUP BY e.id, pu.display_name, c.name, gu.name`;
   const r = rows[0];
   if (!r) return null;
   return {
     title: r.title as string,
     amountCents: Number(r.amount_cents),
     currency: r.currency as string,
+    unitName: (r.unit_name as string | null) ?? null,
     date: r.date as string,
     payerName: r.payer_name as string,
     categoryName: (r.category_name as string | null) ?? null,
@@ -332,7 +354,8 @@ async function loadExpenseSnapshot(expenseId: number): Promise<ExpenseSnapshot |
 /** Builds the post-edit snapshot from the submitted input, resolving display names. */
 async function nextExpenseSnapshot(
   input: ExpenseInput,
-  shares: Map<number, number>
+  shares: Map<number, number>,
+  unitName: string | null = null
 ): Promise<ExpenseSnapshot> {
   const userIds = [...new Set([input.payerId, ...shares.keys()])];
   const [context] = await sql`
@@ -349,6 +372,7 @@ async function nextExpenseSnapshot(
     title: input.title,
     amountCents: input.amountCents,
     currency: input.currency,
+    unitName,
     date: input.date,
     payerName: nameById.get(input.payerId) ?? "",
     categoryName: (context.category_name as string | null) ?? null,
@@ -371,32 +395,37 @@ export async function updateExpenseWithActivity(
   input: ExpenseInput,
   prev: { amountCents: number; currency: string; convertedCents: number; fxRate: number }
 ) {
-  let shares = await validateExpense(groupId, user.id, input);
+  const unit = input.unitId != null ? await requireGroupUnit(groupId, input.unitId) : null;
+  const effectiveInput = unit ? { ...input, currency: groupCurrency } : input;
+  let shares = validateExpenseShares(await validateExpenseActors(groupId, user.id, effectiveInput), effectiveInput);
   const before = await loadExpenseSnapshot(expenseId);
-  if (input.splitMethod !== "itemized" && before?.amountCents === input.amountCents &&
-    before.currency === input.currency && before.splitMethod === input.splitMethod &&
-    before.shares.length === input.participants.length && before.shares.every((share) =>
-      input.participants.some((p) => p.userId === share.userId &&
-        (input.splitMethod === "equal" || (p.value ?? null) === share.rawInput)))) {
+  if (effectiveInput.splitMethod !== "itemized" && before?.amountCents === effectiveInput.amountCents &&
+    before.currency === effectiveInput.currency && before.splitMethod === effectiveInput.splitMethod &&
+    before.shares.length === effectiveInput.participants.length && before.shares.every((share) =>
+      effectiveInput.participants.some((p) => p.userId === share.userId &&
+        (effectiveInput.splitMethod === "equal" || (p.value ?? null) === share.rawInput)))) {
     shares = new Map(before.shares.map((s) => [s.userId, s.shareCents]));
   }
-  let convertedCents = prev.convertedCents;
-  let rate = prev.fxRate;
-  if (input.amountCents !== prev.amountCents || input.currency !== prev.currency) {
-    const c = await convert(input.amountCents, input.currency, groupCurrency);
+  let convertedCents = unit ? input.amountCents : prev.convertedCents;
+  let rate = unit ? 1 : prev.fxRate;
+  if (!unit && (input.amountCents !== prev.amountCents || input.currency !== prev.currency)) {
+    const c = await convert(effectiveInput.amountCents, effectiveInput.currency, groupCurrency);
     convertedCents = c.cents;
     rate = c.rate;
   }
-  const after = await nextExpenseSnapshot(input, shares);
+  const after = await nextExpenseSnapshot(effectiveInput, shares, unit?.name ?? null);
   const changes: Change[] = before ? diffExpense(before, after) : [];
-  const actionText = `edited "${input.title}" (${fmtMoney(input.amountCents, input.currency)})`;
+  const amountText = formatDenomination(effectiveInput.amountCents, unit
+    ? { kind: "unit", unitId: unit.id, name: unit.name }
+    : { kind: "money", currency: effectiveInput.currency });
+  const actionText = `edited "${effectiveInput.title}" (${amountText})`;
   const summary = `${user.displayName} ${actionText}`;
   const [, rows] = await sql.transaction((tx) => [
     tx`SELECT pg_advisory_xact_lock(${groupId}::int)`,
     tx`
     WITH share_rows AS (
       SELECT x.user_id, x.share_cents, x.raw_input
-      FROM jsonb_to_recordset(${sharesJson(shares, input)}::jsonb)
+      FROM jsonb_to_recordset(${sharesJson(shares, effectiveInput)}::jsonb)
         AS x(user_id bigint, share_cents bigint, raw_input numeric)
     ),
     existing_members_ok AS (
@@ -428,7 +457,7 @@ export async function updateExpenseWithActivity(
       FROM existing_members_ok
       WHERE EXISTS (
         SELECT 1 FROM group_members
-        WHERE group_id = ${groupId} AND user_id = ${input.payerId}
+        WHERE group_id = ${groupId} AND user_id = ${effectiveInput.payerId}
       )
       AND NOT EXISTS (
         SELECT 1
@@ -440,15 +469,16 @@ export async function updateExpenseWithActivity(
       )
     ),
     upd AS (
-      UPDATE expenses SET title = ${input.title}, amount_cents = ${input.amountCents},
-        currency = ${input.currency}, converted_cents = ${convertedCents}, fx_rate = ${rate},
-        expense_date = ${input.date}, payer_id = ${input.payerId},
-        category_id = ${input.categoryId ?? null}, notes = ${input.notes},
-        split_method = ${input.splitMethod}, itemized_tax_cents = ${itemizedTaxCents(input)},
-        itemized_tip_cents = ${itemizedTipCents(input)}, updated_at = now()
+      UPDATE expenses SET title = ${effectiveInput.title}, amount_cents = ${effectiveInput.amountCents},
+        currency = ${effectiveInput.currency}, converted_cents = ${convertedCents}, fx_rate = ${rate},
+        expense_date = ${effectiveInput.date}, payer_id = ${effectiveInput.payerId},
+        category_id = ${effectiveInput.categoryId ?? null}, notes = ${effectiveInput.notes},
+        split_method = ${effectiveInput.splitMethod}, itemized_tax_cents = ${itemizedTaxCents(effectiveInput)},
+        itemized_tip_cents = ${itemizedTipCents(effectiveInput)},
+        unit_id = ${effectiveInput.unitId ?? null}, updated_at = now()
       FROM members_ok
       WHERE id = ${expenseId} AND group_id = ${groupId}
-        AND to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') = ${input.expectedUpdatedAt}
+        AND to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') = ${effectiveInput.expectedUpdatedAt}
       RETURNING id
     ),
     del_s AS (
@@ -477,7 +507,7 @@ export async function updateExpenseWithActivity(
         ARRAY(SELECT jsonb_array_elements_text(x.participant_ids)::bigint)
       FROM upd
       CROSS JOIN (SELECT count(*) FROM del_i) deleted
-      CROSS JOIN jsonb_to_recordset(${itemsJson(input)}::jsonb)
+      CROSS JOIN jsonb_to_recordset(${itemsJson(effectiveInput)}::jsonb)
         AS x(name text, amount_cents bigint, participant_ids jsonb)
       RETURNING 1
     ),
@@ -502,7 +532,7 @@ export async function updateExpenseByIdWithActivity(
   const [, rows] = await sql.transaction((tx) => [
     tx`SELECT pg_advisory_xact_lock(e.group_id::int) FROM expenses e WHERE e.id = ${expenseId}`,
     tx`
-    SELECT e.group_id, g.currency AS group_currency, e.amount_cents, e.currency,
+    SELECT e.group_id, g.currency AS group_currency, e.amount_cents, e.currency, e.unit_id,
       e.converted_cents, e.fx_rate,
       to_char(e.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS updated_at,
       EXISTS (
@@ -519,7 +549,10 @@ export async function updateExpenseByIdWithActivity(
   if (versionToken(e.updated_at) !== input.expectedUpdatedAt) {
     badRequest("Expense changed, refresh and try again");
   }
-  await updateExpenseWithActivity(expenseId, Number(e.group_id), e.group_currency as string, user, input, {
+  const unitId = input.unitId === undefined
+    ? (e.unit_id === null ? null : Number(e.unit_id))
+    : input.unitId;
+  await updateExpenseWithActivity(expenseId, Number(e.group_id), e.group_currency as string, user, { ...input, unitId }, {
     amountCents: Number(e.amount_cents),
     currency: e.currency as string,
     convertedCents: Number(e.converted_cents),
@@ -528,11 +561,15 @@ export async function updateExpenseByIdWithActivity(
 }
 
 export async function deleteExpenseWithActivity(
-  expense: { id: number; groupId: number; title: string; amountCents: number; currency: string; expectedUpdatedAt?: string },
+  expense: { id: number; groupId: number; title: string; amountCents: number; currency: string;
+    unitId?: number | null; unitName?: string | null; expectedUpdatedAt?: string },
   user: { id: number; displayName: string }
 ) {
   if (!expense.expectedUpdatedAt) badRequest("Expense changed, refresh and try again");
-  const actionText = `deleted "${expense.title}" (${fmtMoney(expense.amountCents, expense.currency)})`;
+  const amountText = expense.unitId && expense.unitName
+    ? formatDenomination(expense.amountCents, { kind: "unit", unitId: expense.unitId, name: expense.unitName })
+    : fmtMoney(expense.amountCents, expense.currency);
+  const actionText = `deleted "${expense.title}" (${amountText})`;
   const summary = `${user.displayName} ${actionText}`;
   const [, rows] = await sql.transaction((tx) => [
     tx`SELECT pg_advisory_xact_lock(${expense.groupId}::int)`,
@@ -612,6 +649,7 @@ export async function createRecurringExpenseWithActivity(
     title: string;
     amountCents: number;
     currency: string;
+    unitId?: number | null;
     payerId: number;
     categoryId?: number | null;
     participantIds: number[];
@@ -620,10 +658,12 @@ export async function createRecurringExpenseWithActivity(
     startDate: string;
   }
 ): Promise<number> {
+  const unit = body.unitId != null ? await requireGroupUnit(groupId, body.unitId) : null;
+  const currency = unit ? await groupCurrencyFor(groupId) : body.currency;
   await validateExpenseActors(groupId, user.id, body);
   // Keep zero-decimal (JPY/KRW) recurring amounts on a whole unit so every
   // materialized expense and its equal-split shares stay whole units.
-  validateCurrencyAmount(body.amountCents, body.currency);
+  if (!unit) validateCurrencyAmount(body.amountCents, body.currency);
   const summary = `${user.displayName} set up a ${body.cadence} recurring expense "${body.title}"`;
   const [, rows] = await sql.transaction((tx) => [
     tx`SELECT pg_advisory_xact_lock(${groupId}::int)`,
@@ -653,10 +693,10 @@ export async function createRecurringExpenseWithActivity(
     ),
     upd AS (
       INSERT INTO recurring_expenses (group_id, title, amount_cents, currency, payer_id, category_id,
-        participant_ids, notes, cadence, next_date, anchor_day, created_by)
-      SELECT ${groupId}, ${body.title}, ${body.amountCents}, ${body.currency}, ${body.payerId},
+        participant_ids, notes, cadence, next_date, anchor_day, unit_id, created_by)
+      SELECT ${groupId}, ${body.title}, ${body.amountCents}, ${currency}, ${body.payerId},
         ${body.categoryId ?? null}, ${body.participantIds}, ${body.notes}, ${body.cadence},
-        ${body.startDate}, ${Number(body.startDate.slice(8, 10))}, ${user.id}
+        ${body.startDate}, ${Number(body.startDate.slice(8, 10))}, ${body.unitId ?? null}, ${user.id}
       FROM members_ok
       RETURNING id
     ),
@@ -680,6 +720,7 @@ export async function updateRecurringExpenseWithActivity(
     title: string;
     amountCents: number;
     currency: string;
+    unitId?: number | null;
     payerId: number;
     categoryId?: number | null;
     participantIds: number[];
@@ -690,8 +731,10 @@ export async function updateRecurringExpenseWithActivity(
     expectedUpdatedAt: string;
   }
 ) {
+  const unit = body.unitId != null ? await requireGroupUnit(groupId, body.unitId) : null;
+  const currency = unit ? await groupCurrencyFor(groupId) : body.currency;
   await validateExpenseActors(groupId, user.id, body);
-  validateCurrencyAmount(body.amountCents, body.currency);
+  if (!unit) validateCurrencyAmount(body.amountCents, body.currency);
   const summary = `${user.displayName} updated the recurring expense "${body.title}"`;
   const [, rows] = await sql.transaction((tx) => [
     tx`SELECT pg_advisory_xact_lock(${groupId}::int)`,
@@ -721,7 +764,8 @@ export async function updateRecurringExpenseWithActivity(
     ),
     upd AS (
       UPDATE recurring_expenses r SET
-        title = ${body.title}, amount_cents = ${body.amountCents}, currency = ${body.currency},
+        title = ${body.title}, amount_cents = ${body.amountCents}, currency = ${currency},
+        unit_id = ${body.unitId ?? null},
         payer_id = ${body.payerId}, category_id = ${body.categoryId ?? null},
         participant_ids = ${body.participantIds}, notes = ${body.notes}, cadence = ${body.cadence},
         next_date = ${body.nextDate},
@@ -948,6 +992,7 @@ export async function materializeRecurring(groupId: number) {
             notes: snapshot.notes,
             splitMethod: "equal",
             participants,
+            unitId: r.unit_id === null ? null : Number(r.unit_id),
           },
           {
             activity: { actorName: "SplitWisest", type: "expense.recurring", actionText: `added the recurring expense "${snapshot.title}"` },

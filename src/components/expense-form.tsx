@@ -9,6 +9,7 @@ import { rememberExpenseGroup } from "@/lib/last-group";
 import { writeDraft, clearDraft } from "@/lib/drafts";
 import { currencyStep } from "@/lib/currencies";
 import { splitPercentage } from "@/lib/money";
+import { formatUnitAmount, formatUnitQuantity } from "@/lib/units";
 import { shareInputValue } from "@/lib/share-input";
 import { ActionError, Button, Field, Input, Select, Textarea, Modal, ErrorNote, toast, confirmAction, radioGroupKeyDown, radioTabIndex } from "./ui";
 import { ParticipantSplit, ItemizedSplit, Method, METHOD_LABELS, ItemRow } from "./expense-splits";
@@ -39,6 +40,8 @@ interface ExistingExpense {
   title: string;
   amountCents: number;
   currency: string;
+  unitId?: number | null;
+  unitName?: string | null;
   date: string;
   payerId: number;
   categoryId: number | null;
@@ -75,6 +78,8 @@ export function ExpenseForm({
   groupSwitchError = null,
   onRetryGroupSwitch,
   onGroupChange,
+  units = [],
+  onUnitAdded,
 }: {
   groupId: number;
   groupName: string;
@@ -97,10 +102,18 @@ export function ExpenseForm({
   groupSwitchError?: string | null;
   onRetryGroupSwitch?: () => void;
   onGroupChange?: (groupId: number) => void;
+  units?: { id: number; name: string }[];
+  onUnitAdded?: () => void;
 }) {
   const [title, setTitle] = useState("");
   const [amount, setAmount] = useState("");
   const [currency, setCurrency] = useState("USD");
+  const [unitId, setUnitId] = useState<number | null>(null);
+  const [localUnits, setLocalUnits] = useState<{ id: number; name: string }[]>([]);
+  const [addingUnit, setAddingUnit] = useState(false);
+  const [newUnit, setNewUnit] = useState("");
+  const [unitBusy, setUnitBusy] = useState(false);
+  const [unitCleared, setUnitCleared] = useState(false);
   const [date, setDate] = useState(todayStr());
   const [payerId, setPayerId] = useState(meId);
   const [categoryId, setCategoryId] = useState<number | "">("");
@@ -148,6 +161,7 @@ export function ExpenseForm({
     setTitle(f.title);
     setAmount(f.amount);
     setCurrency(f.currency);
+    setUnitId(f.unitId ?? null);
     setDate(f.date);
     setPayerId(f.payerId);
     setCategoryId(f.categoryId);
@@ -164,7 +178,7 @@ export function ExpenseForm({
   }
 
   const fieldsJson = JSON.stringify({
-    title, amount, currency, date, payerId, categoryId, notes, showDetails, method,
+    title, amount, currency, unitId, date, payerId, categoryId, notes, showDetails, method,
     selected: [...selected], values, items, taxEnabled, taxRate, tipEnabled, tipRate,
   } satisfies ExpenseFields);
   const editId = existing?.id ?? null;
@@ -199,6 +213,7 @@ export function ExpenseForm({
     setAddingCat(false);
     setCategoryBusy(false);
     setNewCategory("");
+    setUnitCleared(false);
     setSavedAttachments(existing?.attachments ?? []);
     let fields: ExpenseFields;
     if (existing) {
@@ -214,6 +229,7 @@ export function ExpenseForm({
         title: existing.title,
         amount: (existing.amountCents / 100).toFixed(2),
         currency: existing.currency,
+        unitId: existing.unitId ?? null,
         date: String(existing.date).slice(0, 10),
         payerId: existing.payerId,
         categoryId: existing.categoryId ?? "",
@@ -237,6 +253,7 @@ export function ExpenseForm({
         title: "",
         amount: "",
         currency: groupCurrency,
+        unitId: null,
         date: todayStr(),
         payerId: meId,
         categoryId: "",
@@ -289,6 +306,10 @@ export function ExpenseForm({
     // typed; restart the payer and split for the new members.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setCurrency(groupCurrency);
+    setUnitCleared(unitId !== null);
+    setUnitId(null);
+    setAddingUnit(false);
+    setNewUnit("");
     setPayerId(meId);
     setMethod("solo");
     setSelected(new Set([defaultSoloId]));
@@ -301,7 +322,14 @@ export function ExpenseForm({
   const amountCents = useMemo(() => {
     return amountToCents(amount);
   }, [amount]);
-
+  const allUnits = useMemo(() => {
+    const merged = [...units];
+    for (const unit of localUnits) {
+      if (!merged.some((row) => row.id === unit.id)) merged.push(unit);
+    }
+    return merged;
+  }, [units, localUnits]);
+  const selectedUnit = unitId === null ? null : allUnits.find((unit) => unit.id === unitId) ?? null;
   const itemSubtotalCents = useMemo(
     () => items.reduce((s, i) => s + amountToCents(i.amount), 0),
     [items]
@@ -328,18 +356,23 @@ export function ExpenseForm({
   const itemizedTotalCents = itemSubtotalCents + taxCents + tipCents;
   const effectiveAmountCents = method === "itemized" && itemSubtotalCents > 0 ? itemizedTotalCents : amountCents;
   const displayedAmount =
-    method === "itemized" && itemSubtotalCents > 0 ? (itemizedTotalCents / 100).toFixed(2) : amount;
+    method === "itemized" && itemSubtotalCents > 0
+      ? (selectedUnit ? formatUnitQuantity(itemizedTotalCents) : (itemizedTotalCents / 100).toFixed(2))
+      : amount;
 
   const participantList = members.filter((m) => selected.has(m.id));
   // Live validation feedback for split inputs
   const splitStatus = useMemo(() => {
+    const amountLabel = (cents: number) => selectedUnit
+      ? formatUnitAmount(cents, selectedUnit.name)
+      : fmtMoney(cents, currency);
     if (method === "solo" || method === "equal" || effectiveAmountCents === 0) return null;
     if (method === "exact") {
       const sum = participantList.reduce((s, m) => s + (amountInputToCents(values[m.id] || "0") ?? 0), 0);
       const diff = amountCents - sum;
       return diff === 0
         ? { ok: true, msg: "Amounts match the total" }
-        : { ok: false, msg: `${fmtMoney(Math.abs(diff), currency)} ${diff > 0 ? "left to assign" : "over the total"}` };
+        : { ok: false, msg: `${amountLabel(Math.abs(diff))} ${diff > 0 ? "left to assign" : "over the total"}` };
     }
     if (method === "percentage") {
       const sum = participantList.reduce((s, m) => s + (parseFloat(values[m.id] || "0") || 0), 0);
@@ -359,11 +392,11 @@ export function ExpenseForm({
       const sum = itemSubtotalCents + taxCents + tipCents;
       const diff = effectiveAmountCents - sum;
       return diff === 0
-        ? { ok: true, msg: `Items, tax, and tip total ${fmtMoney(sum, currency)}` }
-        : { ok: false, msg: `Items, tax, and tip ${diff > 0 ? "under" : "over"} by ${fmtMoney(Math.abs(diff), currency)}` };
+        ? { ok: true, msg: `Items, tax, and tip total ${amountLabel(sum)}` }
+        : { ok: false, msg: `Items, tax, and tip ${diff > 0 ? "under" : "over"} by ${amountLabel(Math.abs(diff))}` };
     }
     return null;
-  }, [method, amountCents, participantList, values, itemSubtotalCents, taxCents, tipCents, effectiveAmountCents, currency]);
+  }, [method, amountCents, participantList, values, itemSubtotalCents, taxCents, tipCents, effectiveAmountCents, currency, selectedUnit]);
 
   function toggleMember(id: number) {
     if (method === "solo") {
@@ -394,6 +427,26 @@ export function ExpenseForm({
       setError(err instanceof ApiClientError ? err.message : "Could not add category");
     } finally {
       setCategoryBusy(false);
+    }
+  }
+
+  async function addUnit() {
+    if (!newUnit.trim() || unitBusy) return;
+    setUnitBusy(true);
+    try {
+      const unit = await api<{ id: number; name: string }>(`/api/groups/${groupId}/units`, {
+        body: { name: newUnit.trim() },
+      });
+      setLocalUnits((current) => current.some((row) => row.id === unit.id) ? current : [...current, unit]);
+      setUnitId(unit.id);
+      setNewUnit("");
+      setAddingUnit(false);
+      onUnitAdded?.();
+      requestAnimationFrame(() => document.getElementById("expense-unit")?.focus());
+    } catch (err) {
+      setError(err instanceof ApiClientError ? err.message : "Could not add unit");
+    } finally {
+      setUnitBusy(false);
     }
   }
 
@@ -432,7 +485,8 @@ export function ExpenseForm({
     const body = {
       title: title.trim(),
       amountCents: effectiveAmountCents,
-      currency,
+      currency: selectedUnit ? groupCurrency : currency,
+      unitId,
       date,
       payerId,
       categoryId: categoryId === "" ? null : categoryId,
@@ -561,6 +615,91 @@ export function ExpenseForm({
           </p>
         )}
 
+        <div className="space-y-2">
+          <div role="radiogroup" aria-label="Track in" onKeyDown={radioGroupKeyDown} className="flex flex-wrap gap-1.5">
+            <button
+              type="button"
+              role="radio"
+              aria-checked={unitId === null}
+              tabIndex={radioTabIndex(unitId === null, 0, true)}
+              onClick={() => setUnitId(null)}
+              className={`min-h-[var(--control-h-sm)] rounded-lg border px-2.5 py-1 text-body font-medium transition-colors ${
+                unitId === null ? "border-accent bg-accent-soft text-accent-dark" : "border-line text-ink-soft hover:border-line-strong hover:text-ink"
+              }`}
+            >
+              Money
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={unitId !== null}
+              tabIndex={radioTabIndex(unitId !== null, 1, true)}
+              onClick={() => {
+                if (unitId !== null) return;
+                if (allUnits.length > 0) setUnitId(allUnits[0].id);
+                else setAddingUnit(true);
+              }}
+              className={`min-h-[var(--control-h-sm)] rounded-lg border px-2.5 py-1 text-body font-medium transition-colors ${
+                unitId !== null ? "border-accent bg-accent-soft text-accent-dark" : "border-line text-ink-soft hover:border-line-strong hover:text-ink"
+              }`}
+            >
+              Custom unit
+            </button>
+          </div>
+          {unitId !== null && (
+            <div className="flex flex-wrap items-end gap-2">
+              <div className="min-w-0 flex-1">
+                <Field label="Unit">
+                  <Select
+                    id="expense-unit"
+                    value={unitId}
+                    onChange={(e) => setUnitId(Number(e.target.value))}
+                  >
+                    {allUnits.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}
+                  </Select>
+                </Field>
+              </div>
+              {!addingUnit && (
+                <Button type="button" variant="ghost" onClick={() => setAddingUnit(true)}>
+                  <Plus className="h-4 w-4" /> New unit
+                </Button>
+              )}
+            </div>
+          )}
+          {unitCleared && unitId === null && (
+            <p role="status" className="text-meta text-ink-faint">
+              This group has its own units, so the previous unit was cleared. The amount and other fields are unchanged.
+            </p>
+          )}
+          {addingUnit && (
+            <div className="flex flex-wrap gap-2">
+              <Input
+                value={newUnit}
+                onChange={(e) => setNewUnit(e.target.value)}
+                aria-label="New unit name"
+                placeholder="drinks, chores, points…"
+                maxLength={40}
+                onKeyDown={(e) => {
+                  if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
+                  e.preventDefault();
+                  void addUnit();
+                }}
+                disabled={unitBusy}
+                autoFocus
+              />
+              <Button type="button" variant="secondary" onClick={addUnit} busy={unitBusy} disabled={!newUnit.trim()}>Add</Button>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => { setAddingUnit(false); setNewUnit(""); }}
+                disabled={unitBusy}
+              >
+                Cancel
+              </Button>
+            </div>
+          )}
+        </div>
+
         <div className="flex flex-wrap gap-2">
           <div className="min-w-0 flex-1 basis-40">
             <Field label={method === "itemized" ? "Total" : "Amount"}>
@@ -578,13 +717,13 @@ export function ExpenseForm({
                 }}
                 required={method !== "itemized"}
                 readOnly={method === "itemized" && itemSubtotalCents > 0}
-                placeholder="0.00"
+                placeholder={selectedUnit ? "0" : "0.00"}
                 data-autofocus
                 className="!min-h-14 !text-amount-lg !font-semibold tracking-tight tnum"
               />
             </Field>
           </div>
-          <div className="w-24 max-w-full">
+          {!selectedUnit && <div className="w-24 max-w-full">
             <Field label="Currency">
               <Select value={currency} onChange={(e) => setCurrency(e.target.value)} className="!min-h-14">
                 {CURRENCIES.map((c) => (
@@ -592,7 +731,7 @@ export function ExpenseForm({
                 ))}
               </Select>
             </Field>
-          </div>
+          </div>}
         </div>
 
         <Field label="Description">
@@ -710,6 +849,7 @@ export function ExpenseForm({
               values={values}
               amountCents={amountCents}
               currency={currency}
+              unitName={selectedUnit?.name ?? null}
               participantCount={participantList.length}
               onToggle={toggleMember}
               onValue={(id, value) => setValues((v) => ({ ...v, [id]: value }))}
@@ -720,6 +860,7 @@ export function ExpenseForm({
               items={items}
               setItems={setItems}
               currency={currency}
+              unitName={selectedUnit?.name ?? null}
               subtotalCents={itemSubtotalCents}
               taxEnabled={taxEnabled}
               taxRate={taxRate}

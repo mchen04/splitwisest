@@ -8,6 +8,7 @@ import { api, useApiData, useFormState, CURRENCIES } from "@/lib/client";
 import { AppShell } from "@/components/shell";
 import { Card, EmptyState, Button, Modal, Field, Input, Select, ErrorNote, LoadError, RowMeta, RowTitle } from "@/components/ui";
 import { GroupNet } from "@/components/group-net";
+import { formatUnitAmount } from "@/lib/units";
 
 interface Group {
   id: number;
@@ -17,6 +18,7 @@ interface Group {
   memberCount: number;
   expenseCount: number;
   myNetCents: number;
+  unitNets: { unitId: number; name: string; netCents: number }[];
 }
 
 export default function GroupsPage() {
@@ -95,6 +97,11 @@ export default function GroupsPage() {
                       {g.memberCount} {g.memberCount === 1 ? "member" : "members"} · {g.expenseCount}{" "}
                       {g.expenseCount === 1 ? "expense" : "expenses"} · {g.currency}
                     </RowMeta>
+                    {g.unitNets?.map((unit) => (
+                      <RowMeta key={unit.unitId} className="tnum">
+                        {unit.name}: {formatUnitAmount(unit.netCents, unit.name)}
+                      </RowMeta>
+                    ))}
                   </span>
                   <GroupNet cents={g.myNetCents} currency={g.currency} />
                 </Link>

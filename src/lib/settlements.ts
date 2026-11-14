@@ -9,11 +9,15 @@ import { activityData } from "./activity";
 import { Change, feedLine } from "./activity-diff";
 import { VersionToken, versionToken } from "./versions";
 import { validateCurrencyAmount } from "./currencies";
+import { loadGroupMemberIds } from "./balances";
+import { loadUnitLedger, requireGroupUnit } from "./group-units";
+import { computeUnitBalances, directedObligation, formatDenomination, formatUnitQuantity } from "./units";
 
 // Validation fields shared by group and direct (friend) settlement bodies.
 export const settlementFields = {
   amountCents: z.number().int().positive("Amount must be positive").max(100_000_000_000),
   currency: z.string().refine((c) => CURRENCIES.includes(c), "Unsupported currency"),
+  unitId: z.number().int().positive().nullable().optional(),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Invalid date"),
   note: z.string().max(500).default(""),
 };
@@ -27,11 +31,42 @@ export async function settlementSummary(
   payerId: number,
   recipientId: number,
   amountCents: number,
-  currency: string
+  currency: string,
+  unitName?: string | null
 ): Promise<string> {
   const names = await sql`SELECT id, display_name FROM users WHERE id IN (${payerId}, ${recipientId})`;
   const nameOf = (id: number) => names.find((n) => Number(n.id) === id)?.display_name ?? "Someone";
-  return `${nameOf(payerId)} paid ${nameOf(recipientId)} ${fmtMoney(amountCents, currency)} (recorded offline)`;
+  const amountText = unitName
+    ? formatDenomination(amountCents, { kind: "unit", unitId: 0, name: unitName })
+    : fmtMoney(amountCents, currency);
+  return `${nameOf(payerId)} paid ${nameOf(recipientId)} ${amountText} (recorded offline)`;
+}
+
+async function assertUnitRepaymentAllowed(
+  groupId: number,
+  unitId: number,
+  payerId: number,
+  recipientId: number,
+  amountCents: number,
+  existingAmountCents = 0
+) {
+  const rows = await sql`SELECT auto_reconcile_units FROM groups WHERE id = ${groupId}`;
+  if (rows[0]?.auto_reconcile_units) return;
+  const unit = (await loadUnitLedger(groupId)).find((row) => row.unitId === unitId);
+  if (!unit) return;
+  const memberIds = await loadGroupMemberIds(groupId);
+  const obligations = computeUnitBalances(memberIds, unit.expenses, unit.settlements, false).obligations;
+  const outstanding = directedObligation(obligations, payerId, recipientId) + existingAmountCents;
+  if (amountCents > outstanding) {
+    badRequest(outstanding === 0
+      ? "That person does not owe this unit to the recipient"
+      : `That is more than the ${formatUnitQuantity(outstanding)} still owed in this unit`);
+  }
+}
+
+async function groupCurrencyForSettlement(groupId: number, settlement: AuthorizedSettlement) {
+  const rows = await sql`SELECT currency FROM groups WHERE id = ${groupId}`;
+  return (rows[0]?.currency as string | undefined) ?? settlement.currency;
 }
 
 export async function recordGroupSettlement(
@@ -43,6 +78,7 @@ export async function recordGroupSettlement(
     recipientId: number;
     amountCents: number;
     currency: string;
+    unitId?: number | null;
     date: string;
     note: string;
   },
@@ -52,9 +88,12 @@ export async function recordGroupSettlement(
   // could fabricate/alter a settlement between two OTHER members and silently
   // shift their money-bearing balance (mirrors the guard in recordDirectSettlement).
   if (createdBy !== body.payerId && createdBy !== body.recipientId) forbidden("You can't record this settlement");
-  validateCurrencyAmount(body.amountCents, body.currency);
-  const { cents: convertedCents } = await convert(body.amountCents, body.currency, groupCurrency);
-  const summary = await settlementSummary(body.payerId, body.recipientId, body.amountCents, body.currency);
+  const unit = body.unitId != null ? await requireGroupUnit(groupId, body.unitId) : null;
+  if (!unit) validateCurrencyAmount(body.amountCents, body.currency);
+  const currency = unit ? groupCurrency : body.currency;
+  const convertedCents = unit ? body.amountCents : (await convert(body.amountCents, body.currency, groupCurrency)).cents;
+  if (unit) await assertUnitRepaymentAllowed(groupId, unit.id, body.payerId, body.recipientId, body.amountCents);
+  const summary = await settlementSummary(body.payerId, body.recipientId, body.amountCents, currency, unit?.name);
   const expectedSnapshot = expectedBalances ? JSON.stringify(expectedBalances) : null;
   const [, rows] = await sql.transaction((tx) => [
     tx`SELECT pg_advisory_xact_lock(${groupId}::int)`,
@@ -83,9 +122,9 @@ export async function recordGroupSettlement(
       )
     ),
     s AS (
-      INSERT INTO settlements (group_id, payer_id, recipient_id, amount_cents, currency, converted_cents, settled_date, note, created_by)
-      SELECT ${groupId}, ${body.payerId}, ${body.recipientId}, ${body.amountCents}, ${body.currency},
-        ${convertedCents}, ${body.date}, ${body.note}, ${createdBy}
+      INSERT INTO settlements (group_id, payer_id, recipient_id, amount_cents, currency, converted_cents, unit_id, settled_date, note, created_by)
+      SELECT ${groupId}, ${body.payerId}, ${body.recipientId}, ${body.amountCents}, ${currency},
+        ${convertedCents}, ${body.unitId ?? null}, ${body.date}, ${body.note}, ${createdBy}
       FROM members_ok
       RETURNING id, to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS updated_at
     ),
@@ -111,12 +150,14 @@ export async function recordDirectSettlement(
     recipientId: number;
     amountCents: number;
     currency: string;
+    unitId?: number | null;
     date: string;
     note: string;
   },
   settleFullBalance = false
 ): Promise<{ id: number; updatedAt: string }> {
   if (createdBy !== body.payerId && createdBy !== body.recipientId) forbidden("You can't record this settlement");
+  if (body.unitId != null) badRequest("Direct payments stay in money");
   validateCurrencyAmount(body.amountCents, body.currency);
   const userA = Math.min(body.payerId, body.recipientId);
   const userB = Math.max(body.payerId, body.recipientId);
@@ -173,8 +214,8 @@ export async function recordDirectSettlement(
 
 /** A recorded payment can move in four ways a person would notice. */
 function diffSettlement(
-  prev: { amountCents: number; currency: string; date: string; note: string },
-  next: { amountCents: number; currency: string; date: string; note: string }
+  prev: { amountCents: number; currency: string; unitName?: string | null; date: string; note: string },
+  next: { amountCents: number; currency: string; unitName?: string | null; date: string; note: string }
 ): Change[] {
   const changes: Change[] = [];
   if (prev.amountCents !== next.amountCents) {
@@ -184,9 +225,13 @@ function diffSettlement(
       toCents: next.amountCents,
       fromCurrency: prev.currency,
       toCurrency: next.currency,
+      fromUnitName: prev.unitName ?? null,
+      toUnitName: next.unitName ?? null,
     });
   }
-  if (prev.currency !== next.currency) changes.push({ field: "currency", from: prev.currency, to: next.currency });
+  if (prev.currency !== next.currency && (prev.unitName ?? null) === (next.unitName ?? null)) {
+    changes.push({ field: "currency", from: prev.currency, to: next.currency });
+  }
   if (prev.date !== next.date) changes.push({ field: "date", from: prev.date, to: next.date });
   if (prev.note !== next.note) {
     changes.push({ field: "notes", kind: !prev.note ? "added" : !next.note ? "removed" : "changed" });
@@ -197,12 +242,27 @@ function diffSettlement(
 export async function updateSettlementWithActivity(
   settlement: AuthorizedSettlement,
   user: { id: number; displayName: string },
-  body: { amountCents: number; currency: string; date: string; note: string; expectedUpdatedAt: string },
+  body: { amountCents: number; currency: string; unitId?: number | null; date: string; note: string; expectedUpdatedAt: string },
   convertedCents: number
 ) {
-  validateCurrencyAmount(body.amountCents, body.currency);
-  const fallbackText = await settlementSummary(settlement.payerId, settlement.recipientId, body.amountCents, body.currency);
-  const changes = diffSettlement(settlement, body);
+  const unitId = body.unitId === undefined ? settlement.unitId : body.unitId;
+  if (settlement.groupId === null && unitId != null) badRequest("Direct payments stay in money");
+  const unit = unitId != null && settlement.groupId !== null
+    ? await requireGroupUnit(settlement.groupId, unitId)
+    : null;
+  if (!unit) validateCurrencyAmount(body.amountCents, body.currency);
+  const currency = unit ? await groupCurrencyForSettlement(settlement.groupId!, settlement) : body.currency;
+  const effectiveConverted = unit ? body.amountCents : convertedCents;
+  if (unit && settlement.groupId !== null) {
+    await assertUnitRepaymentAllowed(
+      settlement.groupId, unit.id, settlement.payerId, settlement.recipientId, body.amountCents,
+      settlement.unitId === unit.id ? settlement.amountCents : 0
+    );
+  }
+  const fallbackText = await settlementSummary(
+    settlement.payerId, settlement.recipientId, body.amountCents, currency, unit?.name
+  );
+  const changes = diffSettlement(settlement, { ...body, currency, unitName: unit?.name ?? null });
   const actionText = feedLine(changes) ?? `edited a recorded payment - now ${fallbackText}`;
   const summary = `${user.displayName} ${actionText}`;
   const visibleUserIds = [settlement.payerId, settlement.recipientId].map(String);
@@ -238,8 +298,9 @@ export async function updateSettlementWithActivity(
         )
     ),
     upd AS (
-      UPDATE settlements SET amount_cents = ${body.amountCents}, currency = ${body.currency},
-        converted_cents = ${convertedCents}, settled_date = ${body.date}, note = ${body.note}, updated_at = now()
+      UPDATE settlements SET amount_cents = ${body.amountCents}, currency = ${currency},
+        converted_cents = ${effectiveConverted}, unit_id = ${unitId},
+        settled_date = ${body.date}, note = ${body.note}, updated_at = now()
       FROM existing_members_ok
       WHERE id = ${settlement.id}
         AND to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') = ${body.expectedUpdatedAt}
@@ -343,6 +404,8 @@ export interface AuthorizedSettlement {
   createdBy: number;
   amountCents: number;
   currency: string;
+  unitId: number | null;
+  unitName: string | null;
   convertedCents: number;
   date: string;
   note: string;
@@ -359,6 +422,8 @@ export interface SettlementHistoryRow {
   recipientName: string;
   amountCents: number;
   currency: string;
+  unitId: number | null;
+  unitName: string | null;
   date: string;
   note: string;
 }
@@ -374,6 +439,8 @@ function mapSettlementHistory(rows: Record<string, unknown>[]): SettlementHistor
     recipientName: s.recipient_name as string,
     amountCents: Number(s.amount_cents),
     currency: s.currency as string,
+    unitId: s.unit_id === null || s.unit_id === undefined ? null : Number(s.unit_id),
+    unitName: (s.unit_name as string | null) ?? null,
     date: s.settled_date as string,
     note: s.note as string,
   }));
@@ -396,9 +463,11 @@ export async function loadVisibleSettlementHistory({
     const rows = await sql`
       SELECT s.id, s.group_id, g.name AS group_name, s.payer_id, p.display_name AS payer_name,
         s.recipient_id, r.display_name AS recipient_name, s.amount_cents, s.currency,
+        s.unit_id, gu.name AS unit_name,
         s.settled_date, s.note
       FROM settlements s
       LEFT JOIN groups g ON g.id = s.group_id
+      LEFT JOIN group_units gu ON gu.id = s.unit_id
       JOIN users p ON p.id = s.payer_id
       JOIN users r ON r.id = s.recipient_id
       WHERE s.payer_id = ${viewerId} OR s.recipient_id = ${viewerId}
@@ -410,9 +479,11 @@ export async function loadVisibleSettlementHistory({
     const rows = await sql`
       SELECT s.id, s.group_id, g.name AS group_name, s.payer_id, p.display_name AS payer_name,
         s.recipient_id, r.display_name AS recipient_name, s.amount_cents, s.currency,
+        s.unit_id, gu.name AS unit_name,
         s.settled_date, s.note
       FROM settlements s
       LEFT JOIN groups g ON g.id = s.group_id
+      LEFT JOIN group_units gu ON gu.id = s.unit_id
       JOIN users p ON p.id = s.payer_id
       JOIN users r ON r.id = s.recipient_id
       WHERE ((s.payer_id = ${viewerId} AND s.recipient_id = ${personId})
@@ -426,9 +497,11 @@ export async function loadVisibleSettlementHistory({
   const rows = await sql`
     SELECT s.id, s.group_id, g.name AS group_name, s.payer_id, p.display_name AS payer_name,
       s.recipient_id, r.display_name AS recipient_name, s.amount_cents, s.currency,
+      s.unit_id, gu.name AS unit_name,
       s.settled_date, s.note
     FROM settlements s
     JOIN groups g ON g.id = s.group_id
+    LEFT JOIN group_units gu ON gu.id = s.unit_id
     JOIN users p ON p.id = s.payer_id
     JOIN users r ON r.id = s.recipient_id
     WHERE ((s.payer_id = ${viewerId} AND s.recipient_id = ${personId})
@@ -442,11 +515,13 @@ export async function loadVisibleSettlementHistory({
 export async function loadAuthorizedSettlementForMutation(id: number, userId: number): Promise<AuthorizedSettlement> {
   if (!Number.isInteger(id)) notFound();
   const rows = await sql`
-    SELECT id, group_id, payer_id, recipient_id, created_by, amount_cents, currency, converted_cents,
+    SELECT s.id, s.group_id, s.payer_id, s.recipient_id, s.created_by, s.amount_cents, s.currency,
+      s.converted_cents, s.unit_id, gu.name AS unit_name,
       to_char(settled_date, 'YYYY-MM-DD') AS settled_date, note,
       to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS updated_at
-    FROM settlements
-    WHERE id = ${id}`;
+    FROM settlements s
+    LEFT JOIN group_units gu ON gu.id = s.unit_id
+    WHERE s.id = ${id}`;
   if (rows.length === 0) notFound();
   const raw = rows[0];
   const groupId = raw.group_id === null ? null : Number(raw.group_id);
@@ -458,6 +533,8 @@ export async function loadAuthorizedSettlementForMutation(id: number, userId: nu
     createdBy: Number(raw.created_by),
     amountCents: Number(raw.amount_cents),
     currency: raw.currency as string,
+    unitId: raw.unit_id === null ? null : Number(raw.unit_id),
+    unitName: (raw.unit_name as string | null) ?? null,
     convertedCents: Number(raw.converted_cents),
     date: raw.settled_date as string,
     note: (raw.note as string | null) ?? "",

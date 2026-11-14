@@ -7,7 +7,9 @@ import { suggestSettlements } from "@/lib/balances";
 import { materializeRecurring } from "@/lib/expenses";
 import {
   deleteGroup, parseGroupId, renameGroupWithActivity, requireGroupMember, requireGroupViewerVersions,
+  setGroupAutoReconcile,
 } from "@/lib/groups";
+import { computeUnitBalances, parseUnitLedger } from "@/lib/units";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -21,6 +23,21 @@ export const GET = privateHandler(async (req: NextRequest, { params }: Ctx) => {
   if (group.versions.recurringDue) group = await requireGroupViewerVersions(String(groupId), true);
   const { members, balances } = group;
   const suggestions = suggestSettlements(balances);
+  const memberIds = members.map((member) => member.id);
+  const ledger = parseUnitLedger(group.unitLedger);
+  const unitBalances = group.units.map((unit) => {
+    const entry = ledger.find((row) => row.unitId === unit.id);
+    const result = computeUnitBalances(memberIds, entry?.expenses ?? [], entry?.settlements ?? [], group.autoReconcileUnits);
+    const displayName = new Map(members.map((member) => [member.id, member.displayName]));
+    return {
+      unitId: unit.id,
+      name: unit.name,
+      reconcile: group.autoReconcileUnits,
+      nets: result.nets.map((row) => ({ ...row, displayName: displayName.get(row.userId) ?? "" })),
+      transfers: result.transfers,
+      obligations: result.obligations,
+    };
+  });
 
   return privateJson(req, {
     group: {
@@ -29,15 +46,21 @@ export const GET = privateHandler(async (req: NextRequest, { params }: Ctx) => {
       currency: group.currency,
       inviteCode: group.inviteCode,
       createdBy: group.createdBy,
+      autoReconcileUnits: group.autoReconcileUnits,
     },
     version: group.versions.detail,
     members,
     balances,
     suggestions,
+    units: group.units,
+    unitBalances,
   });
 });
 
-const PatchBody = z.object({ name: z.string().trim().min(1, "Group name is required").max(60) });
+const PatchBody = z.object({
+  name: z.string().trim().min(1, "Group name is required").max(60).optional(),
+  autoReconcileUnits: z.boolean().optional(),
+});
 
 // Rename a group. Any member may rename it; currency is immutable because
 // existing expenses store amounts already converted to the group's currency.
@@ -45,9 +68,15 @@ export const PATCH = handler(async (req: NextRequest, { params }: Ctx) => {
   const user = await requireUser();
   const groupId = parseGroupId((await params).id);
   await requireGroupMember(groupId, user.id);
-  const { name } = PatchBody.parse(await req.json());
-  await renameGroupWithActivity(groupId, user, name);
-  return NextResponse.json({ ok: true });
+  const body = PatchBody.parse(await req.json());
+  if (body.name === undefined && body.autoReconcileUnits === undefined) {
+    badRequest("Nothing to update");
+  }
+  if (body.name !== undefined) await renameGroupWithActivity(groupId, user, body.name);
+  const autoReconcileUnits = body.autoReconcileUnits === undefined
+    ? undefined
+    : await setGroupAutoReconcile(groupId, user.id, body.autoReconcileUnits);
+  return NextResponse.json({ ok: true, autoReconcileUnits });
 });
 
 // Delete a group and everything in it. Restricted to the group's creator;

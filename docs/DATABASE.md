@@ -51,9 +51,12 @@ pnpm migrate:apply scripts/migrations/20260929_group_balances_parent_check.sql
 pnpm migrate:apply scripts/migrations/20260929_group_balances_immutable_allocations.sql
 pnpm migrate:apply scripts/migrations/20260929_group_balances_create_requests.sql
 pnpm migrate:apply scripts/migrations/20261015_currency_balance_units.sql
+pnpm migrate:apply scripts/migrations/20261114_group_units.sql
 ```
 
 These install group balance tables, allocation guards, create receipts, and whole-unit currency allocation.
+The group units migration adds `group_units`, nullable `unit_id` columns, the group-scoped unit foreign keys, and the `auto_reconcile_units` setting.
+It also replaces `group_balance_rows` so money sums skip unit rows.
 Preserve the previous balance function before replacing it.
 Do not restore a function that ignores group balances while group balance entries exist.
 
@@ -103,6 +106,9 @@ Normalize those types before arithmetic, download responses, or date comparisons
 
 Expense deletion cascades to shares, items, and attachments.
 Group deletion removes its scoped financial and message records.
+Unit deletion is allowed only when no expense, settlement, or recurring expense references it.
+Unit rows store `converted_cents = amount_cents` and `fx_rate = 1`.
+Unit settlements always have a group.
 Money references prevent hard deletion of referenced users; authentication excludes users with `deleted_at` set.
 See [money rules](ARCHITECTURE.md#money-rules) before changing balances or deletion behavior.
 
@@ -116,6 +122,7 @@ Core and profile checks use `SPLITWISEST_BASE_URL`, which defaults to `http://lo
 | Check | Required database | App |
 |---|---|---|
 | Money ledger and form | `splitwisest_money_qa`, loopback host | Default `http://127.0.0.1:3000`. |
+| Units | `splitwisest_units_qa`, loopback host | `http://127.0.0.1:3392`. |
 | Notifications | `splitwisest_notifications_qa`, localhost or 127.0.0.1 | Default `http://localhost:3467`. |
 | Monthly reminders | `splitwisest_monthly_qa`, localhost, 127.0.0.1, or db.localtest.me | SQL checks need no app. |
 
@@ -134,6 +141,9 @@ unset SPLITWISEST_MONEY_QA_PASSWORD
 The form check needs Chromium and the ledger fixtures.
 `SPLITWISEST_BROWSER_URL` overrides its browser origin, for example when using local HTTPS.
 Recreate the disposable money database before repeating the ledger check.
+The units check needs the base, notification, and `20261114_group_units.sql` migrations.
+It creates and removes its own users, groups, units, expenses, and settlements.
+`pnpm verify:units-ui` drives the WebKit layout matrix and keeps screenshots outside git.
 See [notification checks](NOTIFICATIONS.md#verification) for their configuration.
 
 Index database checks need 10,000 expenses, group 21, and user 1 with expenses and direct messages.

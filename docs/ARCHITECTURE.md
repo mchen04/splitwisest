@@ -57,6 +57,30 @@ The actor must be the payer or recipient when creating one.
 Editing a group settlement requires membership and participation as payer, recipient, or creator.
 Editing a direct settlement requires being its payer or recipient.
 
+## Custom units
+
+A group can own custom units such as drinks, chores, or points.
+Unit names are trimmed, case-insensitive, and unique within their group.
+The same label in another group is a different unit.
+Expenses and group settlements may reference a unit; a null unit means money.
+Unit amounts use the same integer hundredths and split functions as money, with a step of one.
+Unit rows never convert, never carry an exchange rate, and never sum with money or another unit.
+Money balances, charts, exports, and settlement suggestions exclude unit rows.
+
+Each unit has its own balances.
+With auto-reconcile on, unit nets are paid minus owed plus repayments sent minus received, then simplified with the money payment planner.
+With auto-reconcile off, each participant keeps a direct obligation to the payer.
+Opposite debts stay visible, and nothing is cancelled or simplified across people.
+A repayment reduces only the payer's obligation to that recipient in that unit.
+An over-repayment is rejected while auto-reconcile is off.
+Historic excess, such as a repayment recorded while auto-reconcile was on, shows as the reverse obligation.
+Toggling the setting never edits historical expenses or settlements.
+
+Unit settlements always belong to a group.
+Direct friend payments stay money-only.
+A unit can be deleted only when no expense, payment, or recurring expense uses it.
+Creating a unit with an existing name returns the existing unit.
+
 ## Reads and sync
 
 `GET /api/sync` reads cursors and unread counts in one query.

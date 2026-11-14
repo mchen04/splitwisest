@@ -4,12 +4,15 @@ import { useEffect, useState } from "react";
 import { api, useFormState, amountInputToCents, localDateStr } from "@/lib/client";
 import { Button, Field, Input, Select, Modal, ErrorNote, toast } from "./ui";
 import { Member } from "./expense-form";
+import { formatUnitQuantity } from "@/lib/units";
 
 export interface ExistingRecurring {
   id: number;
   title: string;
   amountCents: number;
   currency: string;
+  unitId: number | null;
+  unitName: string | null;
   payerId: number;
   categoryId: number | null;
   participantIds: number[];
@@ -22,10 +25,11 @@ export interface ExistingRecurring {
 }
 
 export function RecurringModal({
-  open, onClose, onSaved, groupId, members, meId, defaultCurrency, existing,
+  open, onClose, onSaved, groupId, members, meId, defaultCurrency, existing, units = [],
 }: {
   open: boolean; onClose: () => void; onSaved: () => void;
   groupId: number; members: Member[]; meId: number; defaultCurrency: string;
+  units?: { id: number; name: string }[];
   existing?: ExistingRecurring | null;
 }) {
   const [title, setTitle] = useState("");
@@ -33,6 +37,7 @@ export function RecurringModal({
   const [payerId, setPayerId] = useState(meId);
   const [cadence, setCadence] = useState<"weekly" | "monthly">("monthly");
   const [startDate, setStartDate] = useState("");
+  const [unitId, setUnitId] = useState<number | null>(null);
   const { error, setError, busy, run } = useFormState();
 
   useEffect(() => {
@@ -42,12 +47,14 @@ export function RecurringModal({
       // Reset the recurring rule form when opening or switching the edited rule.
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setTitle(existing.title);
-      setAmount((existing.amountCents / 100).toFixed(2));
+      setAmount(existing.unitId ? formatUnitQuantity(existing.amountCents) : (existing.amountCents / 100).toFixed(2));
+      setUnitId(existing.unitId ?? null);
       setPayerId(existing.payerId);
       setCadence(existing.cadence);
       setStartDate(String(existing.nextDate).slice(0, 10));
     } else {
       setTitle(""); setAmount(""); setPayerId(meId); setCadence("monthly");
+      setUnitId(null);
       const d = new Date(); d.setDate(d.getDate() + 1);
       setStartDate(localDateStr(d));
     }
@@ -60,12 +67,13 @@ export function RecurringModal({
     const amountCents = amountInputToCents(amount) ?? 0;
     if (amountCents <= 0) return setError("Enter a positive amount");
     const participantIds = members.map((m) => m.id);
+    const unitCurrency = unitId === null ? undefined : defaultCurrency;
     run(async () => {
       if (existing) {
         await api(`/api/recurring/${existing.id}`, {
           method: "PATCH",
           body: {
-            title: title.trim(), amountCents, currency: existing.currency, payerId,
+            title: title.trim(), amountCents, currency: unitCurrency ?? existing.currency, unitId, payerId,
             categoryId: existing.categoryId, participantIds: existing.participantIds,
             cadence, nextDate: startDate, notes: existing.notes, active: existing.active,
             expectedUpdatedAt: existing.updatedAt,
@@ -74,7 +82,7 @@ export function RecurringModal({
       } else {
         await api(`/api/groups/${groupId}/recurring`, {
           body: {
-            title: title.trim(), amountCents, currency: defaultCurrency, payerId,
+            title: title.trim(), amountCents, currency: unitCurrency ?? defaultCurrency, unitId, payerId,
             participantIds, cadence, startDate, notes: "",
           },
         });
@@ -89,9 +97,15 @@ export function RecurringModal({
         <Field label="Title">
           <Input value={title} onChange={(e) => setTitle(e.target.value)} required maxLength={120} placeholder="Rent" data-autofocus />
         </Field>
+        <Field label="Track in">
+          <Select value={unitId ?? ""} onChange={(e) => setUnitId(e.target.value === "" ? null : Number(e.target.value))}>
+            <option value="">Money ({defaultCurrency})</option>
+            {units.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}
+          </Select>
+        </Field>
         <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,11rem),1fr))] gap-3">
-          <Field label={`Amount (${defaultCurrency})`}>
-            <Input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} required placeholder="0.00" />
+          <Field label={`Amount (${unitId !== null ? units.find((u) => u.id === unitId)?.name ?? "unit" : defaultCurrency})`}>
+            <Input inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} required placeholder={unitId !== null ? "0" : "0.00"} />
           </Field>
           <Field label="Paid by">
             <Select value={payerId} onChange={(e) => setPayerId(Number(e.target.value))}>

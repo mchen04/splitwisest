@@ -11,6 +11,7 @@ import { DirectSettleModal } from "@/components/direct-settle-modal";
 import { FriendBalanceRow, sortByUrgency, useRemind, type FriendWithBalances } from "@/components/friend-balances";
 import { GroupNet } from "@/components/group-net";
 import type { FriendObligation } from "@/lib/balances";
+import { formatUnitAmount } from "@/lib/units";
 
 interface Group {
   id: number;
@@ -19,6 +20,7 @@ interface Group {
   memberCount: number;
   expenseCount: number;
   myNetCents: number;
+  unitNets: { unitId: number; name: string; netCents: number }[];
 }
 
 interface Friend {
@@ -85,6 +87,7 @@ export default function Dashboard() {
       netByCur[cur] = (netByCur[cur] ?? 0) + amt;
     }
     for (const obligation of f.obligations) {
+      if (obligation.kind === "unit") continue;
       obligationCurrencies.add(obligation.currency);
       if (obligation.netCents > 0) owedTotal += obligation.netCents;
       else oweTotal -= obligation.netCents;
@@ -223,6 +226,11 @@ export default function Dashboard() {
                         <RowMeta>
                           {g.memberCount} {g.memberCount === 1 ? "member" : "members"} · {g.expenseCount} {g.expenseCount === 1 ? "expense" : "expenses"}
                         </RowMeta>
+                        {g.unitNets?.map((unit) => (
+                          <RowMeta key={unit.unitId} className="tnum">
+                            {unit.name}: {formatUnitAmount(unit.netCents, unit.name)}
+                          </RowMeta>
+                        ))}
                       </span>
                       <GroupNet cents={g.myNetCents} currency={g.currency} />
                     </Link>

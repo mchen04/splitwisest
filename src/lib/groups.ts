@@ -9,6 +9,7 @@ export interface AuthorizedGroup {
   currency: string;
   inviteCode: string;
   createdBy: number;
+  autoReconcileUnits: boolean;
 }
 
 export function parseGroupId(value: string): number {
@@ -19,7 +20,7 @@ export function parseGroupId(value: string): number {
 
 export async function requireGroupMember(groupId: number, userId: number): Promise<AuthorizedGroup> {
   const rows = await sql`
-    SELECT g.id, g.name, g.currency, g.invite_code, g.created_by,
+    SELECT g.id, g.name, g.currency, g.invite_code, g.created_by, g.auto_reconcile_units,
       EXISTS (
         SELECT 1 FROM group_members gm
         WHERE gm.group_id = g.id AND gm.user_id = ${userId}
@@ -38,6 +39,7 @@ function authorizedGroup(row: Record<string, unknown> | undefined): AuthorizedGr
     currency: row.currency as string,
     inviteCode: row.invite_code as string,
     createdBy: Number(row.created_by),
+    autoReconcileUnits: Boolean(row.auto_reconcile_units),
   };
 }
 
@@ -60,7 +62,13 @@ export interface GroupMember {
 export async function requireGroupViewerVersions(
   rawId: string,
   includeDetail = false,
-): Promise<AuthorizedGroup & { versions: GroupVersions; members: GroupMember[]; balances: MemberBalance[] }> {
+): Promise<AuthorizedGroup & {
+  versions: GroupVersions;
+  members: GroupMember[];
+  balances: MemberBalance[];
+  units: { id: number; name: string }[];
+  unitLedger: { unitId: number; name: string; expenses: unknown[]; settlements: unknown[] }[];
+}> {
   const token = await requireSessionToken();
   // A malformed id keeps the old order: an invalid session still answers 401.
   if (!Number.isInteger(Number(rawId))) await requireUser();
@@ -71,7 +79,8 @@ export async function requireGroupViewerVersions(
       WHERE s.token = ${token} AND s.expires_at > now() AND u.deleted_at IS NULL
     ),
     group_viewer AS MATERIALIZED (
-      SELECT v.viewer_id, g.id, g.name, g.currency, g.invite_code, g.created_by, m.is_member
+      SELECT v.viewer_id, g.id, g.name, g.currency, g.invite_code, g.created_by,
+        g.auto_reconcile_units, m.is_member
       FROM (SELECT (SELECT id FROM viewer) AS viewer_id) v
       LEFT JOIN groups g ON g.id = ${groupId}
       CROSS JOIN LATERAL (
@@ -87,13 +96,43 @@ export async function requireGroupViewerVersions(
       SELECT b.user_id, b.display_name, b.net_cents
       FROM group_viewer g CROSS JOIN LATERAL group_balance_rows(g.id) b
       WHERE g.is_member
+    ),
+    units AS MATERIALIZED (
+      SELECT gu.id, gu.name
+      FROM group_viewer g JOIN group_units gu ON gu.group_id = g.id
+      WHERE g.is_member
+    ),
+    unit_ledger AS MATERIALIZED (
+      SELECT gu.id AS unit_id, gu.name,
+        COALESCE((
+          SELECT jsonb_agg(jsonb_build_object(
+            'payerId', e.payer_id,
+            'amountCents', e.amount_cents,
+            'shares', COALESCE((
+              SELECT jsonb_agg(jsonb_build_object('userId', es.user_id, 'shareCents', es.share_cents))
+              FROM expense_shares es WHERE es.expense_id = e.id
+            ), '[]'::jsonb)
+          ))
+          FROM expenses e WHERE e.group_id = gu.group_id AND e.unit_id = gu.id
+        ), '[]'::jsonb) AS expenses,
+        COALESCE((
+          SELECT jsonb_agg(jsonb_build_object(
+            'payerId', s.payer_id, 'recipientId', s.recipient_id, 'amountCents', s.amount_cents))
+          FROM settlements s WHERE s.group_id = gu.group_id AND s.unit_id = gu.id
+        ), '[]'::jsonb) AS settlements
+      FROM group_viewer g JOIN group_units gu ON gu.group_id = g.id
+      WHERE g.is_member
     )
     SELECT g.*,
       CASE WHEN g.is_member THEN md5(jsonb_build_array(g.name, g.currency, g.invite_code, g.created_by,
+        g.auto_reconcile_units,
         (SELECT jsonb_agg(jsonb_build_array(u.id, u.display_name, u.username) ORDER BY u.id)
          FROM members u),
         (SELECT jsonb_agg(jsonb_build_array(b.user_id, b.display_name, b.net_cents) ORDER BY b.user_id)
-         FROM balances b))::text) END AS detail_version,
+         FROM balances b),
+        (SELECT jsonb_agg(jsonb_build_array(gu.id, gu.name) ORDER BY gu.id) FROM units gu),
+        (SELECT jsonb_agg(jsonb_build_array(ul.unit_id, ul.expenses, ul.settlements) ORDER BY ul.unit_id)
+         FROM unit_ledger ul))::text) END AS detail_version,
       CASE WHEN g.is_member THEN md5(jsonb_build_array(
         (SELECT jsonb_agg(jsonb_build_array(o.id, o.title, o.amount_cents, o.updated_at) ORDER BY o.id)
          FROM group_obligations o WHERE o.group_id = g.id),
@@ -108,7 +147,15 @@ export async function requireGroupViewerVersions(
       END AS members,
       CASE WHEN ${includeDetail} AND g.is_member THEN
         (SELECT jsonb_agg(to_jsonb(b) ORDER BY b.display_name, b.user_id) FROM balances b)
-      END AS balances
+      END AS balances,
+      CASE WHEN ${includeDetail} AND g.is_member THEN
+        (SELECT jsonb_agg(jsonb_build_object('id', gu.id, 'name', gu.name) ORDER BY gu.name, gu.id) FROM units gu)
+      END AS units,
+      CASE WHEN ${includeDetail} AND g.is_member THEN
+        (SELECT jsonb_agg(jsonb_build_object(
+          'unitId', ul.unit_id, 'name', ul.name, 'expenses', ul.expenses, 'settlements', ul.settlements)
+          ORDER BY ul.name, ul.unit_id) FROM unit_ledger ul)
+      END AS unit_ledger
     FROM group_viewer g`;
   if (rows[0].viewer_id === null) throw new AuthError();
   // Like requireUser, a confirmed session refreshes the owner cookie even when 404/403 follows.
@@ -126,6 +173,10 @@ export async function requireGroupViewerVersions(
     balances: ((rows[0].balances ?? []) as { user_id: number; display_name: string; net_cents: number }[]).map((b) => ({
       userId: Number(b.user_id), displayName: b.display_name, netCents: Number(b.net_cents),
     })),
+    units: ((rows[0].units ?? []) as { id: number; name: string }[]).map((u) => ({
+      id: Number(u.id), name: u.name,
+    })),
+    unitLedger: (rows[0].unit_ledger ?? []) as { unitId: number; name: string; expenses: unknown[]; settlements: unknown[] }[],
   };
 }
 
@@ -185,6 +236,19 @@ export async function renameGroupWithActivity(groupId: number, user: SessionUser
     SELECT id FROM upd`,
   ]);
   if (rows.length === 0) notFound();
+}
+
+export async function setGroupAutoReconcile(groupId: number, userId: number, enabled: boolean) {
+  const rows = await sql`
+    UPDATE groups SET auto_reconcile_units = ${enabled}
+    WHERE id = ${groupId}
+      AND EXISTS (
+        SELECT 1 FROM group_members
+        WHERE group_id = ${groupId} AND user_id = ${userId}
+      )
+    RETURNING auto_reconcile_units`;
+  if (rows.length === 0) notFound();
+  return Boolean(rows[0].auto_reconcile_units);
 }
 
 export async function deleteGroup(

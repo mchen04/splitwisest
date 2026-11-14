@@ -147,6 +147,7 @@ async function main() {
     created_by BIGINT NOT NULL REFERENCES users(id),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`;
+  await sql`ALTER TABLE groups ADD COLUMN IF NOT EXISTS auto_reconcile_units BOOLEAN NOT NULL DEFAULT true`;
   await rotateShortInviteCodes("groups");
   await sql`
     DO $$
@@ -167,6 +168,17 @@ async function main() {
   // Reverse lookup "which groups is this user in" (sync poller, sidebar, activity,
   // relationship checks) cannot use the (group_id, user_id) PK — index user_id.
   await sql`CREATE INDEX IF NOT EXISTS group_members_user_idx ON group_members (user_id)`;
+
+  await sql`CREATE TABLE IF NOT EXISTS group_units (
+    id BIGSERIAL PRIMARY KEY,
+    group_id BIGINT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+    name TEXT NOT NULL CHECK (char_length(btrim(name)) BETWEEN 1 AND 40),
+    created_by BIGINT NOT NULL REFERENCES users(id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (id, group_id)
+  )`;
+  await sql`CREATE UNIQUE INDEX IF NOT EXISTS group_units_group_name_idx
+    ON group_units (group_id, lower(btrim(name)))`;
 
   await sql`CREATE TABLE IF NOT EXISTS categories (
     id BIGSERIAL PRIMARY KEY,
@@ -198,6 +210,7 @@ async function main() {
   )`;
   await sql`ALTER TABLE expenses ADD COLUMN IF NOT EXISTS itemized_tax_cents BIGINT NOT NULL DEFAULT 0 CHECK (itemized_tax_cents >= 0)`;
   await sql`ALTER TABLE expenses ADD COLUMN IF NOT EXISTS itemized_tip_cents BIGINT NOT NULL DEFAULT 0 CHECK (itemized_tip_cents >= 0)`;
+  await sql`ALTER TABLE expenses ADD COLUMN IF NOT EXISTS unit_id BIGINT`;
   // group_balance_rows() filters expenses by group_id in its paid/owed CTEs and is
   // THE hottest read (per group page, per sidebar group, and lateral'd across all of
   // a user's groups on the friends page). Without this index each call seq-scans the
@@ -215,6 +228,7 @@ async function main() {
   // recurring_id has no FK by default and is joined by the anchor-day backfill below
   // and the recurring materializer. Partial index skips the many non-recurring rows.
   await sql`CREATE INDEX IF NOT EXISTS expenses_recurring_idx ON expenses (recurring_id) WHERE recurring_id IS NOT NULL`;
+  await sql`CREATE INDEX IF NOT EXISTS expenses_unit_idx ON expenses (group_id, unit_id) WHERE unit_id IS NOT NULL`;
 
   await sql`CREATE TABLE IF NOT EXISTS expense_shares (
     expense_id BIGINT NOT NULL REFERENCES expenses(id) ON DELETE CASCADE,
@@ -301,6 +315,7 @@ async function main() {
     CHECK (payer_id <> recipient_id)
   )`;
   await sql`ALTER TABLE settlements ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now()`;
+  await sql`ALTER TABLE settlements ADD COLUMN IF NOT EXISTS unit_id BIGINT`;
   // group_balance_rows() sums settlements by group_id twice (settled_out/settled_in);
   // friend balances probe the group-less direct settlements by `payer_id = X OR
   // recipient_id = X` (the planner BitmapOrs the two single-column indexes).
@@ -309,6 +324,32 @@ async function main() {
   await sql`DROP INDEX IF EXISTS settlements_group_idx`;
   await sql`CREATE INDEX IF NOT EXISTS settlements_payer_idx ON settlements (payer_id)`;
   await sql`CREATE INDEX IF NOT EXISTS settlements_recipient_idx ON settlements (recipient_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS settlements_unit_idx ON settlements (group_id, unit_id) WHERE unit_id IS NOT NULL`;
+
+  await sql`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'expenses_unit_group_fk') THEN
+        ALTER TABLE expenses ADD CONSTRAINT expenses_unit_group_fk
+          FOREIGN KEY (unit_id, group_id) REFERENCES group_units(id, group_id);
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'settlements_unit_group_fk') THEN
+        ALTER TABLE settlements ADD CONSTRAINT settlements_unit_group_fk
+          FOREIGN KEY (unit_id, group_id) REFERENCES group_units(id, group_id);
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'settlements_unit_needs_group') THEN
+        ALTER TABLE settlements ADD CONSTRAINT settlements_unit_needs_group
+          CHECK (unit_id IS NULL OR group_id IS NOT NULL);
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'expenses_unit_no_conversion') THEN
+        ALTER TABLE expenses ADD CONSTRAINT expenses_unit_no_conversion
+          CHECK (unit_id IS NULL OR (converted_cents = amount_cents AND fx_rate = 1));
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'settlements_unit_no_conversion') THEN
+        ALTER TABLE settlements ADD CONSTRAINT settlements_unit_no_conversion
+          CHECK (unit_id IS NULL OR converted_cents = amount_cents);
+      END IF;
+    END $$`;
 
   await sql`
     CREATE OR REPLACE FUNCTION group_balance_rows(target_group_id bigint)
@@ -325,7 +366,7 @@ async function main() {
       paid AS (
         SELECT user_id, SUM(amount_cents)::bigint AS amount_cents FROM (
           SELECT payer_id AS user_id, converted_cents AS amount_cents
-          FROM expenses WHERE group_id = target_group_id
+          FROM expenses WHERE group_id = target_group_id AND unit_id IS NULL
           UNION ALL
           SELECT goa.user_id, goa.share_cents AS amount_cents
           FROM group_obligation_allocations goa
@@ -352,7 +393,7 @@ async function main() {
         FROM expense_shares es
         JOIN expenses e ON e.id = es.expense_id
         JOIN groups g ON g.id = e.group_id
-        WHERE e.group_id = target_group_id
+        WHERE e.group_id = target_group_id AND e.unit_id IS NULL
       ),
       owed_ranked AS (
         SELECT
@@ -377,13 +418,13 @@ async function main() {
       settled_out AS (
         SELECT payer_id AS user_id, COALESCE(SUM(converted_cents), 0) AS amount_cents
         FROM settlements
-        WHERE group_id = target_group_id
+        WHERE group_id = target_group_id AND unit_id IS NULL
         GROUP BY payer_id
       ),
       settled_in AS (
         SELECT recipient_id AS user_id, COALESCE(SUM(converted_cents), 0) AS amount_cents
         FROM settlements
-        WHERE group_id = target_group_id
+        WHERE group_id = target_group_id AND unit_id IS NULL
         GROUP BY recipient_id
       ),
       raw_balances AS (
@@ -432,9 +473,20 @@ async function main() {
 
 	  await sql`ALTER TABLE recurring_expenses ADD COLUMN IF NOT EXISTS anchor_day INT`;
 	  await sql`ALTER TABLE recurring_expenses ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now()`;
+  await sql`ALTER TABLE recurring_expenses ADD COLUMN IF NOT EXISTS unit_id BIGINT`;
   await sql`CREATE INDEX IF NOT EXISTS recurring_expenses_group_idx ON recurring_expenses (group_id, id)`;
   await sql`CREATE INDEX IF NOT EXISTS recurring_expenses_due_idx
     ON recurring_expenses (group_id, next_date, id) WHERE active`;
+  await sql`CREATE INDEX IF NOT EXISTS recurring_expenses_unit_idx
+    ON recurring_expenses (group_id, unit_id) WHERE unit_id IS NOT NULL`;
+  await sql`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'recurring_expenses_unit_group_fk') THEN
+        ALTER TABLE recurring_expenses ADD CONSTRAINT recurring_expenses_unit_group_fk
+          FOREIGN KEY (unit_id, group_id) REFERENCES group_units(id, group_id);
+      END IF;
+    END $$`;
   if (!(await migrationDone("backfill_recurring_anchor_day"))) {
     await sql`
       UPDATE recurring_expenses r
