@@ -122,6 +122,54 @@ async function seed() {
   console.log(JSON.stringify({ seeded: true, groups: groups.length, users: users.length, ...counts[0] }));
 }
 
+async function seedUnits() {
+  const state = readState();
+  if (state.unitGroups) {
+    console.log(JSON.stringify({ seeded: false, reason: "units exist" }));
+    return;
+  }
+  const rand = lcg(state.seed + 1);
+  const perGroup = Number(flag("unit-expenses", "400"));
+  const repayments = Number(flag("unit-settlements", "40"));
+  for (const [g, groupId] of state.groups.entries()) {
+    const memberRows = await sql`SELECT user_id FROM group_members WHERE group_id = ${groupId} ORDER BY user_id`;
+    const members = memberRows.map((r) => Number(r.user_id));
+    const units: number[] = [];
+    for (const name of ["drinks", "chores", "points"]) {
+      const rows = await sql`INSERT INTO group_units (group_id, name, created_by) VALUES (${groupId}, ${name}, ${state.users[0]}) RETURNING id`;
+      units.push(Number(rows[0].id));
+    }
+    if (g % 2 === 1) await sql`UPDATE groups SET auto_reconcile_units = false WHERE id = ${groupId}`;
+    const idRows = await sql`SELECT nextval('expenses_id_seq')::bigint AS id FROM generate_series(1, ${perGroup})`;
+    const ids = idRows.map((r) => Number(r.id));
+    const rows = ids.map((id, i) => {
+      const amount = 100 * (1 + Math.floor(rand() * 6)) + (rand() < 0.3 ? 50 : 0);
+      const n = 2 + Math.floor(rand() * (members.length - 1));
+      return { id, i, amount, unit: units[Math.floor(rand() * units.length)], payer: members[Math.floor(rand() * members.length)], shares: equalSplit(amount, n) };
+    });
+    const se: number[] = [], su: number[] = [], sc: number[] = [];
+    rows.forEach((r) => r.shares.forEach((c, k) => { se.push(r.id); su.push(members[k]); sc.push(c); }));
+    await sql.transaction([
+      sql`INSERT INTO expenses (id, group_id, title, amount_cents, currency, converted_cents, fx_rate, expense_date, payer_id, split_method, created_by, unit_id)
+        SELECT t.id, ${groupId}, 'Bench unit ' || t.i, t.amount, g.currency, t.amount, 1, '2026-09-01', t.payer, 'equal', ${state.users[0]}, t.unit
+        FROM unnest(${ids}::bigint[], ${rows.map((r) => r.i)}::int[], ${rows.map((r) => r.amount)}::bigint[], ${rows.map((r) => r.payer)}::bigint[], ${rows.map((r) => r.unit)}::bigint[]) AS t(id, i, amount, payer, unit)
+        CROSS JOIN groups g WHERE g.id = ${groupId}`,
+      sql`INSERT INTO expense_shares (expense_id, user_id, share_cents) SELECT * FROM unnest(${se}::bigint[], ${su}::bigint[], ${sc}::bigint[])`,
+    ]);
+    for (let i = 0; i < repayments; i++) {
+      const p = members[Math.floor(rand() * members.length)];
+      const r = members[(members.indexOf(p) + 1 + Math.floor(rand() * (members.length - 1))) % members.length];
+      await sql`INSERT INTO settlements (group_id, payer_id, recipient_id, amount_cents, currency, converted_cents, settled_date, created_by, unit_id)
+        SELECT ${groupId}, ${p}, ${r}, 50, g.currency, 50, '2026-10-02', ${p}, ${units[i % units.length]} FROM groups g WHERE g.id = ${groupId}`;
+    }
+  }
+  await sql`ANALYZE`;
+  state.unitGroups = state.groups;
+  writeFileSync(statePath, JSON.stringify(state));
+  const counts = await sql`SELECT count(*) FILTER (WHERE unit_id IS NOT NULL) AS unit_expenses, count(*) AS expenses FROM expenses WHERE group_id = ANY(${state.groups})`;
+  console.log(JSON.stringify({ seeded: true, ...counts[0] }));
+}
+
 function readState(): State {
   return JSON.parse(readFileSync(statePath, "utf8"));
 }
@@ -136,6 +184,7 @@ function endpoints(state: State) {
   return [
     { name: "groups", path: "/api/groups", check: (j: any) => Array.isArray(j.groups ?? j) },
     { name: "friends", path: "/api/friends", check: (j: any) => j && typeof j === "object" },
+    ...(state.unitGroups ? [{ name: "group-detail-off", path: `/api/groups/${state.groups[1]}`, check: (j: any) => Array.isArray(j.balances) }] : []),
     { name: "group-detail", path: `/api/groups/${state.bigGroup}`, check: (j: any) => Array.isArray(j.balances) && j.balances.reduce((a: number, b: any) => a + Number(b.netCents), 0) === 0 },
     { name: "group-expenses", path: `/api/groups/${state.bigGroup}/expenses?limit=50`, check: (j: any) => j && typeof j === "object" },
     { name: "expenses", path: "/api/expenses?limit=50", check: (j: any) => j && typeof j === "object" },
@@ -208,7 +257,7 @@ async function sqlBench() {
   console.log(line);
 }
 
-const commands: Record<string, () => Promise<void>> = { seed, measure, sql: sqlBench };
+const commands: Record<string, () => Promise<void>> = { seed, "seed-units": seedUnits, measure, sql: sqlBench };
 if (!commands[command]) {
   console.error("usage: bench.ts seed|measure|sql [--label L] [--phase warm|cold] [--reps N]");
   process.exit(2);
