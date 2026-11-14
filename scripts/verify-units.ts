@@ -8,7 +8,7 @@ const databaseUrl = process.env.DATABASE_URL ?? "";
 const databaseName = (() => {
   try { return new URL(databaseUrl).pathname.replace(/^\//, ""); } catch { return ""; }
 })();
-assert(databaseName === "splitwisest_units_qa", "Use the dedicated splitwisest_units_qa database");
+assert(["splitwisest_units_qa", "splitwisest_money_qa"].includes(databaseName), "Use a dedicated splitwisest_units_qa or splitwisest_money_qa database");
 assert(["127.0.0.1", "localhost", "[::1]"].includes(new URL(baseUrl).hostname), "Use a loopback app");
 assert(process.env.NEON_LOCAL_PROXY, "NEON_LOCAL_PROXY is required");
 

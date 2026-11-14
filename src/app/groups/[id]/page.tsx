@@ -897,16 +897,17 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
                     <RowMeta>
                       {fmtDate(s.date)}
                       {s.note ? ` · ${s.note}` : ""}
-                      {s.unitId && s.unitName
-                        ? ` · ${formatUnitAmount(s.amountCents, s.unitName)}`
-                        : s.currency !== detail.group.currency ? ` · ${fmtMoney(s.amountCents, s.currency)}` : ""}
+                      {!s.unitId && s.currency !== detail.group.currency ? ` · ${fmtMoney(s.amountCents, s.currency)}` : ""}
                     </RowMeta>
                   </span>
                   {updating
                     ? <span role="status" className="shrink-0 text-meta text-ink-faint">Updating…</span>
-                    : <span className="tnum shrink-0 text-body font-semibold">{s.unitId && s.unitName
-                      ? formatUnitAmount(s.amountCents, s.unitName)
-                      : fmtMoney(s.amountCents, s.currency)}</span>}
+                    : s.unitId && s.unitName
+                      ? <span className="flex min-w-0 max-w-[35%] shrink-0 flex-col items-end text-right">
+                        <span className="tnum text-body font-semibold">{formatUnitQuantity(s.amountCents)}</span>
+                        <span className="max-w-full truncate text-meta text-ink-faint">{s.unitName}</span>
+                      </span>
+                      : <span className="tnum shrink-0 text-body font-semibold">{fmtMoney(s.amountCents, s.currency)}</span>}
                   <IconButton size="sm" variant="accent" label="Edit payment" onClick={() => setEditingSettlement(s)}>
                     <Pencil className="h-4 w-4" />
                   </IconButton>

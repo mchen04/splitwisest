@@ -53,6 +53,20 @@ async function createGroup(label) {
   return { id: group.id, name };
 }
 
+async function createUnitExpense(groupId, unitId, { title, amountCents, payerId }) {
+  return api(`/api/groups/${groupId}/expenses`, owner.cookie, {
+    title,
+    amountCents,
+    currency: "USD",
+    unitId,
+    date: new Date().toISOString().slice(0, 10),
+    payerId,
+    notes: "",
+    splitMethod: "equal",
+    participants: [{ userId: owner.id }, { userId: friend.id }],
+  });
+}
+
 const executablePath = process.env.PLAYWRIGHT_WEBKIT_EXECUTABLE || (() => {
   try { return webkit.executablePath(); } catch { return undefined; }
 })();
@@ -70,10 +84,6 @@ await context.addCookies([{ name: "sw_session", value: token, domain: new URL(or
 const page = await context.newPage();
 page.setDefaultTimeout(20000);
 page.on("pageerror", (error) => errors.push(error.message));
-if (process.env.UNITS_UI_DEBUG) {
-  page.on("console", (message) => console.log("CONSOLE", message.type(), message.text()));
-  page.on("requestfailed", (request) => console.log("REQUEST FAILED", request.url(), request.failure()?.errorText));
-}
 
 async function settle() {
   await page.waitForLoadState("networkidle").catch(() => {});
@@ -92,6 +102,7 @@ async function layout(name, screenshot = true) {
     for (const element of root.querySelectorAll("input:not([type=hidden]),select,textarea,button,[role=radio]")) {
       if (!element.getClientRects().length) continue;
       const rect = element.getBoundingClientRect();
+      if (rect.bottom <= 0 || rect.top >= innerHeight) continue;
       if (rect.left < -1 || rect.right > innerWidth + 1) {
         overflow.push({ label: element.getAttribute("aria-label") || element.textContent?.trim().slice(0, 40), rect });
       }
@@ -126,43 +137,18 @@ async function runFlow(width, height, label, { largeText = false } = {}) {
   await page.getByRole("link", { name: new RegExp(groupName) }).first().click();
   await page.waitForURL(`**/groups/${groupId}`);
   await settle();
-  if (process.env.UNITS_UI_DEBUG) {
-    console.log("URL", page.url());
-    console.log("BUTTONS", await page.getByRole("button").allInnerTexts());
-    console.log("BODY", (await page.locator("body").innerText()).slice(0, 400));
-    console.log("ERRORS", errors);
-  }
   const trigger = page.locator("main").getByRole("button", { name: "Add expense", exact: true })
     .filter({ hasText: "Add expense" }).first();
   await trigger.waitFor();
   await trigger.click();
-  if (process.env.UNITS_UI_DEBUG) {
-    await page.waitForTimeout(500);
-    console.log("AFTER CLICK", (await page.locator("body").innerText()).slice(0, 300));
-    console.log("DIALOGS", await page.getByRole("dialog").count());
-  }
   const dialog = page.getByRole("dialog", { name: "Add expense", exact: true });
   await dialog.waitFor();
-  if (process.env.UNITS_UI_DEBUG) {
-    console.log("DIALOG", (await dialog.innerText()).slice(0, 500));
-    console.log("SELECTS", await dialog.locator("select").count());
-    console.log("CURRENCY LABEL", await dialog.getByText("Currency", { exact: true }).count());
-    console.log("CURRENCY BY LABEL", await dialog.getByLabel("Currency", { exact: true }).count());
-  }
 
   const money = dialog.getByRole("radio", { name: "Money", exact: true });
   assert.equal(await money.getAttribute("aria-checked"), "true", "Money is the default denomination");
   assert(await dialog.getByLabel("Currency", { exact: true }).isVisible(), "Money shows the currency picker");
   await dialog.getByRole("button", { name: "Close", exact: true }).click();
   await dialog.waitFor({ state: "hidden" });
-  if (process.env.UNITS_UI_DEBUG) {
-    console.log("ACTIVE", await page.evaluate(() => ({
-      tag: document.activeElement?.tagName,
-      id: document.activeElement?.id,
-      text: document.activeElement?.textContent?.slice(0, 40),
-    })));
-    console.log("TRIGGER", await trigger.evaluate((element) => ({ id: element.id, connected: element.isConnected })));
-  }
   assert(await trigger.evaluate((element) => element === document.activeElement), "Focus returns to the Add expense trigger");
   await trigger.click();
   await dialog.waitFor();
@@ -178,6 +164,7 @@ async function runFlow(width, height, label, { largeText = false } = {}) {
   assert((await created).ok(), "Inline unit creation succeeds");
   await dialog.getByLabel("Unit", { exact: true }).waitFor();
   assert.equal(await dialog.getByLabel("Unit", { exact: true }).inputValue() !== "", true, "The new unit is selected");
+  const unitId = Number(await dialog.getByLabel("Unit", { exact: true }).inputValue());
   assert.equal(await dialog.getByLabel("Currency", { exact: true }).count(), 0, "Unit mode hides the currency picker");
 
   await dialog.getByLabel("Amount", { exact: true }).fill("3");
@@ -185,6 +172,8 @@ async function runFlow(width, height, label, { largeText = false } = {}) {
   await dialog.getByLabel("Date", { exact: true }).fill(new Date().toISOString().slice(0, 10));
   if (largeText) await page.evaluate(() => { document.documentElement.style.fontSize = "150%"; });
   await footerReachable(dialog);
+  await dialog.getByLabel("Unit", { exact: true }).scrollIntoViewIfNeeded();
+  await page.waitForTimeout(250);
   await layout(`${label}-add-unit`, true);
   const saved = page.waitForResponse((response) =>
     response.request().method() === "POST" && new URL(response.url()).pathname === `/api/groups/${groupId}/expenses`);
@@ -195,14 +184,19 @@ async function runFlow(width, height, label, { largeText = false } = {}) {
   if (largeText) await page.evaluate(() => { document.documentElement.style.fontSize = ""; });
 
   await page.locator('[data-group-tab="balances"]:visible').click();
-  await page.getByText("Unit balances", { exact: true }).waitFor();
-  await page.getByText(unitName, { exact: true }).last().waitFor();
+  const unitHeading = page.getByRole("heading", { name: new RegExp(`^${unitName}\\s+simplified$`) });
+  await unitHeading.waitFor();
+  const unitCard = unitHeading.locator("..").locator("..");
+  const record = unitCard.getByRole("button", { name: new RegExp(`Record ${unitName} payment`) }).first();
+  await record.waitFor();
+  await unitCard.scrollIntoViewIfNeeded();
+  await page.waitForTimeout(250);
   await layout(`${label}-balances`, true);
 
-  const record = page.getByRole("button", { name: new RegExp(`Record ${unitName} payment`) }).first();
   await record.click();
   const settleDialog = page.getByRole("dialog", { name: "Settle up", exact: true });
   await settleDialog.waitFor();
+  await page.waitForTimeout(350);
   assert.equal(await settleDialog.getByLabel("Currency", { exact: true }).count(), 0, "Unit settlement hides the currency picker");
   assert(await settleDialog.getByText(new RegExp(unitName)).first().isVisible(), "Unit settlement names the unit");
   await layout(`${label}-settle`, true);
@@ -211,6 +205,14 @@ async function runFlow(width, height, label, { largeText = false } = {}) {
   await settleDialog.getByRole("button", { name: /^Record / }).click();
   assert((await paid).ok(), "Unit settlement saves");
   await settleDialog.waitFor({ state: "hidden" });
+  await page.getByText(`Nobody owes any ${unitName}.`, { exact: true }).waitFor();
+  await layout(`${label}-paid`, true);
+
+  await createUnitExpense(groupId, unitId, { title: "Unit A", amountCents: 800, payerId: owner.id });
+  await createUnitExpense(groupId, unitId, { title: "Unit B", amountCents: 400, payerId: friend.id });
+  await page.reload();
+  await settle();
+  await page.locator('[data-group-tab="balances"]:visible').click();
 
   await page.getByRole("button", { name: "Group menu", exact: true }).click();
   await page.getByRole("menuitem", { name: "Group settings", exact: true }).click();
@@ -218,16 +220,30 @@ async function runFlow(width, height, label, { largeText = false } = {}) {
   await settings.waitFor();
   await settings.getByText("Custom units", { exact: true }).waitFor();
   await settings.getByText(unitName, { exact: true }).waitFor();
+  await settings.getByText("Simplify unit balances", { exact: true }).waitFor();
   const toggle = settings.getByRole("checkbox");
+  await toggle.waitFor();
+  await page.waitForTimeout(350);
+  await layout(`${label}-settings`, true);
   const before = await toggle.isChecked();
   const toggled = page.waitForResponse((response) =>
     response.request().method() === "PATCH" && new URL(response.url()).pathname === `/api/groups/${groupId}`);
   await toggle.click();
   assert((await toggled).ok(), "Reconcile toggle persists");
   assert.notEqual(await toggle.isChecked(), before, "Reconcile toggle changes");
-  await layout(`${label}-settings`, true);
   await settings.getByRole("button", { name: "Close", exact: true }).click();
   await settings.waitFor({ state: "hidden" });
+
+  await page.locator('[data-group-tab="balances"]:visible').click();
+  const offHeading = page.getByRole("heading", { name: new RegExp(`^${unitName}\\s+not simplified$`) });
+  await offHeading.waitFor();
+  const offCard = offHeading.locator("..").locator("..");
+  const offRecords = offCard.getByRole("button", { name: new RegExp(`Record ${unitName} payment`) });
+  await offRecords.nth(1).waitFor();
+  await offCard.scrollIntoViewIfNeeded();
+  await page.waitForTimeout(250);
+  assert.equal(await offRecords.count(), 2, "OFF mode shows both directions");
+  await layout(`${label}-off-balances`, true);
 
   await api(`/api/groups/${groupId}`, owner.cookie, undefined, "DELETE");
   results.push({ name: `${label}-flow`, groupId, unitName, passed: true });
@@ -242,11 +258,16 @@ try {
     [1280, 900, "1280", {}],
     [390, 844, "390-large-text", { largeText: true }],
   ];
+  const ran = [];
   for (const [width, height, label, options] of flows) {
-    if (!only || only === label) await runFlow(width, height, label, options);
+    if (!only || only === label) {
+      await runFlow(width, height, label, options);
+      ran.push(label);
+    }
   }
+  assert(ran.length > 0, "No flow selected");
   assert.deepEqual(errors, [], "No browser runtime errors");
-  console.log("Unit UI flows passed at 320, 390, 393, 1280, dark mode, and larger text.");
+  console.log(`Unit UI flows passed: ${ran.join(", ")}.`);
 } catch (error) {
   await page.screenshot({ path: resolve(evidenceDir, "failure.png"), scale: "css" }).catch(() => {});
   console.error(error);
