@@ -31,7 +31,7 @@ export const GET = handler(async (_req: NextRequest, { params }: Ctx) => {
     LEFT JOIN group_units gu ON gu.id = e.unit_id
     WHERE e.group_id = ${groupId}
     ORDER BY e.expense_date, e.id`]);
-  const header = ["Date", "Title", "Amount", "Currency", "Unit", `Amount (${group.currency})`, "Paid by", "Category", "Split", "Notes", "Shares"];
+  const header = ["Date", "Title", "Amount", "Currency", `Amount (${group.currency})`, "Paid by", "Category", "Split", "Notes", "Shares", "Unit"];
   const lines = [header.join(",")];
   for (const r of rows) {
     const unitName = r.unit_name as string | null;
@@ -41,13 +41,13 @@ export const GET = handler(async (_req: NextRequest, { params }: Ctx) => {
       csvCell(r.title),
       unit ? formatUnitQuantity(Number(r.amount_cents)) : (Number(r.amount_cents) / 100).toFixed(currencyFractionDigits(r.currency as string)),
       unit ? "" : r.currency,
-      csvCell(unitName ?? ""),
       unit ? "" : (Number(r.converted_cents) / 100).toFixed(currencyFractionDigits(group.currency)),
       csvCell(r.payer),
       csvCell(r.category ?? ""),
       r.split_method,
       csvCell(r.notes),
       csvCell(r.shares ?? ""),
+      csvCell(unitName ?? ""),
     ].join(","));
   }
   return new Response(lines.join("\n") + "\n", {

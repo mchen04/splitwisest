@@ -67,7 +67,7 @@ export async function requireGroupViewerVersions(
   members: GroupMember[];
   balances: MemberBalance[];
   units: { id: number; name: string }[];
-  unitLedger: { unitId: number; name: string; expenses: unknown[]; settlements: unknown[] }[];
+  unitData: unknown;
 }> {
   const token = await requireSessionToken();
   // A malformed id keeps the old order: an invalid session still answers 401.
@@ -102,26 +102,25 @@ export async function requireGroupViewerVersions(
       FROM group_viewer g JOIN group_units gu ON gu.group_id = g.id
       WHERE g.is_member
     ),
-    unit_ledger AS MATERIALIZED (
-      SELECT gu.id AS unit_id, gu.name,
-        COALESCE((
-          SELECT jsonb_agg(jsonb_build_object(
-            'payerId', e.payer_id,
-            'amountCents', e.amount_cents,
-            'shares', COALESCE((
-              SELECT jsonb_agg(jsonb_build_object('userId', es.user_id, 'shareCents', es.share_cents))
-              FROM expense_shares es WHERE es.expense_id = e.id
-            ), '[]'::jsonb)
-          ))
-          FROM expenses e WHERE e.group_id = gu.group_id AND e.unit_id = gu.id
-        ), '[]'::jsonb) AS expenses,
-        COALESCE((
-          SELECT jsonb_agg(jsonb_build_object(
-            'payerId', s.payer_id, 'recipientId', s.recipient_id, 'amountCents', s.amount_cents))
-          FROM settlements s WHERE s.group_id = gu.group_id AND s.unit_id = gu.id
-        ), '[]'::jsonb) AS settlements
-      FROM group_viewer g JOIN group_units gu ON gu.group_id = g.id
-      WHERE g.is_member
+    unit_data AS MATERIALIZED (
+      SELECT CASE WHEN g.is_member AND EXISTS (SELECT 1 FROM units u)
+        THEN jsonb_build_object(
+          'units', (SELECT jsonb_agg(jsonb_build_object('id', u.id, 'name', u.name) ORDER BY u.name, u.id)
+            FROM units u),
+          'totals', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+              'unitId', t.unit_id, 'userId', t.user_id,
+              'paidCents', t.paid_cents, 'owedCents', t.owed_cents,
+              'settledOutCents', t.settled_out_cents, 'settledInCents', t.settled_in_cents)
+              ORDER BY t.unit_id, t.user_id), '[]'::jsonb)
+            FROM group_unit_totals(g.id) t),
+          'directed', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+              'unitId', d.unit_id, 'debtorId', d.debtor_id,
+              'creditorId', d.creditor_id, 'amountCents', d.amount_cents)
+              ORDER BY d.unit_id, d.debtor_id, d.creditor_id), '[]'::jsonb)
+            FROM group_unit_directed(g.id) d)
+        )
+        ELSE NULL END AS data
+      FROM group_viewer g
     )
     SELECT g.*,
       CASE WHEN g.is_member THEN md5(jsonb_build_array(g.name, g.currency, g.invite_code, g.created_by,
@@ -130,9 +129,7 @@ export async function requireGroupViewerVersions(
          FROM members u),
         (SELECT jsonb_agg(jsonb_build_array(b.user_id, b.display_name, b.net_cents) ORDER BY b.user_id)
          FROM balances b),
-        (SELECT jsonb_agg(jsonb_build_array(gu.id, gu.name) ORDER BY gu.id) FROM units gu),
-        (SELECT jsonb_agg(jsonb_build_array(ul.unit_id, ul.expenses, ul.settlements) ORDER BY ul.unit_id)
-         FROM unit_ledger ul))::text) END AS detail_version,
+        (SELECT data FROM unit_data))::text) END AS detail_version,
       CASE WHEN g.is_member THEN md5(jsonb_build_array(
         (SELECT jsonb_agg(jsonb_build_array(o.id, o.title, o.amount_cents, o.updated_at) ORDER BY o.id)
          FROM group_obligations o WHERE o.group_id = g.id),
@@ -152,10 +149,8 @@ export async function requireGroupViewerVersions(
         (SELECT jsonb_agg(jsonb_build_object('id', gu.id, 'name', gu.name) ORDER BY gu.name, gu.id) FROM units gu)
       END AS units,
       CASE WHEN ${includeDetail} AND g.is_member THEN
-        (SELECT jsonb_agg(jsonb_build_object(
-          'unitId', ul.unit_id, 'name', ul.name, 'expenses', ul.expenses, 'settlements', ul.settlements)
-          ORDER BY ul.name, ul.unit_id) FROM unit_ledger ul)
-      END AS unit_ledger
+        (SELECT data FROM unit_data)
+      END AS unit_data
     FROM group_viewer g`;
   if (rows[0].viewer_id === null) throw new AuthError();
   // Like requireUser, a confirmed session refreshes the owner cookie even when 404/403 follows.
@@ -176,7 +171,7 @@ export async function requireGroupViewerVersions(
     units: ((rows[0].units ?? []) as { id: number; name: string }[]).map((u) => ({
       id: Number(u.id), name: u.name,
     })),
-    unitLedger: (rows[0].unit_ledger ?? []) as { unitId: number; name: string; expenses: unknown[]; settlements: unknown[] }[],
+    unitData: rows[0].unit_data,
   };
 }
 
@@ -239,14 +234,17 @@ export async function renameGroupWithActivity(groupId: number, user: SessionUser
 }
 
 export async function setGroupAutoReconcile(groupId: number, userId: number, enabled: boolean) {
-  const rows = await sql`
+  const [, rows] = await sql.transaction((tx) => [
+    tx`SELECT pg_advisory_xact_lock(${groupId}::int)`,
+    tx`
     UPDATE groups SET auto_reconcile_units = ${enabled}
     WHERE id = ${groupId}
       AND EXISTS (
         SELECT 1 FROM group_members
         WHERE group_id = ${groupId} AND user_id = ${userId}
       )
-    RETURNING auto_reconcile_units`;
+    RETURNING auto_reconcile_units`,
+  ]);
   if (rows.length === 0) notFound();
   return Boolean(rows[0].auto_reconcile_units);
 }
@@ -321,6 +319,11 @@ export async function removeGroupMemberWithActivity({
       JOIN group_obligations go ON go.id = a.obligation_id
       WHERE go.group_id = ${groupId} AND a.user_id = ${targetId}
     ),
+    unit_unsettled AS (
+      SELECT unit_name, reconcile, net_cents, owes_cents, owed_cents
+      FROM group_unit_member_unsettled(${groupId}, ${targetId})
+      LIMIT 1
+    ),
     del AS (
       DELETE FROM group_members
       USING member_balance, active_recurring_refs, group_balance_refs
@@ -329,6 +332,7 @@ export async function removeGroupMemberWithActivity({
         AND member_balance.net_cents = 0
         AND active_recurring_refs.ref_count = 0
         AND group_balance_refs.ref_count = 0
+        AND NOT EXISTS (SELECT 1 FROM unit_unsettled)
       RETURNING user_id
     ),
     t AS (
@@ -348,6 +352,11 @@ export async function removeGroupMemberWithActivity({
       (SELECT net_cents FROM member_balance) AS net_cents,
       (SELECT ref_count FROM active_recurring_refs) AS active_recurring_refs,
       (SELECT ref_count FROM group_balance_refs) AS group_balance_refs,
+      (SELECT unit_name FROM unit_unsettled) AS unit_name,
+      (SELECT reconcile FROM unit_unsettled) AS unit_reconcile,
+      (SELECT net_cents FROM unit_unsettled) AS unit_net_cents,
+      (SELECT owes_cents FROM unit_unsettled) AS unit_owes_cents,
+      (SELECT owed_cents FROM unit_unsettled) AS unit_owed_cents,
       (SELECT count(*) FROM del)::int AS removed`,
   ]);
   return {
@@ -355,5 +364,10 @@ export async function removeGroupMemberWithActivity({
     netCents: Number(rows[0]?.net_cents ?? 0),
     activeRecurringRefs: Number(rows[0]?.active_recurring_refs ?? 0),
     groupBalanceRefs: Number(rows[0]?.group_balance_refs ?? 0),
+    unitName: (rows[0]?.unit_name as string | null) ?? null,
+    unitReconcile: Boolean(rows[0]?.unit_reconcile),
+    unitNetCents: Number(rows[0]?.unit_net_cents ?? 0),
+    unitOwesCents: Number(rows[0]?.unit_owes_cents ?? 0),
+    unitOwedCents: Number(rows[0]?.unit_owed_cents ?? 0),
   };
 }

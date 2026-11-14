@@ -16,6 +16,7 @@ export interface GroupDetail {
     name: string;
     reconcile: boolean;
     nets: { userId: number; displayName: string; netCents: number }[];
+    gross: { userId: number; owesCents: number; owedCents: number }[];
     transfers: { from: number; to: number; amountCents: number }[];
     obligations: { from: number; to: number; amountCents: number }[];
   }[];

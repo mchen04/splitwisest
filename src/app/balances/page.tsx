@@ -128,7 +128,7 @@ export default function BalancesPage() {
   }
 
   const friendMenu = (f: Friend) => {
-    const theyOweMe = f.obligations.some((item) => item.netCents > 0);
+    const theyOweMe = f.obligations.some((item) => item.kind !== "unit" && item.netCents > 0);
     return (
       <Menu label={`More actions for ${f.displayName}`} size="sm">
         {theyOweMe && (

@@ -143,4 +143,135 @@ AS $$
   FROM ranked_balances rb
   ORDER BY rb.display_name, rb.user_id
 $$;
+
+CREATE OR REPLACE FUNCTION group_unit_totals(target_group_id bigint)
+RETURNS TABLE(unit_id bigint, unit_name text, user_id bigint, display_name text,
+  paid_cents bigint, owed_cents bigint, settled_out_cents bigint, settled_in_cents bigint)
+LANGUAGE sql
+STABLE
+AS $$
+  WITH paid AS (
+    SELECT e.unit_id, e.payer_id AS user_id, SUM(e.amount_cents)::bigint AS cents
+    FROM expenses e
+    WHERE e.group_id = target_group_id AND e.unit_id IS NOT NULL
+    GROUP BY e.unit_id, e.payer_id
+  ),
+  owed AS (
+    SELECT e.unit_id, es.user_id, SUM(es.share_cents)::bigint AS cents
+    FROM expense_shares es
+    JOIN expenses e ON e.id = es.expense_id
+    WHERE e.group_id = target_group_id AND e.unit_id IS NOT NULL
+    GROUP BY e.unit_id, es.user_id
+  ),
+  settled_out AS (
+    SELECT s.unit_id, s.payer_id AS user_id, SUM(s.amount_cents)::bigint AS cents
+    FROM settlements s
+    WHERE s.group_id = target_group_id AND s.unit_id IS NOT NULL
+    GROUP BY s.unit_id, s.payer_id
+  ),
+  settled_in AS (
+    SELECT s.unit_id, s.recipient_id AS user_id, SUM(s.amount_cents)::bigint AS cents
+    FROM settlements s
+    WHERE s.group_id = target_group_id AND s.unit_id IS NOT NULL
+    GROUP BY s.unit_id, s.recipient_id
+  )
+  SELECT gu.id, gu.name, gm.user_id, u.display_name,
+    COALESCE(p.cents, 0)::bigint, COALESCE(o.cents, 0)::bigint,
+    COALESCE(so.cents, 0)::bigint, COALESCE(si.cents, 0)::bigint
+  FROM group_units gu
+  JOIN group_members gm ON gm.group_id = gu.group_id
+  JOIN users u ON u.id = gm.user_id
+  LEFT JOIN paid p ON p.unit_id = gu.id AND p.user_id = gm.user_id
+  LEFT JOIN owed o ON o.unit_id = gu.id AND o.user_id = gm.user_id
+  LEFT JOIN settled_out so ON so.unit_id = gu.id AND so.user_id = gm.user_id
+  LEFT JOIN settled_in si ON si.unit_id = gu.id AND si.user_id = gm.user_id
+  WHERE gu.group_id = target_group_id
+$$;
+
+CREATE OR REPLACE FUNCTION group_unit_directed(target_group_id bigint, exclude_settlement_id bigint DEFAULT NULL)
+RETURNS TABLE(unit_id bigint, unit_name text, debtor_id bigint, creditor_id bigint, amount_cents bigint)
+LANGUAGE sql
+STABLE
+AS $$
+  WITH rows AS (
+    SELECT e.unit_id, es.user_id AS debtor_id, e.payer_id AS creditor_id, es.share_cents AS amount_cents
+    FROM expenses e
+    JOIN expense_shares es ON es.expense_id = e.id
+    WHERE e.group_id = target_group_id AND e.unit_id IS NOT NULL AND es.user_id <> e.payer_id
+    UNION ALL
+    SELECT s.unit_id, s.payer_id, s.recipient_id, -s.amount_cents
+    FROM settlements s
+    WHERE s.group_id = target_group_id AND s.unit_id IS NOT NULL
+      AND (exclude_settlement_id IS NULL OR s.id <> exclude_settlement_id)
+  )
+  SELECT r.unit_id, gu.name, r.debtor_id, r.creditor_id, SUM(r.amount_cents)::bigint
+  FROM rows r
+  JOIN group_units gu ON gu.id = r.unit_id
+  GROUP BY r.unit_id, gu.name, r.debtor_id, r.creditor_id
+$$;
+
+DROP FUNCTION IF EXISTS unit_directed_obligation(bigint, bigint, bigint, bigint);
+DROP FUNCTION IF EXISTS unit_directed_obligation(bigint, bigint, bigint, bigint, bigint);
+CREATE OR REPLACE FUNCTION unit_directed_obligation(
+  target_group_id bigint, target_unit_id bigint, target_debtor_id bigint, target_creditor_id bigint,
+  exclude_settlement_id bigint DEFAULT NULL
+)
+RETURNS bigint
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT GREATEST(0, COALESCE(SUM(CASE WHEN d.debtor_id = target_debtor_id AND d.creditor_id = target_creditor_id
+      THEN d.amount_cents ELSE 0 END), 0))
+    + GREATEST(0, -COALESCE(SUM(CASE WHEN d.debtor_id = target_creditor_id AND d.creditor_id = target_debtor_id
+      THEN d.amount_cents ELSE 0 END), 0))
+  FROM group_unit_directed(target_group_id, exclude_settlement_id) d
+  WHERE d.unit_id = target_unit_id
+$$;
+
+CREATE OR REPLACE FUNCTION group_unit_viewer_rows(target_group_id bigint, target_user_id bigint)
+RETURNS TABLE(unit_id bigint, unit_name text, reconcile boolean, net_cents bigint, owes_cents bigint, owed_cents bigint)
+LANGUAGE sql
+STABLE
+AS $$
+  WITH totals AS MATERIALIZED (
+    SELECT * FROM group_unit_totals(target_group_id)
+  ),
+  directed AS MATERIALIZED (
+    SELECT * FROM group_unit_directed(target_group_id)
+  )
+  SELECT gu.id, gu.name, g.auto_reconcile_units,
+    COALESCE(t.paid_cents - t.owed_cents + t.settled_out_cents - t.settled_in_cents, 0)::bigint,
+    COALESCE(d.owes_cents, 0)::bigint,
+    COALESCE(d.owed_cents, 0)::bigint
+  FROM group_units gu
+  JOIN groups g ON g.id = gu.group_id
+  LEFT JOIN totals t ON t.unit_id = gu.id AND t.user_id = target_user_id
+  LEFT JOIN LATERAL (
+    SELECT
+      SUM(GREATEST(pair.forward, 0) + GREATEST(-pair.reverse, 0)) AS owes_cents,
+      SUM(GREATEST(pair.reverse, 0) + GREATEST(-pair.forward, 0)) AS owed_cents
+    FROM (
+      SELECT
+        SUM(CASE WHEN d.debtor_id = target_user_id THEN d.amount_cents ELSE 0 END) AS forward,
+        SUM(CASE WHEN d.creditor_id = target_user_id THEN d.amount_cents ELSE 0 END) AS reverse
+      FROM directed d
+      WHERE d.unit_id = gu.id AND (d.debtor_id = target_user_id OR d.creditor_id = target_user_id)
+      GROUP BY CASE WHEN d.debtor_id = target_user_id THEN d.creditor_id ELSE d.debtor_id END
+    ) pair
+  ) d ON true
+  WHERE gu.group_id = target_group_id
+  ORDER BY gu.name, gu.id
+$$;
+
+CREATE OR REPLACE FUNCTION group_unit_member_unsettled(target_group_id bigint, target_user_id bigint)
+RETURNS TABLE(unit_id bigint, unit_name text, reconcile boolean, net_cents bigint, owes_cents bigint, owed_cents bigint)
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT v.unit_id, v.unit_name, v.reconcile, v.net_cents, v.owes_cents, v.owed_cents
+  FROM group_unit_viewer_rows(target_group_id, target_user_id) v
+  WHERE (v.reconcile AND v.net_cents <> 0)
+     OR (NOT v.reconcile AND (v.owes_cents <> 0 OR v.owed_cents <> 0))
+  ORDER BY v.unit_name, v.unit_id
+$$;
 COMMIT;

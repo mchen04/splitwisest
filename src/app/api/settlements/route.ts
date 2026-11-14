@@ -67,6 +67,7 @@ export const POST = handler(async (req: NextRequest) => {
       recipientId,
       amountCents: body.amountCents,
       currency: body.currency,
+      unitId: body.unitId,
       date: body.date,
       note: body.note,
     },

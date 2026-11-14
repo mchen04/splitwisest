@@ -9,7 +9,7 @@ import {
   deleteGroup, parseGroupId, renameGroupWithActivity, requireGroupMember, requireGroupViewerVersions,
   setGroupAutoReconcile,
 } from "@/lib/groups";
-import { computeUnitBalances, parseUnitLedger } from "@/lib/units";
+import { computeUnitBalancesFromAggregates, parseUnitAggregates } from "@/lib/units";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -24,16 +24,23 @@ export const GET = privateHandler(async (req: NextRequest, { params }: Ctx) => {
   const { members, balances } = group;
   const suggestions = suggestSettlements(balances);
   const memberIds = members.map((member) => member.id);
-  const ledger = parseUnitLedger(group.unitLedger);
-  const unitBalances = group.units.map((unit) => {
-    const entry = ledger.find((row) => row.unitId === unit.id);
-    const result = computeUnitBalances(memberIds, entry?.expenses ?? [], entry?.settlements ?? [], group.autoReconcileUnits);
+  const aggregate = parseUnitAggregates(group.unitData);
+  const unitBalances = aggregate.units.map((unit) => {
+    const result = computeUnitBalancesFromAggregates(
+      memberIds,
+      unit.id,
+      unit.name,
+      aggregate.totals.filter((row) => row.unitId === unit.id),
+      aggregate.directed.filter((row) => row.unitId === unit.id),
+      group.autoReconcileUnits
+    );
     const displayName = new Map(members.map((member) => [member.id, member.displayName]));
     return {
       unitId: unit.id,
       name: unit.name,
       reconcile: group.autoReconcileUnits,
       nets: result.nets.map((row) => ({ ...row, displayName: displayName.get(row.userId) ?? "" })),
+      gross: result.gross,
       transfers: result.transfers,
       obligations: result.obligations,
     };
@@ -52,7 +59,7 @@ export const GET = privateHandler(async (req: NextRequest, { params }: Ctx) => {
     members,
     balances,
     suggestions,
-    units: group.units,
+    units: aggregate.units,
     unitBalances,
   });
 });

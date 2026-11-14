@@ -647,7 +647,7 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
                 filtersActive ? (
                   <Button variant="secondary" onClick={resetFilters}><X className="h-4 w-4" /> Clear filters</Button>
                 ) : (
-                  <Button onClick={() => { setEditing(null); setExpenseOpen(true); }}>
+                  <Button id="add-expense-trigger" onClick={() => { setEditing(null); setExpenseOpen(true); }}>
                     <Plus className="h-4 w-4" /> Add expense
                   </Button>
                 )
@@ -1066,6 +1066,7 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
             onCategoryAdded={reloadCategories}
             units={detail.units}
             onUnitAdded={loadDetail}
+            returnFocusId="add-expense-trigger"
           />
           <GroupBalanceForm
             groupId={groupId} groupName={detail.group.name} currency={detail.group.currency}
@@ -1181,18 +1182,33 @@ function MemberNets({ balances, currency, meId, compact = false }: {
 }
 
 function UnitNets({ units, meId }: {
-  units: { unitId: number; name: string; nets: { userId: number; netCents: number }[] }[];
+  units: {
+    unitId: number; name: string; reconcile: boolean;
+    nets: { userId: number; netCents: number }[];
+    gross: { userId: number; owesCents: number; owedCents: number }[];
+  }[];
   meId?: number;
 }) {
   return (
     <ul className="divide-y divide-line">
       {units.map((unit) => {
-        const mine = unit.nets.find((row) => row.userId === meId)?.netCents ?? 0;
+        const net = unit.nets.find((row) => row.userId === meId)?.netCents ?? 0;
+        const gross = unit.gross.find((row) => row.userId === meId);
+        const owes = gross?.owesCents ?? 0;
+        const owed = gross?.owedCents ?? 0;
+        const settled = unit.reconcile ? net === 0 : owes === 0 && owed === 0;
         return (
           <li key={unit.unitId} className="flex min-h-[var(--control-h-sm)] items-center gap-2 px-3 py-1 text-body">
             <span className="min-w-0 flex-1 truncate font-medium">{unit.name}</span>
-            <span className={`tnum shrink-0 font-semibold ${mine > 0 ? "text-owed" : mine < 0 ? "text-owe" : "text-ink-faint"}`}>
-              {mine === 0 ? "settled" : formatUnitAmount(mine, unit.name)}
+            <span className={`tnum shrink-0 text-right font-semibold ${unit.reconcile
+              ? net > 0 ? "text-owed" : net < 0 ? "text-owe" : "text-ink-faint"
+              : owes > 0 ? "text-owe" : owed > 0 ? "text-owed" : "text-ink-faint"}`}>
+              {settled ? "settled" : unit.reconcile
+                ? formatUnitAmount(net, unit.name)
+                : [
+                  owes > 0 ? `owes ${formatUnitAmount(owes, unit.name)}` : null,
+                  owed > 0 ? `is owed ${formatUnitAmount(owed, unit.name)}` : null,
+                ].filter(Boolean).join(" · ")}
             </span>
           </li>
         );

@@ -9,7 +9,7 @@ const databaseName = (() => {
   try { return new URL(databaseUrl).pathname.replace(/^\//, ""); } catch { return ""; }
 })();
 assert(databaseName === "splitwisest_units_qa", "Use the dedicated splitwisest_units_qa database");
-assert(baseUrl === "http://127.0.0.1:3392" || baseUrl === "http://localhost:3392", "Use the app on port 3392");
+assert(["127.0.0.1", "localhost", "[::1]"].includes(new URL(baseUrl).hostname), "Use a loopback app");
 assert(process.env.NEON_LOCAL_PROXY, "NEON_LOCAL_PROXY is required");
 
 const sql = neon(databaseUrl);
@@ -114,12 +114,47 @@ async function queryDelta(fn: () => Promise<unknown>) {
 
 async function moneySnapshot(group: Group) {
   const detail = await api(`/api/groups/${group.id}`, users[0]);
+  const expenses = (await api(`/api/groups/${group.id}/expenses?all=1`, users[0])).expenses;
+  const exportText = (await request(`/api/groups/${group.id}/export`, users[0])).text;
+  const friends = await api("/api/friends", users[0]);
+  const people = (await api(`/api/people/${users[1].id}`, users[0])).profile;
+  const friend = friends.friends.find((row: { id: number }) => row.id === users[1].id);
+  const groupRow = (await api("/api/groups", users[0])).groups.find((row: { id: number }) => row.id === group.id);
   return JSON.stringify({
     balances: detail.balances,
     suggestions: detail.suggestions,
+    groupList: { id: groupRow?.id ?? null, myNetCents: groupRow?.myNetCents ?? null },
     sql: (await sql`SELECT user_id, net_cents FROM group_balance_rows(${group.id}) ORDER BY user_id`)
       .map((r) => [Number(r.user_id), Number(r.net_cents)]),
+    insights: expenses.filter((e: { unitId: number | null }) => e.unitId === null)
+      .map((e: { id: number; convertedCents: number }) => [e.id, e.convertedCents])
+      .sort((a: number[], b: number[]) => a[0] - b[0]),
+    insightsTotal: expenses.filter((e: { unitId: number | null }) => e.unitId === null)
+      .reduce((sum: number, e: { convertedCents: number }) => sum + e.convertedCents, 0),
+    exportMoney: csvMoneyTotal(exportText),
+    friendMoney: {
+      netByCurrency: friend?.netByCurrency ?? {},
+      obligations: (friend?.obligations ?? []).filter((row: { kind?: string }) => row.kind !== "unit"),
+    },
+    peopleMoney: {
+      netByCurrency: people.netByCurrency,
+      obligations: people.obligations.filter((row: { kind?: string }) => row.kind !== "unit"),
+    },
   });
+}
+
+function csvMoneyTotal(text: string) {
+  const lines = text.trim().split("\n");
+  const header = lines[0].split(",");
+  const amountIndex = header.indexOf("Amount (USD)");
+  const unitIndex = header.indexOf("Unit");
+  assert(amountIndex >= 0 && unitIndex === header.length - 1, "CSV keeps money columns and appends Unit");
+  let total = 0;
+  for (const line of lines.slice(1)) {
+    const cells = line.split(",");
+    if (cells[unitIndex] === "") total += Math.round(Number(cells[amountIndex]) * 100);
+  }
+  return total;
 }
 
 async function main() {
@@ -133,16 +168,28 @@ async function main() {
   const g2 = await createGroup(owner, "USD", "G2");
   await Promise.all([join(g1, b, owner), join(g1, c, owner), join(g1, d, owner), join(g2, b, owner)]);
 
+  await sql`INSERT INTO friendships (user_a, user_b)
+    VALUES (LEAST(${owner.id}::bigint, ${b.id}::bigint), GREATEST(${owner.id}::bigint, ${b.id}::bigint))
+    ON CONFLICT DO NOTHING`;
+
+  const moneyExpense = await api(`/api/groups/${g1.id}/expenses`, owner, {
+    title: "Money baseline", amountCents: 1000, currency: g1.currency, unitId: null,
+    date: today, payerId: owner.id, notes: "", splitMethod: "equal",
+    participants: users.slice(0, 3).map((u) => ({ userId: u.id })),
+  });
+  await api(`/api/groups/${g1.id}/settlements`, b, {
+    payerId: b.id, recipientId: owner.id, amountCents: 100, currency: g1.currency, unitId: null,
+    date: today, note: "money baseline",
+  });
   const moneyBefore = await moneySnapshot(g1);
-  const moneyExpensesBefore = (await api(`/api/groups/${g1.id}/expenses?all=1`, owner)).expenses
-    .filter((e: { unitId: number | null }) => e.unitId === null)
-    .reduce((s: number, e: { convertedCents: number }) => s + e.convertedCents, 0);
+  const moneyExpensesBefore = JSON.parse(moneyBefore).insightsTotal as number;
+  check("money baseline has a real expense", Number(moneyExpense.id) > 0, true);
 
   check("new group defaults to simplifying unit balances", (await api(`/api/groups/${g1.id}`, owner)).group.autoReconcileUnits, true);
 
   const drinks = await createUnit(g1, owner, "drinks");
   check("create unit keeps its trimmed name", drinks.name, "drinks");
-  check("list units includes the new unit", (await api(`/api/groups/${g1.id}/units`, owner)).units.map((u: { name: string }) => u.name), ["drinks"]);
+  check("group detail lists the new unit", (await api(`/api/groups/${g1.id}`, owner)).units.map((u: { name: string }) => u.name), ["drinks"]);
   check("rename unit", (await api(`/api/groups/${g1.id}/units/${drinks.id}`, owner, { name: "drink tickets" }, "PATCH")).name, "drink tickets");
   const temporary = await createUnit(g1, owner, "temporary");
   check("delete an unused unit", (await request(`/api/groups/${g1.id}/units/${temporary.id}`, owner, undefined, "DELETE")).status, 200);
@@ -184,6 +231,23 @@ async function main() {
   check("a malformed amount is rejected", (await request(`/api/groups/${g1.id}/expenses`, owner, expenseBody(g1, drinks.id, { amountCents: 0 }))).status, 400);
   check("an empty unit name is rejected", (await request(`/api/groups/${g1.id}/units`, owner, { name: "   " })).status, 400);
 
+  const beforeSettlements = Number((await sql`SELECT count(*) FROM settlements WHERE group_id = ${g1.id}`)[0].count);
+  check("a forged unit settlement is rejected", (await request(`/api/groups/${g1.id}/settlements`, owner, {
+    payerId: owner.id, recipientId: b.id, amountCents: 100, currency: g1.currency, unitId: otherGroupUnit.id, date: today, note: "forged unit",
+  })).status, 400);
+  check("a forged unit settlement writes nothing", Number((await sql`SELECT count(*) FROM settlements WHERE group_id = ${g1.id}`)[0].count), beforeSettlements);
+
+  const beforeRecurring = Number((await sql`SELECT count(*) FROM recurring_expenses WHERE group_id = ${g1.id}`)[0].count);
+  check("a forged unit recurring rule is rejected", (await request(`/api/groups/${g1.id}/recurring`, owner, {
+    title: "Forged recurring", amountCents: 100, currency: g1.currency, unitId: otherGroupUnit.id,
+    payerId: owner.id, participantIds: users.slice(0, 3).map((u) => u.id), notes: "", cadence: "monthly", startDate: today,
+  })).status, 400);
+  check("a forged unit recurring rule writes nothing", Number((await sql`SELECT count(*) FROM recurring_expenses WHERE group_id = ${g1.id}`)[0].count), beforeRecurring);
+
+  check("a unit on the direct settlement route is rejected", (await request("/api/settlements", owner, {
+    friendId: b.id, direction: "i-paid", amountCents: 100, currency: g1.currency, unitId: drinks.id, date: today, note: "direct unit",
+  })).status, 400);
+
   const onUnit = await createUnit(g1, owner, "on");
   await unitExpense(g1, onUnit.id, { title: "On mode", amountCents: 300, participants: users.slice(0, 3).map((u) => ({ userId: u.id })) });
   let detail = await api(`/api/groups/${g1.id}`, owner);
@@ -202,6 +266,11 @@ async function main() {
   check("OFF mode keeps both directions", byTriple(unit.obligations.map((row: { from: number; to: number; amountCents: number }) => [row.from, row.to, row.amountCents])), byTriple([
     [owner.id, b.id, 100], [b.id, owner.id, 100], [c.id, owner.id, 100],
   ]));
+  const offGross = unit.gross.find((row: { userId: number }) => row.userId === owner.id);
+  check("OFF mode exposes the viewer's gross unit amounts", [offGross.owesCents, offGross.owedCents], [100, 200]);
+  const offList = (await api("/api/groups", owner)).groups.find((row: { id: number }) => row.id === g1.id);
+  const offListUnit = offList.unitNets.find((row: { unitId: number }) => row.unitId === offUnit.id);
+  check("OFF mode group list keeps gross unit amounts", [offListUnit.reconcile, offListUnit.owesCents, offListUnit.owedCents], [false, 100, 200]);
 
   const offRepayment = await api(`/api/groups/${g1.id}/settlements`, b, {
     payerId: b.id, recipientId: owner.id, amountCents: 100, currency: g1.currency, unitId: offUnit.id, date: today, note: "repay",
@@ -211,6 +280,9 @@ async function main() {
   check("OFF repayment removes only that direct debt", byTriple(unit.obligations.map((row: { from: number; to: number; amountCents: number }) => [row.from, row.to, row.amountCents])), byTriple([
     [owner.id, b.id, 100], [c.id, owner.id, 100],
   ]));
+  const outstandingAfterRepayment = await sql`
+    SELECT unit_directed_obligation(${g1.id}, ${offUnit.id}, ${b.id}, ${owner.id}) AS cents`;
+  check("DB sees no outstanding unit debt before the over-repayment", Number(outstandingAfterRepayment[0].cents), 0);
   const beforeOverpay = Number((await sql`SELECT count(*) FROM settlements WHERE group_id = ${g1.id}`)[0].count);
   check("OFF over-repayment is rejected", (await request(`/api/groups/${g1.id}/settlements`, b, {
     payerId: b.id, recipientId: owner.id, amountCents: 101, currency: g1.currency, unitId: offUnit.id, date: today, note: "too much",
@@ -236,6 +308,44 @@ async function main() {
   check("historic excess shows as the reverse obligation", unit.obligations.some((row: { from: number; to: number; amountCents: number }) => row.from === owner.id && row.to === b.id && row.amountCents > 0), true);
   await api(`/api/groups/${g1.id}`, owner, { autoReconcileUnits: true }, "PATCH");
 
+  const raceGroup = await createGroup(owner, "USD", "Race");
+  await join(raceGroup, b, owner);
+  const raceUnit = await createUnit(raceGroup, owner, "race drinks");
+  await api(`/api/groups/${raceGroup.id}/expenses`, owner, expenseBody(raceGroup, raceUnit.id, {
+    title: "Race debt", amountCents: 200, payerId: owner.id,
+    participants: [owner, b].map((u) => ({ userId: u.id })),
+  }));
+  await api(`/api/groups/${raceGroup.id}`, owner, { autoReconcileUnits: false }, "PATCH");
+  const raceBody = {
+    payerId: b.id, recipientId: owner.id, amountCents: 100, currency: raceGroup.currency,
+    unitId: raceUnit.id, date: today, note: "race",
+  };
+  const raceResults = await Promise.all([
+    request(`/api/groups/${raceGroup.id}/settlements`, b, raceBody),
+    request(`/api/groups/${raceGroup.id}/settlements`, b, raceBody),
+  ]);
+  check("concurrent unit repayments allow exactly one", raceResults.map((r) => r.status).sort(), [200, 400]);
+  check("concurrent unit repayments write exactly one", Number((await sql`SELECT count(*) FROM settlements WHERE group_id = ${raceGroup.id}`)[0].count), 1);
+
+  const removalGroup = await createGroup(owner, "USD", "Removal");
+  await join(removalGroup, b, owner);
+  const removalUnit = await createUnit(removalGroup, owner, "chores");
+  await api(`/api/groups/${removalGroup.id}/expenses`, owner, expenseBody(removalGroup, removalUnit.id, {
+    title: "Chore debt", amountCents: 100, payerId: owner.id,
+    participants: [owner, b].map((u) => ({ userId: u.id })),
+  }));
+  const blockedRemoval = await request(`/api/groups/${removalGroup.id}/members/${b.id}`, owner, undefined, "DELETE");
+  check("member removal is blocked by an unsettled unit", blockedRemoval.status, 400);
+  check("member removal names the unsettled unit", blockedRemoval.text.includes("chores"), true);
+  check("blocked member removal keeps membership", Number((await sql`SELECT count(*) FROM group_members WHERE group_id = ${removalGroup.id} AND user_id = ${b.id}`)[0].count), 1);
+
+  const friendBalancesAfter = await api("/api/friends", owner);
+  const friendB = friendBalancesAfter.friends.find((row: { id: number }) => row.id === b.id);
+  const unitObligations = friendB.obligations.filter((row: { kind?: string }) => row.kind === "unit");
+  check("friend balances show unit obligations separately", unitObligations.length > 0 && unitObligations.every((row: { unitId?: number; unitName?: string }) => row.unitId && row.unitName), true);
+  const peopleAfter = (await api(`/api/people/${b.id}`, owner)).profile;
+  check("people balances show unit obligations separately", peopleAfter.obligations.some((row: { kind?: string; unitId?: number }) => row.kind === "unit" && row.unitId), true);
+
   const editId = await unitExpense(g1, drinks.id, { title: "Edit me", amountCents: 300 });
   const editBefore = await expenseDetail(editId);
   await api(`/api/expenses/${editId}`, owner, expenseBody(g1, drinks.id, {
@@ -245,6 +355,24 @@ async function main() {
   check("edit keeps the unit and denomination", [editAfter.title, editAfter.unitId, editAfter.unitName, editAfter.convertedCents], ["Edited unit", drinks.id, "drink tickets", 400]);
   await api(`/api/expenses/${editId}?expectedUpdatedAt=${encodeURIComponent(editAfter.updatedAt)}`, owner, undefined, "DELETE");
   check("delete a unit expense", Number((await sql`SELECT count(*) FROM expenses WHERE id = ${editId}`)[0].count), 0);
+
+  const moneyToUnitId = Number((await api(`/api/groups/${g1.id}/expenses`, owner, {
+    title: "Money to unit", amountCents: 200, currency: g1.currency, unitId: null,
+    date: today, payerId: owner.id, notes: "", splitMethod: "equal",
+    participants: users.slice(0, 3).map((u) => ({ userId: u.id })),
+  })).id);
+  const moneyToUnitBefore = await expenseDetail(moneyToUnitId);
+  await api(`/api/expenses/${moneyToUnitId}`, owner, expenseBody(g1, drinks.id, {
+    title: "Money to unit", amountCents: 200, expectedUpdatedAt: moneyToUnitBefore.updatedAt,
+  }), "PATCH");
+  const moneyToUnitAfter = await expenseDetail(moneyToUnitId);
+  check("edit money to unit keeps the unit", [moneyToUnitAfter.unitId, moneyToUnitAfter.unitName, moneyToUnitAfter.convertedCents], [drinks.id, "drink tickets", 200]);
+  await api(`/api/expenses/${moneyToUnitId}`, owner, expenseBody(g1, null, {
+    title: "Unit to money", amountCents: 200, expectedUpdatedAt: moneyToUnitAfter.updatedAt,
+  }), "PATCH");
+  const unitToMoneyAfter = await expenseDetail(moneyToUnitId);
+  check("edit unit to money clears the unit", [unitToMoneyAfter.unitId, unitToMoneyAfter.unitName, unitToMoneyAfter.convertedCents], [null, null, 200]);
+  await api(`/api/expenses/${moneyToUnitId}?expectedUpdatedAt=${encodeURIComponent(unitToMoneyAfter.updatedAt)}`, owner, undefined, "DELETE");
 
   const settlementId = (await api(`/api/groups/${g1.id}/settlements`, b, {
     payerId: b.id, recipientId: owner.id, amountCents: 50, currency: g1.currency, unitId: drinks.id, date: today, note: "edit settlement",
@@ -259,10 +387,13 @@ async function main() {
 
   const moneyAfter = await moneySnapshot(g1);
   check("money balances are byte-identical after unit data", moneyAfter, moneyBefore);
-  const allExpenses = (await api(`/api/groups/${g1.id}/expenses?all=1`, owner)).expenses;
-  check("money insights exclude unit rows", allExpenses.filter((e: { unitId: number | null }) => e.unitId !== null).every((e: { convertedCents: number }) => e.convertedCents > 0), true);
-  const moneySum = allExpenses.filter((e: { unitId: number | null }) => e.unitId === null).reduce((s: number, e: { convertedCents: number }) => s + e.convertedCents, 0);
-  check("money total is unchanged by unit rows", moneySum, moneyExpensesBefore);
+  const moneyAfterData = JSON.parse(moneyAfter);
+  const moneyBeforeData = JSON.parse(moneyBefore);
+  check("money insights rows are unchanged", moneyAfterData.insights, moneyBeforeData.insights);
+  check("money insights total is unchanged", moneyAfterData.insightsTotal, moneyExpensesBefore);
+  check("money export total is unchanged", moneyAfterData.exportMoney, moneyBeforeData.exportMoney);
+  check("friend money balances are unchanged", moneyAfterData.friendMoney, moneyBeforeData.friendMoney);
+  check("people money balances are unchanged", moneyAfterData.peopleMoney, moneyBeforeData.peopleMoney);
 
   const counts: [string, number, number][] = [];
   const overhead = await queryDelta(async () => {});
@@ -301,7 +432,7 @@ async function cleanup() {
 }
 
 main().catch(async (error) => {
-  console.error(error instanceof Error ? error.message : String(error));
+  console.error(error instanceof Error ? error.stack : String(error));
   await cleanup().catch(() => {});
   process.exitCode = 1;
 });

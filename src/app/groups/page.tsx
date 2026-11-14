@@ -18,7 +18,7 @@ interface Group {
   memberCount: number;
   expenseCount: number;
   myNetCents: number;
-  unitNets: { unitId: number; name: string; netCents: number }[];
+  unitNets: { unitId: number; name: string; reconcile: boolean; netCents: number; owesCents: number; owedCents: number }[];
 }
 
 export default function GroupsPage() {
@@ -99,7 +99,12 @@ export default function GroupsPage() {
                     </RowMeta>
                     {g.unitNets?.map((unit) => (
                       <RowMeta key={unit.unitId} className="tnum">
-                        {unit.name}: {formatUnitAmount(unit.netCents, unit.name)}
+                        {unit.reconcile
+                          ? `${unit.name}: ${formatUnitAmount(unit.netCents, unit.name)}`
+                          : [
+                            unit.owesCents > 0 ? `${unit.name}: owes ${formatUnitAmount(unit.owesCents, unit.name)}` : null,
+                            unit.owedCents > 0 ? `is owed ${formatUnitAmount(unit.owedCents, unit.name)}` : null,
+                          ].filter(Boolean).join(" · ")}
                       </RowMeta>
                     ))}
                   </span>

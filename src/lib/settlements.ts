@@ -9,9 +9,8 @@ import { activityData } from "./activity";
 import { Change, feedLine } from "./activity-diff";
 import { VersionToken, versionToken } from "./versions";
 import { validateCurrencyAmount } from "./currencies";
-import { loadGroupMemberIds } from "./balances";
-import { loadUnitLedger, requireGroupUnit } from "./group-units";
-import { computeUnitBalances, directedObligation, formatDenomination, formatUnitQuantity } from "./units";
+import { requireGroupUnit } from "./group-units";
+import { formatDenomination, validateUnitRepayment } from "./units";
 
 // Validation fields shared by group and direct (friend) settlement bodies.
 export const settlementFields = {
@@ -42,28 +41,6 @@ export async function settlementSummary(
   return `${nameOf(payerId)} paid ${nameOf(recipientId)} ${amountText} (recorded offline)`;
 }
 
-async function assertUnitRepaymentAllowed(
-  groupId: number,
-  unitId: number,
-  payerId: number,
-  recipientId: number,
-  amountCents: number,
-  existingAmountCents = 0
-) {
-  const rows = await sql`SELECT auto_reconcile_units FROM groups WHERE id = ${groupId}`;
-  if (rows[0]?.auto_reconcile_units) return;
-  const unit = (await loadUnitLedger(groupId)).find((row) => row.unitId === unitId);
-  if (!unit) return;
-  const memberIds = await loadGroupMemberIds(groupId);
-  const obligations = computeUnitBalances(memberIds, unit.expenses, unit.settlements, false).obligations;
-  const outstanding = directedObligation(obligations, payerId, recipientId) + existingAmountCents;
-  if (amountCents > outstanding) {
-    badRequest(outstanding === 0
-      ? "That person does not owe this unit to the recipient"
-      : `That is more than the ${formatUnitQuantity(outstanding)} still owed in this unit`);
-  }
-}
-
 async function groupCurrencyForSettlement(groupId: number, settlement: AuthorizedSettlement) {
   const rows = await sql`SELECT currency FROM groups WHERE id = ${groupId}`;
   return (rows[0]?.currency as string | undefined) ?? settlement.currency;
@@ -92,13 +69,21 @@ export async function recordGroupSettlement(
   if (!unit) validateCurrencyAmount(body.amountCents, body.currency);
   const currency = unit ? groupCurrency : body.currency;
   const convertedCents = unit ? body.amountCents : (await convert(body.amountCents, body.currency, groupCurrency)).cents;
-  if (unit) await assertUnitRepaymentAllowed(groupId, unit.id, body.payerId, body.recipientId, body.amountCents);
   const summary = await settlementSummary(body.payerId, body.recipientId, body.amountCents, currency, unit?.name);
   const expectedSnapshot = expectedBalances ? JSON.stringify(expectedBalances) : null;
   const [, rows] = await sql.transaction((tx) => [
     tx`SELECT pg_advisory_xact_lock(${groupId}::int)`,
     tx`
-    WITH balance_unchanged AS (
+    WITH lock AS (
+      SELECT pg_advisory_xact_lock(${groupId}::int)
+    ),
+    unit_gate AS (
+      SELECT 1 FROM lock
+      WHERE ${body.unitId ?? null}::bigint IS NULL
+        OR EXISTS (SELECT 1 FROM groups WHERE id = ${groupId} AND auto_reconcile_units)
+        OR unit_directed_obligation(${groupId}, ${body.unitId}, ${body.payerId}, ${body.recipientId}) >= ${body.amountCents}
+    ),
+    balance_unchanged AS (
       SELECT ${expectedSnapshot}::jsonb IS NULL OR ${expectedSnapshot}::jsonb = COALESCE(
         (SELECT jsonb_agg(jsonb_build_array(rows.user_id, rows.net_cents) ORDER BY rows.user_id)
          FROM group_balance_rows(${groupId}) rows),
@@ -108,6 +93,7 @@ export async function recordGroupSettlement(
     members_ok AS (
       SELECT 1
       WHERE (SELECT ok FROM balance_unchanged)
+      AND EXISTS (SELECT 1 FROM unit_gate)
       AND EXISTS (
         SELECT 1 FROM group_members
         WHERE group_id = ${groupId} AND user_id = ${body.payerId}
@@ -138,6 +124,22 @@ export async function recordGroupSettlement(
     SELECT id, updated_at FROM s`,
   ]);
   if (!rows[0]) {
+    if (unit && body.unitId != null) {
+      const auto = await sql`SELECT auto_reconcile_units FROM groups WHERE id = ${groupId}`;
+      if (!auto[0]?.auto_reconcile_units) {
+        const outstanding = Number((await sql`
+          SELECT unit_directed_obligation(${groupId}, ${body.unitId}, ${body.payerId}, ${body.recipientId}) AS cents`
+        )[0]?.cents ?? 0);
+        const message = validateUnitRepayment({
+          reconcile: false,
+          obligations: [{ from: body.payerId, to: body.recipientId, amountCents: outstanding }],
+          payerId: body.payerId,
+          recipientId: body.recipientId,
+          amountCents: body.amountCents,
+        });
+        if (message) badRequest(message.replace("this unit", unit.name));
+      }
+    }
     badRequest(expectedBalances ? "This balance changed. Refresh and try again" : "Both people must be group members");
   }
   return { id: Number(rows[0].id), updatedAt: versionToken(rows[0].updated_at) };
@@ -253,12 +255,6 @@ export async function updateSettlementWithActivity(
   if (!unit) validateCurrencyAmount(body.amountCents, body.currency);
   const currency = unit ? await groupCurrencyForSettlement(settlement.groupId!, settlement) : body.currency;
   const effectiveConverted = unit ? body.amountCents : convertedCents;
-  if (unit && settlement.groupId !== null) {
-    await assertUnitRepaymentAllowed(
-      settlement.groupId, unit.id, settlement.payerId, settlement.recipientId, body.amountCents,
-      settlement.unitId === unit.id ? settlement.amountCents : 0
-    );
-  }
   const fallbackText = await settlementSummary(
     settlement.payerId, settlement.recipientId, body.amountCents, currency, unit?.name
   );
@@ -273,9 +269,20 @@ export async function updateSettlementWithActivity(
       ? tx`SELECT pg_advisory_xact_lock(${userA}::int, ${userB}::int)`
       : tx`SELECT pg_advisory_xact_lock(${settlement.groupId}::int)`,
     tx`
-    WITH existing_members_ok AS (
+    WITH lock AS (
+      SELECT pg_advisory_xact_lock(${settlement.groupId ?? userA}::int)
+    ),
+    unit_gate AS (
+      SELECT 1 FROM lock
+      WHERE ${unitId}::bigint IS NULL
+        OR ${settlement.groupId}::bigint IS NULL
+        OR EXISTS (SELECT 1 FROM groups WHERE id = ${settlement.groupId} AND auto_reconcile_units)
+        OR unit_directed_obligation(${settlement.groupId}, ${unitId}, ${settlement.payerId}, ${settlement.recipientId}, ${settlement.id}) >= ${body.amountCents}
+    ),
+    existing_members_ok AS (
       SELECT 1
-      WHERE (
+      WHERE EXISTS (SELECT 1 FROM unit_gate)
+        AND (
           ${settlement.groupId}::bigint IS NULL
           AND EXISTS (
             SELECT 1 FROM friendships
@@ -325,6 +332,22 @@ export async function updateSettlementWithActivity(
       EXISTS(SELECT 1 FROM stale) AS stale,
       (SELECT updated_at FROM upd) AS updated_at`,
   ]);
+  if (Number(rows[0]?.updated ?? 0) === 0 && unit && settlement.groupId !== null) {
+    const auto = await sql`SELECT auto_reconcile_units FROM groups WHERE id = ${settlement.groupId}`;
+    if (!auto[0]?.auto_reconcile_units) {
+      const outstanding = Number((await sql`
+        SELECT unit_directed_obligation(${settlement.groupId}, ${unit.id}, ${settlement.payerId}, ${settlement.recipientId}, ${settlement.id}) AS cents`
+      )[0]?.cents ?? 0);
+      const message = validateUnitRepayment({
+        reconcile: false,
+        obligations: [{ from: settlement.payerId, to: settlement.recipientId, amountCents: outstanding }],
+        payerId: settlement.payerId,
+        recipientId: settlement.recipientId,
+        amountCents: body.amountCents,
+      });
+      if (message) badRequest(message.replace("this unit", unit.name));
+    }
+  }
   if (Number(rows[0]?.updated ?? 0) === 0 && rows[0]?.stale) badRequest("Settlement changed, refresh and try again");
   if (Number(rows[0]?.updated ?? 0) === 0 && settlement.groupId === null) forbidden("You are not friends with this user");
   if (Number(rows[0]?.updated ?? 0) === 0) badRequest("This settlement involves someone who has left the group");

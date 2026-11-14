@@ -54,53 +54,66 @@ export interface UnitObligation {
   amountCents: number;
 }
 
-export interface UnitBalanceResult {
+export interface UnitTotalsRow {
+  unitId: number;
+  userId: number;
+  paidCents: number;
+  owedCents: number;
+  settledOutCents: number;
+  settledInCents: number;
+}
+
+export interface UnitDirectedRow {
+  unitId: number;
+  debtorId: number;
+  creditorId: number;
+  amountCents: number;
+}
+
+export interface UnitGross {
+  userId: number;
+  owesCents: number;
+  owedCents: number;
+}
+
+export interface UnitSummary {
+  unitId: number;
+  name: string;
+  reconcile: boolean;
   nets: { userId: number; netCents: number }[];
+  gross: UnitGross[];
   transfers: Transfer[];
   obligations: UnitObligation[];
 }
 
-export function computeUnitBalances(
-  memberIds: Iterable<number>,
-  expenses: UnitExpenseRow[],
-  settlements: UnitSettlementRow[],
-  reconcile: boolean
-): UnitBalanceResult {
-  const nets = new Map<number, number>();
-  for (const id of memberIds) nets.set(id, 0);
-  const directed = new Map<string, number>();
-  const addDirected = (from: number, to: number, amountCents: number) => {
-    if (from === to || amountCents === 0) return;
-    const key = `${from}:${to}`;
-    directed.set(key, (directed.get(key) ?? 0) + amountCents);
-  };
+export interface UnitAggregateData {
+  units: { id: number; name: string }[];
+  totals: UnitTotalsRow[];
+  directed: UnitDirectedRow[];
+}
 
-  for (const expense of expenses) {
-    nets.set(expense.payerId, (nets.get(expense.payerId) ?? 0) + expense.amountCents);
-    for (const share of expense.shares) {
-      nets.set(share.userId, (nets.get(share.userId) ?? 0) - share.shareCents);
-      if (share.userId !== expense.payerId) addDirected(share.userId, expense.payerId, share.shareCents);
-    }
+export interface UnitViewerRow {
+  unitId: number;
+  name: string;
+  reconcile: boolean;
+  netCents: number;
+  owesCents: number;
+  owedCents: number;
+}
+
+function normalizeDirected(rows: UnitDirectedRow[]): UnitObligation[] {
+  const raw = new Map<string, number>();
+  for (const row of rows) {
+    const key = `${row.debtorId}:${row.creditorId}`;
+    raw.set(key, (raw.get(key) ?? 0) + row.amountCents);
   }
-  for (const settlement of settlements) {
-    nets.set(settlement.payerId, (nets.get(settlement.payerId) ?? 0) + settlement.amountCents);
-    nets.set(settlement.recipientId, (nets.get(settlement.recipientId) ?? 0) - settlement.amountCents);
-    addDirected(settlement.payerId, settlement.recipientId, -settlement.amountCents);
-  }
-
-  const netRows = [...nets.entries()]
-    .map(([userId, netCents]) => ({ userId, netCents }))
-    .sort((a, b) => a.userId - b.userId);
-
-  if (reconcile) {
-    return { nets: netRows, transfers: simplifyDebts(nets), obligations: [] };
-  }
-
   const normalized = new Map<string, number>();
-  for (const [key, amountCents] of directed) {
+  for (const [key, amountCents] of raw) {
     if (amountCents === 0) continue;
     const [from, to] = key.split(":").map(Number);
-    const [a, b, amount] = amountCents > 0 ? [from, to, amountCents] : [to, from, -amountCents];
+    const [a, b, amount] = amountCents > 0
+      ? [from, to, amountCents]
+      : [to, from, -amountCents];
     const normalizedKey = `${a}:${b}`;
     normalized.set(normalizedKey, (normalized.get(normalizedKey) ?? 0) + amount);
   }
@@ -111,7 +124,105 @@ export function computeUnitBalances(
     obligations.push({ from, to, amountCents });
   }
   obligations.sort((a, b) => a.from - b.from || a.to - b.to);
-  return { nets: netRows, transfers: [], obligations };
+  return obligations;
+}
+
+export function computeUnitBalancesFromAggregates(
+  memberIds: Iterable<number>,
+  unitId: number,
+  name: string,
+  totals: UnitTotalsRow[],
+  directed: UnitDirectedRow[],
+  reconcile: boolean
+): UnitSummary {
+  const ids = new Set(memberIds);
+  for (const row of totals) ids.add(row.userId);
+  for (const row of directed) {
+    ids.add(row.debtorId);
+    ids.add(row.creditorId);
+  }
+  const nets = new Map<number, number>();
+  for (const id of ids) nets.set(id, 0);
+  if (reconcile) {
+    for (const row of totals) {
+      nets.set(row.userId, (nets.get(row.userId) ?? 0) +
+        row.paidCents - row.owedCents + row.settledOutCents - row.settledInCents);
+    }
+  }
+  const obligations = normalizeDirected(directed);
+  const gross = new Map<number, { owesCents: number; owedCents: number }>();
+  for (const id of ids) gross.set(id, { owesCents: 0, owedCents: 0 });
+  for (const row of obligations) {
+    gross.get(row.from)!.owesCents += row.amountCents;
+    gross.get(row.to)!.owedCents += row.amountCents;
+  }
+  if (!reconcile) {
+    for (const id of ids) nets.set(id, 0);
+    for (const row of obligations) {
+      nets.set(row.from, (nets.get(row.from) ?? 0) - row.amountCents);
+      nets.set(row.to, (nets.get(row.to) ?? 0) + row.amountCents);
+    }
+  }
+  const netRows = [...nets.entries()]
+    .map(([userId, netCents]) => ({ userId, netCents }))
+    .sort((a, b) => a.userId - b.userId);
+  const grossRows = [...gross.entries()]
+    .map(([userId, value]) => ({ userId, ...value }))
+    .sort((a, b) => a.userId - b.userId);
+  return {
+    unitId,
+    name,
+    reconcile,
+    nets: netRows,
+    gross: grossRows,
+    transfers: reconcile ? simplifyDebts(nets) : [],
+    obligations: reconcile ? [] : obligations,
+  };
+}
+
+function aggregateLedger(
+  memberIds: Iterable<number>,
+  expenses: UnitExpenseRow[],
+  settlements: UnitSettlementRow[]
+): { totals: UnitTotalsRow[]; directed: UnitDirectedRow[] } {
+  const totals = new Map<number, UnitTotalsRow>();
+  const rowFor = (userId: number) => {
+    const existing = totals.get(userId);
+    if (existing) return existing;
+    const row = { unitId: 0, userId, paidCents: 0, owedCents: 0, settledOutCents: 0, settledInCents: 0 };
+    totals.set(userId, row);
+    return row;
+  };
+  for (const id of memberIds) rowFor(id);
+  const directed: UnitDirectedRow[] = [];
+  for (const expense of expenses) {
+    rowFor(expense.payerId).paidCents += expense.amountCents;
+    for (const share of expense.shares) {
+      rowFor(share.userId).owedCents += share.shareCents;
+      if (share.userId !== expense.payerId) {
+        directed.push({ unitId: 0, debtorId: share.userId, creditorId: expense.payerId, amountCents: share.shareCents });
+      }
+    }
+  }
+  for (const settlement of settlements) {
+    rowFor(settlement.payerId).settledOutCents += settlement.amountCents;
+    rowFor(settlement.recipientId).settledInCents += settlement.amountCents;
+    directed.push({
+      unitId: 0, debtorId: settlement.payerId, creditorId: settlement.recipientId,
+      amountCents: -settlement.amountCents,
+    });
+  }
+  return { totals: [...totals.values()], directed };
+}
+
+export function computeUnitBalances(
+  memberIds: Iterable<number>,
+  expenses: UnitExpenseRow[],
+  settlements: UnitSettlementRow[],
+  reconcile: boolean
+): UnitSummary {
+  const { totals, directed } = aggregateLedger(memberIds, expenses, settlements);
+  return computeUnitBalancesFromAggregates(memberIds, 0, "", totals, directed, reconcile);
 }
 
 export function directedObligation(
@@ -145,33 +256,47 @@ export function validateUnitRepayment({
   return null;
 }
 
-export interface UnitLedgerUnit {
-  unitId: number;
-  name: string;
-  expenses: UnitExpenseRow[];
-  settlements: UnitSettlementRow[];
+export function parseUnitAggregates(value: unknown): UnitAggregateData {
+  const raw = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
+  return {
+    units: (Array.isArray(raw.units) ? raw.units : []).map((unit) => {
+      const row = unit as Record<string, unknown>;
+      return { id: Number(row.id), name: String(row.name) };
+    }),
+    totals: (Array.isArray(raw.totals) ? raw.totals : []).map((total) => {
+      const row = total as Record<string, unknown>;
+      return {
+        unitId: Number(row.unitId),
+        userId: Number(row.userId),
+        paidCents: Number(row.paidCents),
+        owedCents: Number(row.owedCents),
+        settledOutCents: Number(row.settledOutCents),
+        settledInCents: Number(row.settledInCents),
+      };
+    }),
+    directed: (Array.isArray(raw.directed) ? raw.directed : []).map((directed) => {
+      const row = directed as Record<string, unknown>;
+      return {
+        unitId: Number(row.unitId),
+        debtorId: Number(row.debtorId),
+        creditorId: Number(row.creditorId),
+        amountCents: Number(row.amountCents),
+      };
+    }),
+  };
 }
 
-export function parseUnitLedger(value: unknown): UnitLedgerUnit[] {
+export function parseUnitViewerRows(value: unknown): UnitViewerRow[] {
   if (!Array.isArray(value)) return [];
-  return value.map((raw) => {
-    const row = raw as Record<string, unknown>;
+  return value.map((unit) => {
+    const row = unit as Record<string, unknown>;
     return {
       unitId: Number(row.unitId),
       name: String(row.name),
-      expenses: ((row.expenses ?? []) as Record<string, unknown>[]).map((expense) => ({
-        payerId: Number(expense.payerId),
-        amountCents: Number(expense.amountCents),
-        shares: ((expense.shares ?? []) as Record<string, unknown>[]).map((share) => ({
-          userId: Number(share.userId),
-          shareCents: Number(share.shareCents),
-        })),
-      })),
-      settlements: ((row.settlements ?? []) as Record<string, unknown>[]).map((settlement) => ({
-        payerId: Number(settlement.payerId),
-        recipientId: Number(settlement.recipientId),
-        amountCents: Number(settlement.amountCents),
-      })),
+      reconcile: Boolean(row.reconcile),
+      netCents: Number(row.netCents),
+      owesCents: Number(row.owesCents),
+      owedCents: Number(row.owedCents),
     };
   });
 }

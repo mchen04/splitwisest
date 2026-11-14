@@ -1,7 +1,7 @@
 import { sql } from "./db";
 import type { NeonQueryFunctionInTransaction } from "@neondatabase/serverless";
 import { simplifyDebts, Transfer } from "./money";
-import { computeUnitBalances, parseUnitLedger } from "./units";
+import { computeUnitBalancesFromAggregates, parseUnitAggregates } from "./units";
 
 // All balance math uses converted_cents (the expense amount converted to the
 // group's currency at entry time). Settlements likewise.
@@ -76,37 +76,36 @@ function friendGroupRows(
   query: NeonQueryFunctionInTransaction<false, false> = sql
 ) {
   return query`
-    SELECT g.id AS group_id, g.name AS group_name, g.currency, g.auto_reconcile_units,
-      COALESCE((
-        SELECT jsonb_agg(jsonb_build_object(
-          'unitId', gu.id, 'name', gu.name,
-          'expenses', COALESCE((
-            SELECT jsonb_agg(jsonb_build_object(
-              'payerId', e.payer_id, 'amountCents', e.amount_cents,
-              'shares', COALESCE((
-                SELECT jsonb_agg(jsonb_build_object('userId', es.user_id, 'shareCents', es.share_cents))
-                FROM expense_shares es WHERE es.expense_id = e.id
-              ), '[]'::jsonb)
-            ))
-            FROM expenses e WHERE e.group_id = gu.group_id AND e.unit_id = gu.id
-          ), '[]'::jsonb),
-          'settlements', COALESCE((
-            SELECT jsonb_agg(jsonb_build_object(
-              'payerId', s.payer_id, 'recipientId', s.recipient_id, 'amountCents', s.amount_cents))
-            FROM settlements s WHERE s.group_id = gu.group_id AND s.unit_id = gu.id
-          ), '[]'::jsonb)
-        ) ORDER BY gu.name, gu.id)
-        FROM group_units gu WHERE gu.group_id = g.id
-      ), '[]'::jsonb) AS unit_ledger,
-      b.user_id, b.display_name, b.net_cents
-    FROM groups g
-    JOIN group_members me ON me.group_id = g.id AND me.user_id = ${userId}
-    CROSS JOIN LATERAL group_balance_rows(g.id) b
-    WHERE ${friendFilter}::bigint IS NULL OR EXISTS (
-      SELECT 1 FROM group_members them
-      WHERE them.group_id = g.id AND them.user_id = ${friendFilter}
+    WITH groups_for_viewer AS MATERIALIZED (
+      SELECT g.id AS group_id, g.name AS group_name, g.currency, g.auto_reconcile_units,
+        CASE WHEN EXISTS (SELECT 1 FROM group_units gu WHERE gu.group_id = g.id) THEN
+          jsonb_build_object(
+            'units', (SELECT jsonb_agg(jsonb_build_object('id', gu.id, 'name', gu.name)
+                ORDER BY gu.name, gu.id) FROM group_units gu WHERE gu.group_id = g.id),
+            'totals', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+                'unitId', t.unit_id, 'userId', t.user_id,
+                'paidCents', t.paid_cents, 'owedCents', t.owed_cents,
+                'settledOutCents', t.settled_out_cents, 'settledInCents', t.settled_in_cents)
+                ORDER BY t.unit_id, t.user_id), '[]'::jsonb)
+              FROM group_unit_totals(g.id) t),
+            'directed', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+                'unitId', d.unit_id, 'debtorId', d.debtor_id,
+                'creditorId', d.creditor_id, 'amountCents', d.amount_cents)
+                ORDER BY d.unit_id, d.debtor_id, d.creditor_id), '[]'::jsonb)
+              FROM group_unit_directed(g.id) d)
+          )
+        ELSE NULL END AS unit_data
+      FROM groups g
+      JOIN group_members me ON me.group_id = g.id AND me.user_id = ${userId}
+      WHERE ${friendFilter}::bigint IS NULL OR EXISTS (
+        SELECT 1 FROM group_members them
+        WHERE them.group_id = g.id AND them.user_id = ${friendFilter}
+      )
     )
-    ORDER BY g.id, b.user_id`;
+    SELECT gf.*, b.user_id, b.display_name, b.net_cents
+    FROM groups_for_viewer gf
+    CROSS JOIN LATERAL group_balance_rows(gf.group_id) b
+    ORDER BY gf.group_id, b.user_id`;
 }
 
 function groupObligationsSnapshot(
@@ -146,11 +145,15 @@ function groupObligationsSnapshot(
 
     const memberIds = rows.map((row) => Number(row.user_id));
     const reconcile = Boolean(rows[0].auto_reconcile_units);
-    for (const unit of parseUnitLedger(rows[0].unit_ledger)) {
-      const result = computeUnitBalances(memberIds, unit.expenses, unit.settlements, reconcile);
-      const unitTransfers = reconcile
-        ? result.transfers
-        : result.obligations.map((row) => ({ from: row.from, to: row.to, amountCents: row.amountCents }));
+    const aggregate = parseUnitAggregates(rows[0].unit_data);
+    for (const unit of aggregate.units) {
+      const result = computeUnitBalancesFromAggregates(
+        memberIds, unit.id, unit.name,
+        aggregate.totals.filter((row) => row.unitId === unit.id),
+        aggregate.directed.filter((row) => row.unitId === unit.id),
+        reconcile
+      );
+      const unitTransfers = reconcile ? result.transfers : result.obligations;
       for (const transfer of unitTransfers) {
         if (transfer.from !== userId && transfer.to !== userId) continue;
         const friendId = transfer.from === userId ? transfer.to : transfer.from;
@@ -162,7 +165,7 @@ function groupObligationsSnapshot(
           currency: String(rows[0].currency),
           netCents: transfer.to === userId ? transfer.amountCents : -transfer.amountCents,
           kind: "unit",
-          unitId: unit.unitId,
+          unitId: unit.id,
           unitName: unit.name,
         });
         byFriend.set(friendId, obligations);

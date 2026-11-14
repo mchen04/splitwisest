@@ -3,6 +3,7 @@ import { handler, notFound, forbidden, badRequest } from "@/lib/api";
 import { requireUser } from "@/lib/auth";
 import { isGroupMember } from "@/lib/balances";
 import { parseGroupId, removeGroupMemberWithActivity, requireGroupMember } from "@/lib/groups";
+import { formatUnitAmount } from "@/lib/units";
 
 type Ctx = { params: Promise<{ id: string; userId: string }> };
 
@@ -31,6 +32,18 @@ export const DELETE = handler(async (_req: NextRequest, { params }: Ctx) => {
       removingSelf
         ? "Edit or delete group balances that include you before leaving"
         : "Edit or delete group balances that include this member before removing them"
+    );
+  }
+  if (!result.removed && result.unitName) {
+    const amount = result.unitReconcile
+      ? formatUnitAmount(Math.abs(result.unitNetCents), result.unitName)
+      : result.unitOwesCents >= result.unitOwedCents
+        ? formatUnitAmount(result.unitOwesCents, result.unitName)
+        : formatUnitAmount(result.unitOwedCents, result.unitName);
+    badRequest(
+      removingSelf
+        ? `Settle your ${result.unitName} balance (${amount}) before leaving`
+        : `That member still has an outstanding ${result.unitName} balance (${amount}) — settle it up first`
     );
   }
   if (!result.removed && result.netCents !== 0) {

@@ -281,9 +281,10 @@ function ProfileActions({
 }) {
   const router = useRouter();
   if (profile.relationship === "self") return null;
-  const theyOweMe = profile.obligations.some((item) => item.netCents > 0);
-  const iOweThem = profile.obligations.some((item) => item.netCents < 0);
-  const canSettle = profile.canSettleDirectly || profile.obligations.some((item) => item.groupId !== null);
+  const moneyObligations = profile.obligations.filter((item) => item.kind !== "unit");
+  const theyOweMe = moneyObligations.some((item) => item.netCents > 0);
+  const iOweThem = moneyObligations.some((item) => item.netCents < 0);
+  const canSettle = profile.canSettleDirectly || moneyObligations.some((item) => item.groupId !== null);
   const dmHref = `/chat?dm=${profile.person.id}`;
 
   // One contextual primary tied to the relationship; everything else overflows.

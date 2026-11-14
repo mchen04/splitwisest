@@ -19,10 +19,13 @@ export interface FriendWithBalances {
 
 /** Friends you owe come first (the action is yours), then by largest balance. */
 export function sortByUrgency<T extends FriendWithBalances>(friends: T[]): T[] {
-  const weight = (f: T) => ({
-    owes: f.obligations.some((o) => o.netCents < 0) ? 1 : 0,
-    size: Math.max(0, ...f.obligations.map((o) => Math.abs(o.netCents))),
-  });
+  const weight = (f: T) => {
+    const money = f.obligations.filter((o) => o.kind !== "unit");
+    return {
+      owes: money.some((o) => o.netCents < 0) ? 1 : 0,
+      size: Math.max(0, ...money.map((o) => Math.abs(o.netCents))),
+    };
+  };
   return [...friends].sort((a, b) => weight(b).owes - weight(a).owes || weight(b).size - weight(a).size);
 }
 
