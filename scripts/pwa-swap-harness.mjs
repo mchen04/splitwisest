@@ -694,10 +694,9 @@ async function suite() {
     const reloadRestored = await restoredLacksUnitBalances(page);
     const reloadResponse = waitGroupResponse(page);
     await page.reload({ waitUntil: "load" });
-    await closeDraftSheet(page);
-    await page.evaluate(({ key, value }) => localStorage.setItem(key, value), { key: draftKey, value: draftValue });
     const reload = await check(page, await reloadResponse, reloadRestored);
     await shot(page, "2b");
+    await closeDraftSheet(page);
     record("units-cache-2b", reload.pass, { ...reload, path: "reload" });
 
     await app.ctx.close();
@@ -708,10 +707,9 @@ async function suite() {
     const coldResponse = waitGroupResponse(app.page);
     await app.page.goto(groupUrl, { waitUntil: "load" });
     await app.page.waitForFunction(() => Boolean(navigator.serviceWorker?.controller), null, { timeout: 20000 }).catch(() => {});
-    await closeDraftSheet(app.page);
-    await app.page.evaluate(({ key, value }) => localStorage.setItem(key, value), { key: draftKey, value: draftValue });
     const cold = await check(app.page, await coldResponse, coldRestored);
     await shot(app.page, "2c");
+    await closeDraftSheet(app.page);
     record("units-cache-2c", cold.pass, { ...cold, path: "cold-launch" });
 
     await restoreCache(app.page, oldCache);
@@ -723,10 +721,9 @@ async function suite() {
       window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
     });
     await app.page.reload({ waitUntil: "load" });
-    await closeDraftSheet(app.page);
-    await app.page.evaluate(({ key, value }) => localStorage.setItem(key, value), { key: draftKey, value: draftValue });
     const update = await check(app.page, await updateResponse, updateRestored);
     await shot(app.page, "2d");
+    await closeDraftSheet(app.page);
     record("units-cache-2d", update.pass, { ...update, path: "worker-update-resume-reload" });
   }
 
