@@ -581,7 +581,7 @@ async function suite() {
           splitMethod: "equal", participants: [{ userId: ownerId }],
         }),
       });
-      return group;
+      return { ...group, name };
     }, { name: `Cache upgrade ${Date.now()}`, ownerId: me.user.id });
     const group = created;
     const groupUrl = `${ORIGIN}/groups/${group.id}`;
