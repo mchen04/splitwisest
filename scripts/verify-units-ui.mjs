@@ -83,6 +83,9 @@ const context = await browser.newContext({
   serviceWorkers: "block",
 });
 await context.addInitScript(() => Object.defineProperty(navigator, "standalone", { get: () => true }));
+await context.addInitScript(() => {
+  if (sessionStorage.getItem("units-ui-large-text") === "1") document.documentElement.style.fontSize = "150%";
+});
 const token = owner.cookie.split("=").slice(1).join("=");
 await context.addCookies([{ name: "sw_session", value: token, domain: new URL(origin).hostname, path: "/" }]);
 const page = await context.newPage();
@@ -174,7 +177,7 @@ async function runFlow(width, height, label, { largeText = false } = {}) {
   await dialog.getByLabel("Amount", { exact: true }).fill("3");
   await dialog.getByLabel("Description", { exact: true }).fill(`Unit UI ${label} ${suffix}`);
   await dialog.getByLabel("Date", { exact: true }).fill(localToday());
-  if (largeText) await page.evaluate(() => { document.documentElement.style.fontSize = "150%"; });
+  if (largeText) await page.evaluate(() => { sessionStorage.setItem("units-ui-large-text", "1"); document.documentElement.style.fontSize = "150%"; });
   await footerReachable(dialog);
   await dialog.getByLabel("Unit", { exact: true }).scrollIntoViewIfNeeded();
   await page.waitForTimeout(250);
