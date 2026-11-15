@@ -388,8 +388,9 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
   }
   const canSettle = (detail?.members.length ?? 0) >= 2;
   const unitRows = detail?.unitBalances.flatMap((unit) => unit.reconcile ? unit.transfers : unit.obligations) ?? [];
-  const unitsOpen = unitRows.length > 0;
-  const myUnitsOpen = unitRows.some((row) => row.from === me?.id || row.to === me?.id);
+  const openNets = detail?.unitBalances.flatMap((unit) => unit.reconcile ? unit.nets.filter((row) => row.netCents !== 0) : []) ?? [];
+  const unitsOpen = unitRows.length > 0 || openNets.length > 0;
+  const myUnitsOpen = unitRows.some((row) => row.from === me?.id || row.to === me?.id) || openNets.some((row) => row.userId === me?.id);
   const myGroupBalance = me && detail
     ? detail.balances.find((balance) => balance.userId === me.id)?.netCents ?? 0
     : 0;

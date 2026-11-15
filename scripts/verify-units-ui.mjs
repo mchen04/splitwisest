@@ -289,6 +289,8 @@ async function runFormerFlow() {
   assert(!cardText.includes(`Nobody owes any ${unitName}`), "Unit card does not say nobody owes");
   const body = await page.locator("main").innerText();
   assert(body.includes("unit debt"), "Member list shows the owner's open unit amount");
+  assert(body.includes("Money settled"), "Header says only money is settled");
+  assert(!body.includes("Nobody owes anything in this group"), "Money card does not say nobody owes anything");
   await layout("1280-former-open", true);
   results.push({ name: "former-open", groupId: group.id, unitName, passed: true });
 }
