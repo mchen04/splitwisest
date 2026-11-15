@@ -149,7 +149,8 @@ async function queryDelta(fn: () => Promise<unknown>) {
   const before = await xact();
   await fn();
   const after = await xact();
-  return after - before - 1;
+  const delta = after - before - 1;
+  return delta;
 }
 
 async function moneySnapshot(group: Group) {
