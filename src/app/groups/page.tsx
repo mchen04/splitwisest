@@ -8,7 +8,7 @@ import { api, useApiData, useFormState, CURRENCIES } from "@/lib/client";
 import { AppShell } from "@/components/shell";
 import { Card, EmptyState, Button, Modal, Field, Input, Select, ErrorNote, LoadError, RowMeta, RowTitle } from "@/components/ui";
 import { GroupNet } from "@/components/group-net";
-import { formatUnitAmount } from "@/lib/units";
+import { unitSummaryText } from "@/lib/units";
 
 interface Group {
   id: number;
@@ -99,12 +99,7 @@ export default function GroupsPage() {
                     </RowMeta>
                     {g.unitNets?.map((unit) => (
                       <RowMeta key={unit.unitId} className="tnum">
-                        {unit.reconcile
-                          ? `${unit.name}: ${formatUnitAmount(unit.netCents, unit.name)}`
-                          : [
-                            unit.owesCents > 0 ? `${unit.name}: owes ${formatUnitAmount(unit.owesCents, unit.name)}` : null,
-                            unit.owedCents > 0 ? `is owed ${formatUnitAmount(unit.owedCents, unit.name)}` : null,
-                          ].filter(Boolean).join(" · ")}
+                        {`${unit.name}: ${unitSummaryText(unit)}`}
                       </RowMeta>
                     ))}
                   </span>

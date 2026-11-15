@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   computeUnitBalances, directedObligation, formatUnitAmount, formatUnitQuantity,
-  normalizeUnitName, unitNameError, validateUnitRepayment,
+  normalizeUnitName, unitNameError, unitSummaryText, validateUnitRepayment,
 } from "../units";
 
 const ids = [1, 2, 3];
@@ -17,6 +17,14 @@ describe("unit formatting", () => {
     expect(formatUnitQuantity(34)).toBe("0.34");
     expect(formatUnitQuantity(-150)).toBe("-1.5");
     expect(formatUnitAmount(250, "drinks")).toBe("2.5 drinks");
+  });
+
+  it("summarizes a member's unit position in words", () => {
+    expect(unitSummaryText({ reconcile: true, netCents: -200, owesCents: 0, owedCents: 0 })).toBe("owes 2");
+    expect(unitSummaryText({ reconcile: true, netCents: 150, owesCents: 0, owedCents: 0 })).toBe("owed 1.5");
+    expect(unitSummaryText({ reconcile: true, netCents: 0, owesCents: 500, owedCents: 500 })).toBe("settled");
+    expect(unitSummaryText({ reconcile: false, netCents: 0, owesCents: 500, owedCents: 500 })).toBe("owes 5 · owed 5");
+    expect(unitSummaryText({ reconcile: false, netCents: 200, owesCents: 0, owedCents: 200 })).toBe("owed 2");
   });
 
   it("normalizes names and enforces the shared limit", () => {

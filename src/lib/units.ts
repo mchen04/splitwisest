@@ -30,6 +30,17 @@ export function formatUnitAmount(cents: number, name: string): string {
   return `${formatUnitQuantity(cents)} ${name}`;
 }
 
+export function unitSummaryText(summary: { reconcile: boolean; netCents: number; owesCents: number; owedCents: number }): string {
+  const parts = summary.reconcile
+    ? [summary.netCents < 0 ? `owes ${formatUnitQuantity(-summary.netCents)}` : summary.netCents > 0 ? `owed ${formatUnitQuantity(summary.netCents)}` : null]
+    : [
+      summary.owesCents > 0 ? `owes ${formatUnitQuantity(summary.owesCents)}` : null,
+      summary.owedCents > 0 ? `owed ${formatUnitQuantity(summary.owedCents)}` : null,
+    ];
+  const text = parts.filter(Boolean).join(" · ");
+  return text || "settled";
+}
+
 export function formatDenomination(cents: number, denomination: Denomination): string {
   return denomination.kind === "money"
     ? fmtMoney(cents, denomination.currency)

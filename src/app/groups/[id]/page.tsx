@@ -27,7 +27,7 @@ import { ChatPane } from "@/components/chat";
 import { SpendCharts } from "@/components/spend-charts";
 import { ActivitySummary } from "@/components/activity-summary";
 import { Expense, Settlement, useGroupPageData } from "./use-group-page-data";
-import { formatUnitAmount, formatUnitQuantity } from "@/lib/units";
+import { formatUnitAmount, formatUnitQuantity, unitSummaryText } from "@/lib/units";
 
 type Tab = "expenses" | "balances" | "insights" | "chat" | "activity";
 type GroupBalanceSummary = { id: number; title: string; amountCents: number; updatedAt: string };
@@ -1177,23 +1177,18 @@ function UnitNets({ units, meId }: {
   return (
     <ul className="divide-y divide-line">
       {units.map((unit) => {
-        const net = unit.nets.find((row) => row.userId === meId)?.netCents ?? 0;
+        const netCents = unit.nets.find((row) => row.userId === meId)?.netCents ?? 0;
         const gross = unit.gross.find((row) => row.userId === meId);
-        const owes = gross?.owesCents ?? 0;
-        const owed = gross?.owedCents ?? 0;
-        const settled = unit.reconcile ? net === 0 : owes === 0 && owed === 0;
+        const owesCents = gross?.owesCents ?? 0;
+        const owedCents = gross?.owedCents ?? 0;
+        const tone = unit.reconcile
+          ? netCents > 0 ? "text-owed" : netCents < 0 ? "text-owe" : "text-ink-faint"
+          : owesCents > 0 ? "text-owe" : owedCents > 0 ? "text-owed" : "text-ink-faint";
         return (
           <li key={unit.unitId} className="flex min-h-[var(--control-h-sm)] items-center gap-2 px-3 py-1 text-body">
-            <span className="min-w-0 flex-1 truncate font-medium">{unit.name}</span>
-            <span className={`tnum shrink-0 text-right font-semibold ${unit.reconcile
-              ? net > 0 ? "text-owed" : net < 0 ? "text-owe" : "text-ink-faint"
-              : owes > 0 ? "text-owe" : owed > 0 ? "text-owed" : "text-ink-faint"}`}>
-              {settled ? "settled" : unit.reconcile
-                ? formatUnitAmount(net, unit.name)
-                : [
-                  owes > 0 ? `owes ${formatUnitAmount(owes, unit.name)}` : null,
-                  owed > 0 ? `is owed ${formatUnitAmount(owed, unit.name)}` : null,
-                ].filter(Boolean).join(" · ")}
+            <span className="min-w-0 flex-1 truncate font-medium" title={unit.name}>{unit.name}</span>
+            <span className={`tnum shrink-0 text-right font-semibold ${tone}`}>
+              {unitSummaryText({ reconcile: unit.reconcile, netCents, owesCents, owedCents })}
             </span>
           </li>
         );

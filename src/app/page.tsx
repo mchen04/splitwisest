@@ -11,7 +11,7 @@ import { DirectSettleModal } from "@/components/direct-settle-modal";
 import { FriendBalanceRow, sortByUrgency, useRemind, type FriendWithBalances } from "@/components/friend-balances";
 import { GroupNet } from "@/components/group-net";
 import type { FriendObligation } from "@/lib/balances";
-import { formatUnitAmount } from "@/lib/units";
+import { unitSummaryText } from "@/lib/units";
 
 interface Group {
   id: number;
@@ -228,12 +228,7 @@ export default function Dashboard() {
                         </RowMeta>
                         {g.unitNets?.map((unit) => (
                           <RowMeta key={unit.unitId} className="tnum">
-                            {unit.reconcile
-                              ? `${unit.name}: ${formatUnitAmount(unit.netCents, unit.name)}`
-                              : [
-                                unit.owesCents > 0 ? `${unit.name}: owes ${formatUnitAmount(unit.owesCents, unit.name)}` : null,
-                                unit.owedCents > 0 ? `is owed ${formatUnitAmount(unit.owedCents, unit.name)}` : null,
-                              ].filter(Boolean).join(" · ")}
+                            {`${unit.name}: ${unitSummaryText(unit)}`}
                           </RowMeta>
                         ))}
                       </span>
