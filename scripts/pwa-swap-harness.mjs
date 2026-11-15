@@ -596,6 +596,7 @@ async function suite() {
     await page.locator("#expense-title").fill("Cache draft survives");
     await page.locator("#expense-amount").fill("1.23");
     await page.waitForFunction((key) => Boolean(localStorage.getItem(key)), draftKey, { timeout: 10000 });
+    const draftValue = await page.evaluate((key) => localStorage.getItem(key), draftKey);
     await page.getByRole("dialog").getByRole("button", { name: "Close" }).click();
     await page.goto(`${ORIGIN}/groups`, { waitUntil: "load" });
     await sleep(1200);
@@ -604,6 +605,7 @@ async function suite() {
       if (await close.count()) await close.first().click();
     };
     await closeDraftSheet(page);
+    await page.evaluate(({ key, value }) => localStorage.setItem(key, value), { key: draftKey, value: draftValue });
     const before = await page.evaluate(({ groupId, draftKey }) => {
       const raw = localStorage.getItem("splitwisest.read-cache.v1");
       const parsed = raw ? JSON.parse(raw) : null;
@@ -657,6 +659,7 @@ async function suite() {
 
     await page.goto(`${ORIGIN}/groups`, { waitUntil: "load" });
     await closeDraftSheet(page);
+    await page.evaluate(({ key, value }) => localStorage.setItem(key, value), { key: draftKey, value: draftValue });
     const tapResponse = waitGroupResponse(page);
     await page.getByRole("link", { name: new RegExp(group.name) }).first().click();
     const tap = await check(page, await tapResponse, true);
@@ -676,6 +679,7 @@ async function suite() {
     await app.page.goto(groupUrl, { waitUntil: "load" });
     await app.page.waitForFunction(() => Boolean(navigator.serviceWorker?.controller), null, { timeout: 20000 }).catch(() => {});
     await closeDraftSheet(app.page);
+    await app.page.evaluate(({ key, value }) => localStorage.setItem(key, value), { key: draftKey, value: draftValue });
     const cold = await check(app.page, await coldResponse, true);
     record("units-cache-2c", cold.pass, { ...cold, path: "cold-launch" });
 
@@ -688,6 +692,7 @@ async function suite() {
     });
     await app.page.reload({ waitUntil: "load" });
     await closeDraftSheet(app.page);
+    await app.page.evaluate(({ key, value }) => localStorage.setItem(key, value), { key: draftKey, value: draftValue });
     const update = await check(app.page, await updateResponse, true);
     record("units-cache-2d", update.pass, { ...update, path: "worker-update-resume-reload" });
   }
