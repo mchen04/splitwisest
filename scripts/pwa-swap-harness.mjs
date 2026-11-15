@@ -76,22 +76,22 @@ function buildSlot(slot) {
   const rootModules = readdirSync(join(ROOT, "node_modules")).length;
   const worktree = ref ? mkdtempSync(join(tmpdir(), `splitwisest-pwa-${slot}-`)) : null;
   const cwd = worktree ?? ROOT;
-  if (worktree) {
-    const added = spawnSync("git", ["worktree", "add", "--detach", worktree, ref], { cwd: ROOT, stdio: "inherit" });
-    if (added.status !== 0) throw new Error(`worktree ${ref} failed`);
-    spawnSync("pnpm", ["install", "--frozen-lockfile", "--prefer-offline"], {
-      cwd: worktree,
-      env: { ...process.env, CI: "1" },
-      stdio: ["ignore", "inherit", "inherit"],
-    });
-    if (!existsSync(join(worktree, "node_modules/.bin/next"))) {
-      throw new Error(`dependencies ${slot} failed`);
-    }
-  }
-  // A previous suite leaves .next as a symlink into a slot; building through
-  // it would silently overwrite that slot and alias both builds to one dir.
-  if (existsSync(NEXT_DIR) && lstatSync(NEXT_DIR).isSymbolicLink()) rmSync(NEXT_DIR);
   try {
+    if (worktree) {
+      const added = spawnSync("git", ["worktree", "add", "--detach", worktree, ref], { cwd: ROOT, stdio: "inherit" });
+      if (added.status !== 0) throw new Error(`worktree ${ref} failed`);
+      spawnSync("pnpm", ["install", "--frozen-lockfile", "--prefer-offline"], {
+        cwd: worktree,
+        env: { ...process.env, CI: "1" },
+        stdio: ["ignore", "inherit", "inherit"],
+      });
+      if (!existsSync(join(worktree, "node_modules/.bin/next"))) {
+        throw new Error(`dependencies ${slot} failed`);
+      }
+    }
+    // A previous suite leaves .next as a symlink into a slot; building through
+    // it would silently overwrite that slot and alias both builds to one dir.
+    if (existsSync(NEXT_DIR) && lstatSync(NEXT_DIR).isSymbolicLink()) rmSync(NEXT_DIR);
     const res = spawnSync("pnpm", ["build"], {
       cwd,
       env: { ...process.env, GITHUB_SHA: SHAS[slot] },
@@ -635,6 +635,10 @@ async function suite() {
       const entry = parsed?.entries?.find(([path]) => String(path).startsWith(`/api/groups/${groupId}`));
       return Boolean(entry && !Object.prototype.hasOwnProperty.call(entry[1], "unitBalances"));
     }, group.id);
+    const closeDraftSheet = async (target) => {
+      const close = target.getByRole("dialog").getByRole("button", { name: "Close" });
+      if (await close.count()) await close.first().click();
+    };
     await swapTo("B");
     const check = async (target, response, restoredLackedUnitBalances) => {
       const data = response ? await response.json().catch(() => null) : null;
@@ -643,26 +647,29 @@ async function suite() {
       let draftKept = false;
       let controlled = false;
       let signedIn = false;
+      let urlOk = false;
       try {
-        await target.getByText(group.name, { exact: false }).first().waitFor({ timeout: 10000 }).catch(() => {});
+        await target.waitForURL((url) => url.pathname === `/groups/${group.id}`, { timeout: 10000 }).catch(() => {});
         body = await target.locator("body").innerText();
         draftKept = await target.evaluate((key) => Boolean(localStorage.getItem(key)), draftKey);
         controlled = await target.evaluate(() => Boolean(navigator.serviceWorker?.controller));
         signedIn = !target.url().includes("/login");
+        urlOk = new URL(target.url()).pathname === `/groups/${group.id}`;
       } catch {}
       const fields = {
         groupId: group.id,
         requested: Boolean(response),
         unitBalances: Array.isArray(data?.unitBalances),
         errorScreen: body.includes("This page couldn’t load"),
-        rendered: await target.getByText(group.name, { exact: false }).count() > 0,
+        rendered: urlOk && await target.getByRole("tab", { name: "Balances", exact: true }).count() > 0,
+        urlOk,
         signedIn,
         draftKept,
         controlled,
         restoredLackedUnitBalances,
       };
       return { ...fields, pass: fields.requested && fields.unitBalances && !fields.errorScreen
-        && fields.rendered && fields.signedIn && fields.draftKept && fields.controlled
+        && fields.rendered && fields.urlOk && fields.signedIn && fields.draftKept && fields.controlled
         && fields.restoredLackedUnitBalances };
     };
     const shot = (target, name) => target.screenshot({ path: join(HDIR, `units-cache-${name}-${SHAS.B.slice(0, 7)}.png`) }).catch(() => {});
@@ -674,9 +681,11 @@ async function suite() {
     await page.evaluate(({ key, value }) => localStorage.setItem(key, value), { key: draftKey, value: draftValue });
     const tapRestored = await restoredLacksUnitBalances(page);
     await page.goto(`${ORIGIN}/groups`, { waitUntil: "load" });
+    await closeDraftSheet(page);
     await page.evaluate(({ key, value }) => localStorage.setItem(key, value), { key: draftKey, value: draftValue });
     const tapResponse = waitGroupResponse(page);
     await page.getByRole("link", { name: new RegExp(group.name) }).first().click({ force: true });
+    await page.waitForURL((url) => url.pathname === `/groups/${group.id}`, { timeout: 10000 }).catch(() => {});
     const tap = await check(page, await tapResponse, tapRestored);
     await shot(page, "2a");
     record("units-cache-2a", tap.pass, { ...tap, path: "tap-from-list" });
@@ -685,6 +694,8 @@ async function suite() {
     const reloadRestored = await restoredLacksUnitBalances(page);
     const reloadResponse = waitGroupResponse(page);
     await page.reload({ waitUntil: "load" });
+    await closeDraftSheet(page);
+    await page.evaluate(({ key, value }) => localStorage.setItem(key, value), { key: draftKey, value: draftValue });
     const reload = await check(page, await reloadResponse, reloadRestored);
     await shot(page, "2b");
     record("units-cache-2b", reload.pass, { ...reload, path: "reload" });
@@ -697,6 +708,8 @@ async function suite() {
     const coldResponse = waitGroupResponse(app.page);
     await app.page.goto(groupUrl, { waitUntil: "load" });
     await app.page.waitForFunction(() => Boolean(navigator.serviceWorker?.controller), null, { timeout: 20000 }).catch(() => {});
+    await closeDraftSheet(app.page);
+    await app.page.evaluate(({ key, value }) => localStorage.setItem(key, value), { key: draftKey, value: draftValue });
     const cold = await check(app.page, await coldResponse, coldRestored);
     await shot(app.page, "2c");
     record("units-cache-2c", cold.pass, { ...cold, path: "cold-launch" });
@@ -710,6 +723,8 @@ async function suite() {
       window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
     });
     await app.page.reload({ waitUntil: "load" });
+    await closeDraftSheet(app.page);
+    await app.page.evaluate(({ key, value }) => localStorage.setItem(key, value), { key: draftKey, value: draftValue });
     const update = await check(app.page, await updateResponse, updateRestored);
     await shot(app.page, "2d");
     record("units-cache-2d", update.pass, { ...update, path: "worker-update-resume-reload" });
