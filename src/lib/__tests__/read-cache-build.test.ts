@@ -23,6 +23,9 @@ beforeEach(() => {
     getItem: (key: string) => store.get(key) ?? null,
     setItem: (key: string, value: string) => store.set(key, value),
     removeItem: (key: string) => store.delete(key),
+    clear: () => store.clear(),
+    key: (index: number) => [...store.keys()][index] ?? null,
+    get length() { return store.size; },
   });
 });
 
@@ -75,5 +78,20 @@ describe("persisted read cache build identity", () => {
 
     expect(store.has(DRAFT_KEY)).toBe(true);
     expect(store.has(PUSH_KEY)).toBe(true);
+  });
+
+  it("writes the build identity so the next launch can read its own cache", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(OLD_DETAIL), {
+      status: 200, headers: { "content-type": "application/json" },
+    })));
+    const client = await import("../client");
+
+    await client.apiCached(PATH);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(JSON.parse(store.get(KEY) ?? "null")).toMatchObject({ owner: "u1", build: "build-b" });
+    vi.resetModules();
+    const next = await import("../client");
+    expect(next.cacheGet(PATH)).toEqual(OLD_DETAIL);
   });
 });
