@@ -25,9 +25,10 @@ import { webkit, devices } from "playwright-core";
 import { spawn, spawnSync } from "node:child_process";
 import http from "node:http";
 import httpsMod from "node:https";
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync, lstatSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync, lstatSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import { tmpdir } from "node:os";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 process.env.DATABASE_URL ??= "postgres://postgres:postgres@127.0.0.1:5433/splitwisest";
@@ -72,14 +73,18 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 function buildSlot(slot) {
   console.error(`[harness] building slot ${slot} (GITHUB_SHA=${SHAS[slot].slice(0, 8)}…)`);
   const ref = slot === "A" ? OLD_REF : NEW_REF;
-  const worktree = ref ? join(HDIR, `worktree-${slot}`) : null;
+  const rootModules = readdirSync(join(ROOT, "node_modules")).length;
+  const worktree = ref ? mkdtempSync(join(tmpdir(), `splitwisest-pwa-${slot}-`)) : null;
   const cwd = worktree ?? ROOT;
   if (worktree) {
-    mkdirSync(HDIR, { recursive: true });
-    rmSync(worktree, { recursive: true, force: true });
     const added = spawnSync("git", ["worktree", "add", "--detach", worktree, ref], { cwd: ROOT, stdio: "inherit" });
     if (added.status !== 0) throw new Error(`worktree ${ref} failed`);
-    symlinkSync(join(ROOT, "node_modules"), join(worktree, "node_modules"));
+    const installed = spawnSync("pnpm", ["install", "--frozen-lockfile", "--prefer-offline"], {
+      cwd: worktree,
+      env: { ...process.env, CI: "1" },
+      stdio: ["ignore", "inherit", "inherit"],
+    });
+    if (installed.status !== 0) throw new Error(`dependencies ${slot} failed`);
   }
   // A previous suite leaves .next as a symlink into a slot; building through
   // it would silently overwrite that slot and alias both builds to one dir.
@@ -112,7 +117,13 @@ function buildSlot(slot) {
     writeFileSync(join(dest, "harness-info.json"), JSON.stringify(info));
     return info;
   } finally {
-    if (worktree) spawnSync("git", ["worktree", "remove", "--force", worktree], { cwd: ROOT, stdio: "ignore" });
+    if (readdirSync(join(ROOT, "node_modules")).length !== rootModules) {
+      throw new Error("root node_modules changed during build");
+    }
+    if (worktree) {
+      spawnSync("git", ["worktree", "remove", "--force", worktree], { cwd: ROOT, stdio: "ignore" });
+      rmSync(worktree, { recursive: true, force: true });
+    }
   }
 }
 
@@ -573,15 +584,14 @@ async function suite() {
     }, { name: `Cache upgrade ${Date.now()}`, ownerId: me.user.id });
     const group = created;
     const groupUrl = `${ORIGIN}/groups/${group.id}`;
-    await page.goto(groupUrl, { waitUntil: "load" });
+    await page.goto(`${groupUrl}?add=1`, { waitUntil: "load" });
     await page.waitForFunction(() => Boolean(navigator.serviceWorker?.controller), null, { timeout: 20000 }).catch(() => {});
     await sleep(1500);
     const draftKey = `splitwisest.draft.${me.user.id}.expense`;
-    await page.locator("main").getByRole("button", { name: "Add expense", exact: true }).first().click();
     await page.locator("#expense-title").fill("Cache draft survives");
     await page.locator("#expense-amount").fill("1.23");
     await page.waitForFunction((key) => Boolean(localStorage.getItem(key)), draftKey, { timeout: 10000 });
-    await page.reload({ waitUntil: "load" });
+    await page.goto(groupUrl, { waitUntil: "load" });
     await sleep(1200);
     const before = await page.evaluate(({ groupId, draftKey }) => {
       const raw = localStorage.getItem("splitwisest.read-cache.v1");
