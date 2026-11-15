@@ -1219,8 +1219,8 @@ function UnitNets({ units, meId }: {
             owedCents > 0 ? { text: `owed ${formatUnitQuantity(owedCents)}`, tone: "text-owed" } : null];
         const shown = parts.filter((part): part is { text: string; tone: string } => part !== null);
         const openRows = unit.reconcile ? unit.transfers : unit.obligations;
-        const settled = openRows.length === 0;
-        const even = !settled && shown.length === 0;
+        const settled = openRows.length === 0 && shown.length === 0;
+        const even = openRows.length > 0 && shown.length === 0;
         return (
           <li key={unit.unitId} className="flex min-h-[var(--control-h-sm)] flex-wrap items-center gap-x-2 px-3 py-1 text-body">
             <span className="min-w-[5rem] flex-1 truncate font-medium" title={unit.name}>{unit.name}</span>

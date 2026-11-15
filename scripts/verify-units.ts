@@ -520,6 +520,13 @@ async function main() {
   detail = await api(`/api/groups/${formerGroup.id}`, owner);
   unit = detail.unitBalances.find((row: { name: string }) => row.name === "former drinks");
   check("former-member repayment clears that row", byTriple(unit.obligations.map((row: { from: number; to: number; amountCents: number }) => [row.from, row.to, row.amountCents])), byTriple([[b.id, owner.id, 500]]));
+  const formerOn = await request(`/api/groups/${formerGroup.id}`, owner, { autoReconcileUnits: true }, "PATCH");
+  check("turning cancelling back on succeeds after a former-member repayment", formerOn.status, 200);
+  detail = await api(`/api/groups/${formerGroup.id}`, owner);
+  unit = detail.unitBalances.find((row: { name: string }) => row.name === "former drinks");
+  check("open amount owed by a former member stays in the owner's net", unit.nets.find((row: { userId: number }) => row.userId === owner.id)?.netCents, 500);
+  const formerOffAgain = await request(`/api/groups/${formerGroup.id}`, owner, { autoReconcileUnits: false }, "PATCH");
+  check("turning cancelling off again succeeds", formerOffAgain.status, 200);
   const ownerFormerRepay = await request(`/api/groups/${formerGroup.id}/settlements`, owner, {
     payerId: b.id, recipientId: owner.id, amountCents: 500, currency: formerGroup.currency,
     unitId: formerUnit.id, date: today, note: "former repay 2",
