@@ -63,6 +63,7 @@ const requestGeneration = new Map<string, number>();
 let cacheEpoch = 0;
 const READ_CACHE_KEY = "splitwisest.read-cache.v1";
 const CACHE_OWNER_COOKIE = "sw_cache_owner";
+const BUILD_ID = process.env.NEXT_PUBLIC_BUILD_ID ?? "";
 const MAX_CACHE_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 const FRESH_DEDUPE_MS = 1500;
 const MAX_CACHE_ENTRIES = 80;
@@ -72,6 +73,7 @@ let persistScheduled = false;
 
 interface StoredReadCache {
   owner: string;
+  build: string;
   entries: [string, unknown, number][];
 }
 
@@ -96,7 +98,7 @@ function clearReadCache(clearOwnerCookie = false) {
   }
 }
 
-function hydrateReadCache() {
+export function hydrateReadCache() {
   if (cacheHydrated || typeof window === "undefined") return;
   cacheHydrated = true;
   const owner = cacheOwner();
@@ -105,7 +107,7 @@ function hydrateReadCache() {
     const raw = localStorage.getItem(READ_CACHE_KEY);
     if (!raw) return;
     const stored = JSON.parse(raw) as StoredReadCache;
-    if (stored.owner !== owner || !Array.isArray(stored.entries)) {
+    if (!BUILD_ID || stored.build !== BUILD_ID || stored.owner !== owner || !Array.isArray(stored.entries)) {
       localStorage.removeItem(READ_CACHE_KEY);
       return;
     }
@@ -133,10 +135,10 @@ function persistReadCache() {
     .sort((a, b) => b[2] - a[2])
     .slice(0, MAX_CACHE_ENTRIES);
   try {
-    let payload = JSON.stringify({ owner, entries } satisfies StoredReadCache);
+    let payload = JSON.stringify({ owner, build: BUILD_ID, entries } satisfies StoredReadCache);
     while (payload.length > MAX_CACHE_BYTES && entries.length > 1) {
       entries.pop();
-      payload = JSON.stringify({ owner, entries } satisfies StoredReadCache);
+      payload = JSON.stringify({ owner, build: BUILD_ID, entries } satisfies StoredReadCache);
     }
     localStorage.setItem(READ_CACHE_KEY, payload);
   } catch {
@@ -158,6 +160,7 @@ function scheduleCachePersist() {
 // manage their own fetch state use this to seed useState so a revisit renders
 // the previous data instantly instead of flashing a skeleton.
 export function cacheGet<T>(path: string): T | null {
+  hydrateReadCache();
   return (dataCache.get(path) as T | undefined) ?? null;
 }
 
