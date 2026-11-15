@@ -355,7 +355,10 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
     );
   }
 
-  const memberName = (uid: number) => detail?.members.find((m) => m.id === uid)?.displayName ?? "Someone";
+  const memberName = (uid: number) =>
+    detail?.members.find((m) => m.id === uid)?.displayName
+    ?? detail?.unitPeople.find((p) => p.userId === uid)?.displayName
+    ?? "Someone";
   const visibleBalances = detail?.balances.filter((b) => {
     const q = memberQuery.trim().toLowerCase();
     return !q || b.displayName.toLowerCase().includes(q);
@@ -1077,6 +1080,7 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
             onSaved={refreshAll}
             groupId={groupId}
             members={detail.members}
+            people={detail.unitPeople.map((p) => ({ id: p.userId, displayName: p.displayName }))}
             meId={me.id}
             defaultCurrency={detail.group.currency}
             prefill={settlePrefill}
@@ -1093,6 +1097,7 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
             }}
             groupId={groupId}
             members={detail.members}
+            people={detail.unitPeople.map((p) => ({ id: p.userId, displayName: p.displayName }))}
             meId={me.id}
             defaultCurrency={detail.group.currency}
             existing={editingSettlement}
@@ -1209,18 +1214,17 @@ function UnitNets({ units, meId }: {
           : [owesCents > 0 ? { text: `owes ${formatUnitQuantity(owesCents)}`, tone: "text-owe" } : null,
             owedCents > 0 ? { text: `owed ${formatUnitQuantity(owedCents)}`, tone: "text-owed" } : null];
         const shown = parts.filter((part): part is { text: string; tone: string } => part !== null);
-        const directedOpen = unit.reconcile
-          ? unit.transfers.some((row) => row.from === meId || row.to === meId)
-          : owesCents > 0 || owedCents > 0;
-        const settled = shown.length === 0 && !directedOpen;
+        const openRows = unit.reconcile ? unit.transfers : unit.obligations;
+        const settled = openRows.length === 0;
+        const even = !settled && shown.length === 0;
         return (
           <li key={unit.unitId} className="flex min-h-[var(--control-h-sm)] flex-wrap items-center gap-x-2 px-3 py-1 text-body">
             <span className="min-w-[5rem] flex-1 truncate font-medium" title={unit.name}>{unit.name}</span>
             <span className="tnum ml-auto shrink-0 text-right font-semibold">
               {settled
                 ? <span className="text-ink-faint">settled</span>
-                : shown.length === 0
-                  ? <span className="text-ink-faint">unit debt</span>
+                : even
+                  ? <span className="text-ink-faint">you&rsquo;re even</span>
                 : shown.map((part, index) => (
                   <span key={part.text} className={part.tone}>{index > 0 ? " · " : ""}{part.text}</span>
                 ))}
