@@ -638,7 +638,7 @@ async function main() {
   LANGUAGE sql
   STABLE
   AS $$
-    SELECT COALESCE(MAX(d.amount_cents), 0)
+    SELECT COALESCE(SUM(d.amount_cents), 0)
     FROM group_unit_directed_for_viewer(target_group_id, target_debtor_id, exclude_settlement_id) d
     WHERE d.unit_id = target_unit_id
       AND d.debtor_id = target_debtor_id
@@ -725,7 +725,8 @@ async function main() {
   AS $$
     SELECT v.unit_id, v.unit_name, v.reconcile, v.net_cents, v.owes_cents, v.owed_cents
     FROM group_unit_viewer_rows(target_group_id, target_user_id) v
-    WHERE v.net_cents <> 0 OR v.owes_cents <> 0 OR v.owed_cents <> 0
+    WHERE (v.reconcile AND v.net_cents <> 0)
+       OR (NOT v.reconcile AND (v.owes_cents <> 0 OR v.owed_cents <> 0))
     ORDER BY v.unit_name, v.unit_id
   $$`;
 
