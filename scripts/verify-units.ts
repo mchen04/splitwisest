@@ -561,22 +561,18 @@ async function main() {
   check("friend money balances are unchanged", moneyAfterData.friendMoney, moneyBeforeData.friendMoney);
   check("people money balances are unchanged", moneyAfterData.peopleMoney, moneyBeforeData.peopleMoney);
 
-  if (process.env.SPLITWISEST_SKIP_QUERY_COUNTS === "1") {
-    console.log("SKIP query counts (host proxy)");
-  } else {
-    const counts: [string, number, number][] = [];
-    const overhead = await queryDelta(async () => {});
-    const proxyTransactionsPerQuery = Math.max(1, (await queryDelta(async () => { await sql`SELECT 1`; })) - overhead);
-    const measured = async (fn: () => Promise<unknown>) =>
-      Math.round(((await queryDelta(fn)) - overhead) / proxyTransactionsPerQuery);
-    counts.push(["/api/groups", await measured(() => api("/api/groups", owner)), 1]);
-    counts.push(["/api/friends", await measured(() => api("/api/friends", owner)), 3]);
-    counts.push(["/api/groups/:id", await measured(() => api(`/api/groups/${g1.id}`, owner)), 2]);
-    counts.push(["/api/groups/:id/expenses", await measured(() => api(`/api/groups/${g1.id}/expenses?limit=10`, owner)), 2]);
-    counts.push(["/api/expenses", await measured(() => api("/api/expenses?limit=10", owner)), 1]);
-    counts.push(["/api/sync", await measured(() => api("/api/sync", owner)), 1]);
-    for (const [label, actual, expected] of counts) check(`query count ${label}`, actual, expected);
-  }
+  const counts: [string, number, number][] = [];
+  const overhead = await queryDelta(async () => {});
+  const proxyTransactionsPerQuery = Math.max(1, (await queryDelta(async () => { await sql`SELECT 1`; })) - overhead);
+  const measured = async (fn: () => Promise<unknown>) =>
+    Math.round(((await queryDelta(fn)) - overhead) / proxyTransactionsPerQuery);
+  counts.push(["/api/groups", await measured(() => api("/api/groups", owner)), 1]);
+  counts.push(["/api/friends", await measured(() => api("/api/friends", owner)), 3]);
+  counts.push(["/api/groups/:id", await measured(() => api(`/api/groups/${g1.id}`, owner)), 2]);
+  counts.push(["/api/groups/:id/expenses", await measured(() => api(`/api/groups/${g1.id}/expenses?limit=10`, owner)), 2]);
+  counts.push(["/api/expenses", await measured(() => api("/api/expenses?limit=10", owner)), 1]);
+  counts.push(["/api/sync", await measured(() => api("/api/sync", owner)), 1]);
+  for (const [label, actual, expected] of counts) check(`query count ${label}`, actual, expected);
 
   await cleanup();
   console.log(JSON.stringify({ passed, failed: failures.length, failures }, null, 2));
