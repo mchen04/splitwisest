@@ -88,7 +88,7 @@ for (const v of variants) {
     await page.getByRole("heading", { name: "drinks" }).first().scrollIntoViewIfNeeded().catch(() => {});
     await shot("unit-balances");
     await page.goto(`${origin}/groups`);
-    await page.getByText("Lake cabin").first().waitFor();
+    await page.getByText("Lake cabin").filter({ visible: true }).first().waitFor();
     await shot("groups-list");
     await page.goto(`${origin}/groups/${groupId}`);
     await page.getByText("Groceries").first().waitFor();
