@@ -29,6 +29,7 @@ Use `http://localhost:3391`. Opening Next through `127.0.0.1` can block its brow
 An occupied app port, existing instance record, or checkout dev lock stops launch.
 Do not reuse that instance or remove its lock. Finish the owning run first.
 Different checkouts require distinct `SPLITWISEST_VERIFY_PORT`, `SPLITWISEST_PG_PORT`, and `SPLITWISEST_PROXY_PORT` values.
+Set `SPLITWISEST_PG_CONTAINER` to reuse a running Postgres container with its proxy instead of `pnpm db:local`, for example when Docker has no room for new volumes.
 Two dev servers cannot safely share this checkout's `.next` directory.
 The helper stores its server PID and process start time outside the repo.
 

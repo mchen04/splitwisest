@@ -17,7 +17,7 @@ const evidence = resolve(work, "evidence");
 const statePath = resolve(work, "instance.json");
 const docker = existsSync("/Applications/Docker.app/Contents/Resources/bin/docker")
   ? "/Applications/Docker.app/Contents/Resources/bin/docker" : "docker";
-const container = `splitwisest-local-${hash}-postgres-1`;
+const container = process.env.SPLITWISEST_PG_CONTAINER ?? `splitwisest-local-${hash}-postgres-1`;
 const database = "splitwisest_money_qa";
 
 function run(command, args, env = process.env, transcript) {
@@ -82,7 +82,7 @@ async function launch() {
   };
   writeFileSync(statePath, JSON.stringify(state));
   const env = { ...environment(state), SPLITWISEST_PG_PORT: String(pgPort), SPLITWISEST_PROXY_PORT: String(proxyPort) };
-  run("pnpm", ["db:local"], env);
+  if (!process.env.SPLITWISEST_PG_CONTAINER) run("pnpm", ["db:local"], env);
   if (!psql(`SELECT 1 FROM pg_database WHERE datname = '${database}'`, true)) {
     psql(`CREATE DATABASE ${database}`);
     state.databaseCreated = true;
@@ -175,7 +175,8 @@ async function cleanup() {
   unlinkSync(statePath);
   const expected = ["after-form.png", "after-saved.png", "after-balances.png", "after-edit-reload.png", "money-form-proof.json"];
   const retained = expected.filter((file) => existsSync(resolve(evidence, file)));
-  console.log(`PASS cleanup: owned server removed; ${retained.length}/${expected.length} proof artifacts retained at ${evidence}`);
+  const units = existsSync(resolve(evidence, "units-ui")) ? "; unit screenshots retained in units-ui" : "";
+  console.log(`PASS cleanup: owned server removed; ${retained.length}/${expected.length} proof artifacts retained at ${evidence}${units}`);
 }
 
 const command = process.argv[2];
