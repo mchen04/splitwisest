@@ -442,7 +442,7 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
     <AppShell title={detail?.group.name ?? "Group"}>
       {query}
       <div className="@container mb-2.5 md:shrink-0">
-        <section className={`group-context group-hue-${groupId % 6} lg:@min-[45rem]:grid lg:@min-[45rem]:grid-cols-[minmax(min(14rem,30%),1fr)_auto_minmax(9rem,auto)] lg:@min-[45rem]:items-center lg:@min-[45rem]:gap-x-4`} aria-label="Current group">
+        <section className={`group-context group-hue-${groupId % 6} lg:@min-[44rem]:grid lg:@min-[44rem]:grid-cols-[minmax(min(14rem,30%),1fr)_auto_minmax(9rem,auto)] lg:@min-[44rem]:items-center lg:@min-[44rem]:gap-x-4`} aria-label="Current group">
           <div className="flex items-center gap-1.5">
             {detail ? (
               <div className="min-w-0 flex-1">
@@ -478,9 +478,9 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
           {/* The balance and the action it justifies share one row until the header is
               wide enough, in rem, for one grid row; then `contents` hands both to the grid.
               Measuring the header in rem keeps large text on the stacked layout. */}
-          <div className="mt-1.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 lg:@min-[45rem]:mt-0 lg:@min-[45rem]:contents">
+          <div className="mt-1.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 lg:@min-[44rem]:mt-0 lg:@min-[44rem]:contents">
             {detail ? (
-              <p className={`tnum whitespace-nowrap text-amount font-semibold tracking-tight lg:@min-[45rem]:whitespace-normal ${myGroupBalance > 0 ? "text-owed" : myGroupBalance < 0 ? "text-owe" : "text-[var(--group-ink)]"}`}>
+              <p className={`tnum whitespace-nowrap text-amount font-semibold tracking-tight lg:@min-[44rem]:whitespace-normal ${myGroupBalance > 0 ? "text-owed" : myGroupBalance < 0 ? "text-owe" : "text-[var(--group-ink)]"}`}>
                 {myGroupBalance === 0 ? (myUnitsOpen ? "Money settled" : "Settled up") : (
                   <>{myGroupBalance > 0 ? "Owed " : "You owe "}<Money cents={Math.abs(myGroupBalance)} currency={detail.group.currency} /></>
                 )}
@@ -494,7 +494,7 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
                  Button carries. Dropping the style when disabled lets that grey show. */
               variant="ghost"
               /* opacity is the one hover affordance an inline background cannot swallow. */
-              className="shrink-0 hover:opacity-90 lg:@min-[45rem]:w-full"
+              className="shrink-0 hover:opacity-90 lg:@min-[44rem]:w-full"
               style={canSettle ? { background: "var(--group-color)", color: "var(--color-white)" } : undefined}
               disabled={!canSettle}
               title={canSettle ? undefined : "Invite a friend first"}
@@ -508,7 +508,7 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
               type="button"
               onClick={() => setTab("balances")}
               title="Show who owes who"
-              className="mt-0.5 flex max-w-full flex-wrap gap-x-1.5 text-left text-body text-[var(--group-muted)] hover:underline lg:@min-[45rem]:col-span-full lg:@min-[45rem]:mt-0 lg:@min-[45rem]:justify-self-end"
+              className="mt-0.5 flex max-w-full flex-wrap gap-x-1.5 text-left text-body text-[var(--group-muted)] hover:underline lg:@min-[44rem]:col-span-full lg:@min-[44rem]:mt-0 lg:@min-[44rem]:justify-self-end"
             >
               {oneDirection && <span>{mySuggestions[0].from === me?.id ? "to" : "from"}</span>}
               {mySuggestions.slice(0, 3).map((s, i) => (

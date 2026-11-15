@@ -303,11 +303,13 @@ async function runFormerFlow() {
         title: title.getBoundingClientRect().width,
         mainOverflow: main.scrollWidth - main.clientWidth,
         sectionOverflow: section.scrollWidth - section.clientWidth,
+        display: getComputedStyle(section).display,
       };
     });
     assert(header.title >= 80, `${width} large text: group title stays readable (${Math.round(header.title)}px)`);
     assert(header.mainOverflow <= 1, `${width} large text: page does not scroll sideways (${header.mainOverflow}px)`);
     assert(header.sectionOverflow <= 1, `${width} large text: header content fits (${header.sectionOverflow}px)`);
+    assert.notEqual(header.display, "grid", `${width} large text: header stays stacked`);
     if (width === 1024) await layout("1024-former-open", true);
   }
   await layout("1280-former-open", true);
