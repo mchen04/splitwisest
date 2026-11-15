@@ -103,20 +103,33 @@ try {
   if (scenario === "isolation") {
     const a = await setup("a");
     const b = await setup("b");
+    const watch = (context, marker) => context.addInitScript((text) => {
+      const look = () => {
+        if (document.body?.innerText.includes(text)) sessionStorage.setItem("units-cache-seen", "1");
+      };
+      new MutationObserver(look).observe(document, { childList: true, subtree: true, characterData: true });
+    }, marker);
+    const seen = (page) => page.evaluate(() => sessionStorage.getItem("units-cache-seen") === "1");
     const control = await launch(b.owner.cookies);
     const build = await buildId(control.page);
+    const cachedName = `Cached only ${b.group.id}`;
     const ownSeed = JSON.stringify({
       owner: String(b.owner.id), build,
-      entries: [["/api/groups", { groups: [{ id: b.group.id, name: b.group.name, currency: "USD" }] }, Date.now()]],
+      entries: [["/api/groups", { groups: [{ id: b.group.id, name: cachedName, currency: "USD" }] }, Date.now()]],
     });
     await control.context.addInitScript((value) => {
-      localStorage.setItem("splitwisest.read-cache.v1", value);
+      if (!sessionStorage.getItem("units-cache-seeded")) {
+        sessionStorage.setItem("units-cache-seeded", "1");
+        localStorage.setItem("splitwisest.read-cache.v1", value);
+      }
     }, ownSeed);
+    await watch(control.context, cachedName);
     await control.page.goto(new URL("/groups", base).href, { waitUntil: "load" });
-    await control.page.waitForTimeout(1000);
-    const controlPainted = (await control.page.locator("body").innerText()).includes(b.group.name);
+    await control.page.waitForTimeout(1500);
+    const controlPainted = await seen(control.page);
     await control.context.close();
     const iso = await launch(b.owner.cookies);
+    await watch(iso.context, a.group.name);
     const seed = JSON.stringify({
       owner: String(a.owner.id), build,
       entries: [
@@ -127,8 +140,8 @@ try {
     await iso.page.goto(new URL("/offline.html", base).href, { waitUntil: "load" });
     await iso.page.evaluate((value) => localStorage.setItem("splitwisest.read-cache.v1", value), seed);
     await iso.page.goto(new URL("/groups", base).href, { waitUntil: "load" });
-    await iso.page.waitForTimeout(1000);
-    const leaked = (await iso.page.locator("body").innerText()).includes(a.group.name);
+    await iso.page.waitForTimeout(1500);
+    const leaked = await seen(iso.page);
     await api(`/api/groups/${b.group.id}/expenses`, b.owner.cookies, {
       title: "Isolation fresh proof", amountCents: 100, currency: "USD", unitId: b.unit.id,
       date: new Date().toISOString().slice(0, 10), payerId: b.owner.id, notes: "", splitMethod: "equal",
