@@ -804,13 +804,14 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
 
         {detail.unitBalances.map((unit) => {
           const rows = unit.reconcile ? unit.transfers : unit.obligations;
+          const formerOpen = unit.reconcile && unit.nets.reduce((sum, row) => sum + row.netCents, 0) !== 0;
+          const formerNote = `Some ${unit.name} is still open with someone who left. Turn off \u201cSimplify unit balances\u201d in group settings to record it.`;
           return (
             <Card key={unit.unitId}>
               <CardHeader title={unit.name} meta={unit.reconcile ? "simplified" : "not simplified"} />
+              {formerOpen && rows.length > 0 && <p className="px-4 pt-3 text-body text-ink-faint">{formerNote}</p>}
               {rows.length === 0 ? (
-                <p className="px-4 py-3 text-body text-ink-faint">{unit.reconcile && unit.nets.some((row) => row.netCents !== 0)
-                  ? `Some ${unit.name} is still open with someone who left. Turn off \u201cSimplify unit balances\u201d in group settings to record it.`
-                  : `Nobody owes any ${unit.name}.`}</p>
+                <p className="px-4 py-3 text-body text-ink-faint">{formerOpen ? formerNote : `Nobody owes any ${unit.name}.`}</p>
               ) : (
                 <ul className="divide-y divide-line">
                   {rows.map((row) => {
