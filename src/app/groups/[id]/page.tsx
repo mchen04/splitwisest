@@ -808,7 +808,9 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
             <Card key={unit.unitId}>
               <CardHeader title={unit.name} meta={unit.reconcile ? "simplified" : "not simplified"} />
               {rows.length === 0 ? (
-                <p className="px-4 py-3 text-body text-ink-faint">{`Nobody owes any ${unit.name}.`}</p>
+                <p className="px-4 py-3 text-body text-ink-faint">{unit.reconcile && unit.nets.some((row) => row.netCents !== 0)
+                  ? `Some ${unit.name} is still open with someone who left. Turn off \u201cSimplify unit balances\u201d in group settings to record it.`
+                  : `Nobody owes any ${unit.name}.`}</p>
               ) : (
                 <ul className="divide-y divide-line">
                   {rows.map((row) => {
@@ -1153,6 +1155,7 @@ function MemberNets({ balances, units, currency, meId, compact = false }: {
   balances: { userId: number; displayName: string; netCents: number }[];
   units: {
     reconcile: boolean;
+    nets?: { userId: number; netCents: number }[];
     transfers: { from: number; to: number; amountCents: number }[];
     obligations: { from: number; to: number; amountCents: number }[];
   }[];
@@ -1165,7 +1168,8 @@ function MemberNets({ balances, units, currency, meId, compact = false }: {
       {balances.map((b) => {
         const unitOpen = units.some((unit) => {
           const rows = unit.reconcile ? unit.transfers : unit.obligations;
-          return rows.some((row) => row.from === b.userId || row.to === b.userId);
+          return rows.some((row) => row.from === b.userId || row.to === b.userId)
+            || (unit.reconcile && (unit.nets ?? []).some((row) => row.userId === b.userId && row.netCents !== 0));
         });
         const settled = b.netCents === 0 && !unitOpen;
         return (

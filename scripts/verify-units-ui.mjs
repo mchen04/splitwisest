@@ -258,6 +258,41 @@ async function runFlow(width, height, label, { largeText = false } = {}) {
   results.push({ name: `${label}-flow`, groupId, unitName, passed: true });
 }
 
+async function runFormerFlow() {
+  const leaver = await signup("leaver");
+  const group = await createGroup("former");
+  await api("/api/groups/join", leaver.cookie, { code: (await api(`/api/groups/${group.id}`, owner.cookie)).group.inviteCode });
+  const unitName = `rounds ${suffix}`;
+  const unit = await api(`/api/groups/${group.id}/units`, owner.cookie, { name: unitName });
+  const spend = (cookie, payerId, people) => api(`/api/groups/${group.id}/expenses`, cookie, {
+    title: `Former ${payerId}`, amountCents: 1000, currency: "USD", unitId: unit.id, date: localToday(),
+    payerId, notes: "", splitMethod: "equal", participants: people.map((userId) => ({ userId })),
+  });
+  await spend(owner.cookie, owner.id, [owner.id, leaver.id]);
+  await spend(leaver.cookie, leaver.id, [leaver.id, friend.id]);
+  await api(`/api/groups/${group.id}/members/${leaver.id}`, owner.cookie, undefined, "DELETE");
+  await api(`/api/groups/${group.id}`, owner.cookie, { autoReconcileUnits: false }, "PATCH");
+  await api(`/api/groups/${group.id}/settlements`, friend.cookie, {
+    payerId: friend.id, recipientId: leaver.id, amountCents: 500, currency: "USD", unitId: unit.id,
+    date: localToday(), note: "",
+  });
+  await api(`/api/groups/${group.id}`, owner.cookie, { autoReconcileUnits: true }, "PATCH");
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await navigate(`${origin}/groups/${group.id}`);
+  await page.locator('[data-group-tab="balances"]:visible').click().catch(() => {});
+  const heading = page.getByRole("heading", { name: new RegExp(`^${unitName}\\s+simplified$`) });
+  await heading.waitFor();
+  const card = heading.locator("..").locator("..");
+  await card.scrollIntoViewIfNeeded();
+  const cardText = await card.innerText();
+  assert(cardText.includes("still open with someone who left"), "Unit card names the open former-member amount");
+  assert(!cardText.includes(`Nobody owes any ${unitName}`), "Unit card does not say nobody owes");
+  const body = await page.locator("main").innerText();
+  assert(body.includes("unit debt"), "Member list shows the owner's open unit amount");
+  await layout("1280-former-open", true);
+  results.push({ name: "former-open", groupId: group.id, unitName, passed: true });
+}
+
 try {
   const only = process.env.UNITS_UI_ONLY;
   const flows = [
@@ -273,6 +308,10 @@ try {
       await runFlow(width, height, label, options);
       ran.push(label);
     }
+  }
+  if (!only || only === "former") {
+    await runFormerFlow();
+    ran.push("former");
   }
   assert(ran.length > 0, "No flow selected");
   assert.deepEqual(errors, [], "No browser runtime errors");
