@@ -58,12 +58,17 @@ async function createUnitExpense(groupId, unitId, { title, amountCents, payerId 
     amountCents,
     currency: "USD",
     unitId,
-    date: new Date().toISOString().slice(0, 10),
+    date: localToday(),
     payerId,
     notes: "",
     splitMethod: "equal",
     participants: [{ userId: owner.id }, { userId: friend.id }],
   });
+}
+
+function localToday() {
+  const now = new Date();
+  return new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 }
 
 const executablePath = process.env.PLAYWRIGHT_WEBKIT_EXECUTABLE || (() => {
@@ -168,7 +173,7 @@ async function runFlow(width, height, label, { largeText = false } = {}) {
 
   await dialog.getByLabel("Amount", { exact: true }).fill("3");
   await dialog.getByLabel("Description", { exact: true }).fill(`Unit UI ${label} ${suffix}`);
-  await dialog.getByLabel("Date", { exact: true }).fill(new Date().toISOString().slice(0, 10));
+  await dialog.getByLabel("Date", { exact: true }).fill(localToday());
   if (largeText) await page.evaluate(() => { document.documentElement.style.fontSize = "150%"; });
   await footerReachable(dialog);
   await dialog.getByLabel("Unit", { exact: true }).scrollIntoViewIfNeeded();
@@ -180,7 +185,6 @@ async function runFlow(width, height, label, { largeText = false } = {}) {
   assert((await saved).ok(), "Unit expense saves");
   await dialog.waitFor({ state: "hidden" });
   assert.equal(await page.evaluate(() => document.activeElement?.closest('[role="dialog"]') === null), true, "Focus leaves the closed dialog");
-  if (largeText) await page.evaluate(() => { document.documentElement.style.fontSize = ""; });
 
   await page.locator('[data-group-tab="balances"]:visible').click();
   const unitHeading = page.getByRole("heading", { name: new RegExp(`^${unitName}\\s+simplified$`) });

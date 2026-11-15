@@ -27,7 +27,7 @@ import { ChatPane } from "@/components/chat";
 import { SpendCharts } from "@/components/spend-charts";
 import { ActivitySummary } from "@/components/activity-summary";
 import { Expense, Settlement, useGroupPageData } from "./use-group-page-data";
-import { formatUnitAmount, formatUnitQuantity, unitSummaryText } from "@/lib/units";
+import { formatUnitAmount, formatUnitQuantity } from "@/lib/units";
 
 type Tab = "expenses" | "balances" | "insights" | "chat" | "activity";
 type GroupBalanceSummary = { id: number; title: string; amountCents: number; updatedAt: string };
@@ -384,6 +384,9 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
     requestAnimationFrame(() => tablist?.querySelector<HTMLButtonElement>(`[data-group-tab="${next}"]`)?.focus());
   }
   const canSettle = (detail?.members.length ?? 0) >= 2;
+  const unitRows = detail?.unitBalances.flatMap((unit) => unit.reconcile ? unit.transfers : unit.obligations) ?? [];
+  const unitsOpen = unitRows.length > 0;
+  const myUnitsOpen = unitRows.some((row) => row.from === me?.id || row.to === me?.id);
   const myGroupBalance = me && detail
     ? detail.balances.find((balance) => balance.userId === me.id)?.netCents ?? 0
     : 0;
@@ -472,7 +475,7 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
         <div className="mt-1.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 lg:mt-0 lg:contents">
           {detail ? (
             <p className={`tnum whitespace-nowrap text-amount font-semibold tracking-tight ${myGroupBalance > 0 ? "text-owed" : myGroupBalance < 0 ? "text-owe" : "text-[var(--group-ink)]"}`}>
-              {myGroupBalance === 0 ? "Settled up" : (
+              {myGroupBalance === 0 ? (myUnitsOpen ? "Money settled" : "Settled up") : (
                 <>{myGroupBalance > 0 ? "Owed " : "You owe "}<Money cents={Math.abs(myGroupBalance)} currency={detail.group.currency} /></>
               )}
             </p>
@@ -764,7 +767,9 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
         <Card>
           <CardHeader title="Who owes who" />
           {detail.suggestions.length === 0 ? (
-            <EmptyState icon={<Scale className="h-6 w-6" />} title="All settled up" hint="Nobody owes anything in this group right now." />
+            unitsOpen
+              ? <EmptyState icon={<Scale className="h-6 w-6" />} title="No money owed" hint="Unit balances are listed below." />
+              : <EmptyState icon={<Scale className="h-6 w-6" />} title="All settled up" hint="Nobody owes anything in this group right now." />
           ) : (
             <ul className="divide-y divide-line">
               {detail.suggestions.map((s, i) => {
@@ -800,7 +805,7 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
             <Card key={unit.unitId}>
               <CardHeader title={unit.name} meta={unit.reconcile ? "simplified" : "not simplified"} />
               {rows.length === 0 ? (
-                <p className="px-4 py-3 text-body text-ink-faint">Nobody owes any {unit.name}.</p>
+                <p className="px-4 py-3 text-body text-ink-faint">{`Nobody owes any ${unit.name}.`}</p>
               ) : (
                 <ul className="divide-y divide-line">
                   {rows.map((row) => {
@@ -1181,14 +1186,21 @@ function UnitNets({ units, meId }: {
         const gross = unit.gross.find((row) => row.userId === meId);
         const owesCents = gross?.owesCents ?? 0;
         const owedCents = gross?.owedCents ?? 0;
-        const tone = unit.reconcile
-          ? netCents > 0 ? "text-owed" : netCents < 0 ? "text-owe" : "text-ink-faint"
-          : owesCents > 0 ? "text-owe" : owedCents > 0 ? "text-owed" : "text-ink-faint";
+        const parts = unit.reconcile
+          ? [netCents < 0 ? { text: `owes ${formatUnitQuantity(-netCents)}`, tone: "text-owe" } : null,
+            netCents > 0 ? { text: `owed ${formatUnitQuantity(netCents)}`, tone: "text-owed" } : null]
+          : [owesCents > 0 ? { text: `owes ${formatUnitQuantity(owesCents)}`, tone: "text-owe" } : null,
+            owedCents > 0 ? { text: `owed ${formatUnitQuantity(owedCents)}`, tone: "text-owed" } : null];
+        const shown = parts.filter((part): part is { text: string; tone: string } => part !== null);
         return (
-          <li key={unit.unitId} className="flex min-h-[var(--control-h-sm)] items-center gap-2 px-3 py-1 text-body">
-            <span className="min-w-0 flex-1 truncate font-medium" title={unit.name}>{unit.name}</span>
-            <span className={`tnum shrink-0 text-right font-semibold ${tone}`}>
-              {unitSummaryText({ reconcile: unit.reconcile, netCents, owesCents, owedCents })}
+          <li key={unit.unitId} className="flex min-h-[var(--control-h-sm)] flex-wrap items-center gap-x-2 px-3 py-1 text-body">
+            <span className="min-w-[5rem] flex-1 truncate font-medium" title={unit.name}>{unit.name}</span>
+            <span className="tnum ml-auto shrink-0 text-right font-semibold">
+              {shown.length === 0
+                ? <span className="text-ink-faint">settled</span>
+                : shown.map((part, index) => (
+                  <span key={part.text} className={part.tone}>{index > 0 ? " · " : ""}{part.text}</span>
+                ))}
             </span>
           </li>
         );

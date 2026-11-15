@@ -5,7 +5,7 @@ import { api, todayStr, fmtMoney, useFormState, amountInputToCents } from "@/lib
 import { Button, Field, Select, Modal, ErrorNote, toast } from "./ui";
 import { SettleFields } from "./settle-fields";
 import { Member } from "./expense-form";
-import { formatUnitAmount } from "@/lib/units";
+import { formatUnitAmount, formatUnitQuantity } from "@/lib/units";
 
 // Records an offline payment — purely a ledger entry, no money moves here.
 export function SettleModal({
@@ -160,21 +160,24 @@ export function SettleModal({
           currency={currency} setCurrency={setCurrency}
           date={date} setDate={setDate}
           note={note} setNote={setNote}
-          notePlaceholder="Paid in cash"
+          notePlaceholder={activeUnit ? "Optional" : "Paid in cash"}
           lockAmount={Boolean(prefill && !existing)}
           lockCurrency={Boolean(prefill && !existing)}
           showAmount={!(prefill && !existing)}
           unitName={activeUnit?.name ?? null}
         />
-        {activeUnit && <p className="text-meta text-ink-faint">Recording in {activeUnit.name}.</p>}
-        <p className="text-meta text-ink-faint">Records a payment made outside SplitWisest, such as cash or a bank transfer. No money moves.</p>
+        <p className="text-meta text-ink-faint">
+          {activeUnit
+            ? `Records ${activeUnit.name} paid back outside SplitWisest. Money balances do not change.`
+            : "Records a payment made outside SplitWisest, such as cash or a bank transfer. No money moves."}
+        </p>
         <ErrorNote message={error} />
         <div className="flex min-w-0 justify-end gap-2">
           <Button type="button" variant="secondary" onClick={onClose} className="shrink-0">
             Cancel
           </Button>
           <Button type="submit" busy={busy} data-autofocus className="min-w-0 !shrink">
-            <span className="truncate">{existing ? "Save changes" : `Record ${amount ? amountText(amountInputToCents(amount) ?? 0) : ""}`}</span>
+            <span className="truncate">{existing ? "Save changes" : `Record ${!amount ? "" : activeUnit ? formatUnitQuantity(amountInputToCents(amount) ?? 0) : amountText(amountInputToCents(amount) ?? 0)}`}</span>
           </Button>
         </div>
       </form>

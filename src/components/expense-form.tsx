@@ -613,7 +613,7 @@ export function ExpenseForm({
             <Users className="h-4 w-4 shrink-0" aria-hidden />
             <span className="sr-only">Group: </span>
             <span className="truncate font-semibold">{groupName}</span>
-            <span className="shrink-0 text-[var(--group-muted)]">· {groupCurrency}</span>
+            {unitId === null && <span className="shrink-0 text-[var(--group-muted)]">· {groupCurrency}</span>}
           </p>
         )}
 
@@ -650,7 +650,7 @@ export function ExpenseForm({
           </div>
           {unitId !== null && (
             <div className="flex flex-wrap items-end gap-2">
-              <div className="min-w-0 flex-1">
+              <div className="min-w-[12rem] flex-1">
                 <Field label="Unit">
                   <Select
                     id="expense-unit"
