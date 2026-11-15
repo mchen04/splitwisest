@@ -54,6 +54,7 @@ pnpm migrate:apply scripts/migrations/20261015_currency_balance_units.sql
 pnpm migrate:apply scripts/migrations/20261114_group_units.sql
 pnpm migrate:apply scripts/migrations/20261115_units_member_unsettled.sql
 pnpm migrate:apply scripts/migrations/20261115_units_obligation_sum.sql
+pnpm migrate:apply scripts/migrations/20261115_group_unit_people.sql
 ```
 
 These install group balance tables, allocation guards, create receipts, and whole-unit currency allocation.
@@ -61,6 +62,7 @@ The group units migration adds `group_units`, nullable `unit_id` columns, the gr
 It also replaces `group_balance_rows` so money sums skip unit rows.
 The member-unsettled migration makes cancelling-on leave checks follow net unit balances.
 The obligation-sum migration lets former-member unit repayments match the combined obligation view.
+The group-unit-people migration adds display names for former members to the existing unit data payload.
 Preserve the previous balance function before replacing it.
 Do not restore a function that ignores group balances while group balance entries exist.
 
