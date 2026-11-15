@@ -250,6 +250,12 @@ async function main() {
   const concurrent = await Promise.all(Array.from({ length: 6 }, () => createUnit(g1, owner, "points")));
   check("concurrent duplicate creates converge", new Set(concurrent.map((u: { id: number }) => u.id)).size, 1);
   check("concurrent duplicate creates leave one row", Number((await sql`SELECT count(*) FROM group_units WHERE group_id = ${g1.id} AND lower(btrim(name)) = 'points'`)[0].count), 1);
+  const concurrentRace = await Promise.all(Array.from({ length: 8 }, () => createUnit(g1, owner, "race-unit")));
+  check("concurrent identical creates return the same row", new Set(concurrentRace.map((u: { id: number }) => u.id)).size, 1);
+  check("concurrent identical creates log one add", Number((await sql`
+    SELECT count(*) FROM activity
+    WHERE group_id = ${g1.id} AND type = 'group_unit.added'
+      AND summary LIKE '%added the unit race-unit'`)[0].count), 1);
 
   const splitCases: { method: string; amountCents: number; extra: Body; expected: [number, number][] }[] = [
     { method: "equal", amountCents: 100, extra: {}, expected: byId([[owner.id, 34], [b.id, 33], [c.id, 33]]) },
