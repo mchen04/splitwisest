@@ -86,7 +86,10 @@ function friendGroupRows(
         WHERE them.group_id = g.id AND them.user_id = ${friendFilter}
       )
     )
-    SELECT gf.*, b.user_id, b.display_name, b.net_cents
+    SELECT gf.group_id, gf.group_name, gf.currency, gf.auto_reconcile_units,
+      CASE WHEN b.user_id = MIN(b.user_id) OVER (PARTITION BY gf.group_id)
+        THEN gf.unit_data END AS unit_data,
+      b.user_id, b.display_name, b.net_cents
     FROM groups_for_viewer gf
     CROSS JOIN LATERAL group_balance_rows(gf.group_id) b
     ORDER BY gf.group_id, b.user_id`;

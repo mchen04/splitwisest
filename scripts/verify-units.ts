@@ -27,6 +27,46 @@ const groups: Group[] = [];
 const byId = (rows: [number, number][]) => [...rows].sort((a, b) => a[0] - b[0]);
 const byTriple = (rows: [number, number, number][]) => [...rows].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
 
+function detailUnitSummary(detail: Body, viewerId: number) {
+  return (detail.unitBalances as Body[])
+    .map((unit) => {
+      const net = (unit.nets as Body[]).find((row) => Number(row.userId) === viewerId)?.netCents ?? 0;
+      const gross = (unit.gross as Body[]).find((row) => Number(row.userId) === viewerId) ?? { owesCents: 0, owedCents: 0 };
+      return {
+        unitId: Number(unit.unitId), name: unit.name, reconcile: unit.reconcile,
+        netCents: Number(net), owesCents: Number(gross.owesCents), owedCents: Number(gross.owedCents),
+      };
+    })
+    .filter((unit) => unit.reconcile
+      ? unit.netCents !== 0
+      : unit.owesCents !== 0 || unit.owedCents !== 0)
+    .sort((a, b) => a.unitId - b.unitId);
+}
+
+function detailUnitFriendObligations(detail: Body, viewerId: number, friendId: number) {
+  const rows: { unitId: number; unitName: string; netCents: number }[] = [];
+  for (const unit of detail.unitBalances as Body[]) {
+    const unitRows = (unit.reconcile ? unit.transfers : unit.obligations) as Body[];
+    for (const row of unitRows) {
+      if (Number(row.from) !== viewerId && Number(row.to) !== viewerId) continue;
+      const other = Number(row.from) === viewerId ? Number(row.to) : Number(row.from);
+      if (other !== friendId) continue;
+      rows.push({
+        unitId: Number(unit.unitId), unitName: String(unit.name),
+        netCents: Number(row.to) === viewerId ? Number(row.amountCents) : -Number(row.amountCents),
+      });
+    }
+  }
+  return rows.sort((a, b) => a.unitId - b.unitId || a.netCents - b.netCents);
+}
+
+function friendUnitObligations(friend: Body, groupId: number) {
+  return (friend.obligations as Body[])
+    .filter((row) => row.kind === "unit" && Number(row.groupId) === groupId)
+    .map((row) => ({ unitId: Number(row.unitId), unitName: String(row.unitName), netCents: Number(row.netCents) }))
+    .sort((a, b) => a.unitId - b.unitId || a.netCents - b.netCents);
+}
+
 function check(name: string, actual: unknown, expected: unknown) {
   try { assert.deepEqual(actual, expected); passed++; console.log(`PASS ${name}`); }
   catch { failures.push(name); console.error(`FAIL ${name}: actual=${JSON.stringify(actual)} expected=${JSON.stringify(expected)}`); }
@@ -294,6 +334,9 @@ async function main() {
   const offList = (await api("/api/groups", owner)).groups.find((row: { id: number }) => row.id === g1.id);
   const offListUnit = offList.unitNets.find((row: { unitId: number }) => row.unitId === offUnit.id);
   check("OFF mode group list keeps gross unit amounts", [offListUnit.reconcile, offListUnit.owesCents, offListUnit.owedCents], [false, 100, 200]);
+  check("OFF group list unit summary matches detail", offList.unitNets.slice().sort((a: { unitId: number }, b: { unitId: number }) => a.unitId - b.unitId), detailUnitSummary(detail, owner.id));
+  const offFriend = (await api("/api/friends", owner)).friends.find((row: { id: number }) => row.id === b.id);
+  check("OFF friend unit summary matches detail", friendUnitObligations(offFriend, g1.id), detailUnitFriendObligations(detail, owner.id, b.id));
 
   const offRepayment = await api(`/api/groups/${g1.id}/settlements`, b, {
     payerId: b.id, recipientId: owner.id, amountCents: 100, currency: g1.currency, unitId: offUnit.id, date: today, note: "repay",
@@ -321,6 +364,10 @@ async function main() {
   detail = await api(`/api/groups/${g1.id}`, owner);
   unit = detail.unitBalances.find((row: { name: string }) => row.name === "on");
   check("ON repayment nets against the unit", unit.nets.filter((row: { netCents: number }) => row.netCents !== 0).map((row: { userId: number; netCents: number }) => [row.userId, row.netCents]).sort((a: number[], b: number[]) => a[0] - b[0]), byId([[owner.id, 100], [c.id, -100]]));
+  const onList = (await api("/api/groups", owner)).groups.find((row: { id: number }) => row.id === g1.id);
+  check("ON group list unit summary matches detail", onList.unitNets.slice().sort((a: { unitId: number }, b: { unitId: number }) => a.unitId - b.unitId), detailUnitSummary(detail, owner.id));
+  const onFriend = (await api("/api/friends", owner)).friends.find((row: { id: number }) => row.id === b.id);
+  check("ON friend unit summary matches detail", friendUnitObligations(onFriend, g1.id), detailUnitFriendObligations(detail, owner.id, b.id));
 
   await api(`/api/groups/${g1.id}/settlements`, b, {
     payerId: b.id, recipientId: owner.id, amountCents: 500, currency: g1.currency, unitId: onUnit.id, date: today, note: "historic excess",
