@@ -684,7 +684,7 @@ async function suite() {
     await closeDraftSheet(page);
     await page.evaluate(({ key, value }) => localStorage.setItem(key, value), { key: draftKey, value: draftValue });
     const tapResponse = waitGroupResponse(page);
-    await page.getByRole("link", { name: new RegExp(group.name) }).first().click({ force: true });
+    await page.locator(`a[href="/groups/${group.id}"]`).first().click({ force: true });
     await page.waitForURL((url) => url.pathname === `/groups/${group.id}`, { timeout: 10000 }).catch(() => {});
     const tap = await check(page, await tapResponse, tapRestored);
     await shot(page, "2a");
