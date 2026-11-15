@@ -55,16 +55,15 @@ const oldDetail = (group) => ({
   members: [], balances: [], suggestions: [],
 });
 
-async function launch(cookies, seed) {
+async function launch(cookies) {
   const context = await webkit.launchPersistentContext(profile, {
     ...(devices["iPhone 16 Pro"] ?? devices["iPhone 15 Pro"]),
     serviceWorkers: "allow",
     ignoreHTTPSErrors: true,
   });
-  await context.addInitScript(({ seedValue }) => {
+  await context.addInitScript(() => {
     Object.defineProperty(navigator, "standalone", { get: () => true, configurable: true });
-    if (seedValue) localStorage.setItem("splitwisest.read-cache.v1", seedValue);
-  }, { seedValue: seed });
+  });
   await context.addCookies(cookies.map((cookie) => {
     const [pair] = cookie.split(";");
     const [name, ...value] = pair.split("=");
@@ -75,6 +74,13 @@ async function launch(cookies, seed) {
   }));
   const page = context.pages()[0] ?? await context.newPage();
   return { context, page };
+}
+
+async function buildId(page) {
+  await page.goto(new URL("/", base).href, { waitUntil: "load" });
+  const id = await page.evaluate(() => document.querySelector('meta[name="build-id"]')?.getAttribute("content") ?? "");
+  assert(id, "build-id meta tag was empty");
+  return id;
 }
 
 async function cleanup() {
@@ -96,14 +102,24 @@ try {
   if (scenario === "isolation") {
     const a = await setup("a");
     const b = await setup("b");
+    const { context, page } = await launch(b.owner.cookies);
+    const build = await buildId(page);
+    const ownSeed = JSON.stringify({
+      owner: String(b.owner.id), build,
+      entries: [["/api/groups", { groups: [{ id: b.group.id, name: b.group.name, currency: "USD" }] }, Date.now()]],
+    });
+    await page.evaluate((value) => localStorage.setItem("splitwisest.read-cache.v1", value), ownSeed);
+    await page.goto(new URL("/groups", base).href, { waitUntil: "load" });
+    await page.waitForTimeout(1000);
+    const controlPainted = (await page.locator("body").innerText()).includes(b.group.name);
     const seed = JSON.stringify({
-      owner: String(a.owner.id), build: process.env.SPLITWISEST_BUILD_ID ?? "",
+      owner: String(a.owner.id), build,
       entries: [
         ["/api/groups", { groups: [{ id: a.group.id, name: a.group.name, currency: "USD" }] }, Date.now()],
         [`/api/groups/${a.group.id}`, oldDetail(a.group), Date.now()],
       ],
     });
-    const { context, page } = await launch(b.owner.cookies, seed);
+    await page.evaluate((value) => localStorage.setItem("splitwisest.read-cache.v1", value), seed);
     await page.goto(new URL("/groups", base).href, { waitUntil: "load" });
     await page.waitForTimeout(1000);
     const leaked = (await page.locator("body").innerText()).includes(a.group.name);
@@ -115,22 +131,24 @@ try {
     await page.goto(new URL(`/groups/${b.group.id}`, base).href, { waitUntil: "load" });
     await page.waitForTimeout(1500);
     const fresh = (await page.locator("body").innerText()).includes("Isolation fresh proof");
-    detail = { leaked, fresh };
-    passed = !leaked && fresh;
+    detail = { controlPainted, leaked, fresh };
+    passed = controlPainted && !leaked && fresh;
     await context.close();
   } else {
     const data = await setup(scenario);
     const path = `/api/groups/${data.group.id}`;
+    const { context, page } = await launch(data.owner.cookies);
+    const build = await buildId(page);
     const seed = JSON.stringify({
-      owner: String(data.owner.id), entries: [[path, oldDetail(data.group), Date.now()]],
+      owner: String(data.owner.id), build, entries: [[path, oldDetail(data.group), Date.now()]],
     });
-    const { context, page } = await launch(data.owner.cookies, seed);
+    await page.evaluate((value) => localStorage.setItem("splitwisest.read-cache.v1", value), seed);
     await page.goto(new URL("/offline.html", base).href, { waitUntil: "load" });
     const seeded = await page.evaluate(() => localStorage.getItem("splitwisest.read-cache.v1"));
     assert.equal(seeded, seed, "seed was not present before app navigation");
     const requests = [];
     page.on("request", (request) => {
-      if (request.url().includes(path)) requests.push(request.url());
+      if (new URL(request.url()).pathname === path) requests.push(request.url());
     });
     await page.goto(new URL(`/groups/${data.group.id}`, base).href, { waitUntil: "load" });
     await page.waitForTimeout(2500);
