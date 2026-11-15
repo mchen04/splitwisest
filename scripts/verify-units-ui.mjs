@@ -84,7 +84,10 @@ const context = await browser.newContext({
 });
 await context.addInitScript(() => Object.defineProperty(navigator, "standalone", { get: () => true }));
 await context.addInitScript(() => {
-  if (sessionStorage.getItem("units-ui-large-text") === "1") document.documentElement.style.fontSize = "150%";
+  if (sessionStorage.getItem("units-ui-large-text") !== "1") return;
+  const apply = () => { document.documentElement.style.fontSize = "150%"; };
+  if (document.documentElement) apply();
+  else document.addEventListener("DOMContentLoaded", apply, { once: true });
 });
 const token = owner.cookie.split("=").slice(1).join("=");
 await context.addCookies([{ name: "sw_session", value: token, domain: new URL(origin).hostname, path: "/" }]);
