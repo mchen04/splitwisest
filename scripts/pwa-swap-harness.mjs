@@ -618,6 +618,7 @@ async function suite() {
       let controlled = false;
       let signedIn = false;
       try {
+        await target.getByText(group.name, { exact: false }).first().waitFor({ timeout: 10000 }).catch(() => {});
         body = await target.locator("body").innerText();
         draftKept = await target.evaluate((key) => Boolean(localStorage.getItem(key)), draftKey);
         controlled = await target.evaluate(() => Boolean(navigator.serviceWorker?.controller));
@@ -628,7 +629,7 @@ async function suite() {
         requested: Boolean(response),
         unitBalances: Array.isArray(data?.unitBalances),
         errorScreen: body.includes("This page couldn’t load"),
-        rendered: body.includes(group.name),
+        rendered: await target.getByText(group.name, { exact: false }).count() > 0,
         signedIn,
         draftKept,
         controlled,
@@ -637,7 +638,8 @@ async function suite() {
         && fields.rendered && fields.signedIn && fields.draftKept && fields.controlled };
     };
     const waitGroupResponse = (target) =>
-      target.waitForResponse((r) => r.request().method() === "GET" && r.url().includes(`/api/groups/${group.id}`), { timeout: 20000 })
+      target.waitForResponse((r) => r.request().method() === "GET"
+        && new URL(r.url()).pathname === `/api/groups/${group.id}`, { timeout: 20000 })
         .catch(() => null);
 
     await page.goto(`${ORIGIN}/groups`, { waitUntil: "load" });
