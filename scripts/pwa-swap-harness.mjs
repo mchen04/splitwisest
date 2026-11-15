@@ -79,12 +79,14 @@ function buildSlot(slot) {
   if (worktree) {
     const added = spawnSync("git", ["worktree", "add", "--detach", worktree, ref], { cwd: ROOT, stdio: "inherit" });
     if (added.status !== 0) throw new Error(`worktree ${ref} failed`);
-    const installed = spawnSync("pnpm", ["install", "--frozen-lockfile", "--prefer-offline"], {
+    spawnSync("pnpm", ["install", "--frozen-lockfile", "--prefer-offline"], {
       cwd: worktree,
       env: { ...process.env, CI: "1" },
       stdio: ["ignore", "inherit", "inherit"],
     });
-    if (installed.status !== 0 && installed.status !== 1) throw new Error(`dependencies ${slot} failed`);
+    if (!existsSync(join(worktree, "node_modules/.bin/next"))) {
+      throw new Error(`dependencies ${slot} failed`);
+    }
   }
   // A previous suite leaves .next as a symlink into a slot; building through
   // it would silently overwrite that slot and alias both builds to one dir.
@@ -117,13 +119,13 @@ function buildSlot(slot) {
     writeFileSync(join(dest, "harness-info.json"), JSON.stringify(info));
     return info;
   } finally {
-    if (readdirSync(join(ROOT, "node_modules")).length !== rootModules) {
-      throw new Error("root node_modules changed during build");
-    }
     if (worktree) {
       spawnSync("git", ["worktree", "remove", "--force", worktree], { cwd: ROOT, stdio: "ignore" });
       rmSync(worktree, { recursive: true, force: true });
       spawnSync("git", ["worktree", "prune"], { cwd: ROOT, stdio: "ignore" });
+    }
+    if (readdirSync(join(ROOT, "node_modules")).length !== rootModules) {
+      throw new Error("root node_modules changed during build");
     }
   }
 }
@@ -598,14 +600,9 @@ async function suite() {
     await page.waitForFunction((key) => Boolean(localStorage.getItem(key)), draftKey, { timeout: 10000 });
     const draftValue = await page.evaluate((key) => localStorage.getItem(key), draftKey);
     await page.getByRole("dialog").getByRole("button", { name: "Close" }).click();
+    await page.evaluate(({ key, value }) => localStorage.setItem(key, value), { key: draftKey, value: draftValue });
     await page.goto(`${ORIGIN}/groups`, { waitUntil: "load" });
     await sleep(1200);
-    const closeDraftSheet = async (target) => {
-      const close = target.getByRole("dialog").getByRole("button", { name: "Close" });
-      if (await close.count()) await close.first().click();
-    };
-    await closeDraftSheet(page);
-    await page.evaluate(({ key, value }) => localStorage.setItem(key, value), { key: draftKey, value: draftValue });
     const before = await page.evaluate(({ groupId, draftKey }) => {
       const raw = localStorage.getItem("splitwisest.read-cache.v1");
       const parsed = raw ? JSON.parse(raw) : null;
@@ -622,6 +619,16 @@ async function suite() {
       groupId: group.id, ...before,
     });
     const oldCache = await page.evaluate(() => localStorage.getItem("splitwisest.read-cache.v1"));
+    const restoreCache = async (target, value) => target.evaluate(({ cache, draftKey, draftValue }) => {
+      localStorage.setItem("splitwisest.read-cache.v1", cache);
+      localStorage.setItem(draftKey, draftValue);
+    }, { cache: value, draftKey, draftValue });
+    const restoredLacksUnitBalances = async (target) => target.evaluate((groupId) => {
+      const raw = localStorage.getItem("splitwisest.read-cache.v1");
+      const parsed = raw ? JSON.parse(raw) : null;
+      const entry = parsed?.entries?.find(([path]) => String(path).startsWith(`/api/groups/${groupId}`));
+      return Boolean(entry && !Object.prototype.hasOwnProperty.call(entry[1], "unitBalances"));
+    }, group.id);
     await swapTo("B");
     const check = async (target, response, restoredLackedUnitBalances) => {
       const data = response ? await response.json().catch(() => null) : null;
@@ -657,33 +664,35 @@ async function suite() {
         && new URL(r.url()).pathname === `/api/groups/${group.id}`, { timeout: 20000 })
         .catch(() => null);
 
+    await page.evaluate(({ key, value }) => localStorage.setItem(key, value), { key: draftKey, value: draftValue });
+    const tapRestored = await restoredLacksUnitBalances(page);
     await page.goto(`${ORIGIN}/groups`, { waitUntil: "load" });
-    await closeDraftSheet(page);
     await page.evaluate(({ key, value }) => localStorage.setItem(key, value), { key: draftKey, value: draftValue });
     const tapResponse = waitGroupResponse(page);
     await page.getByRole("link", { name: new RegExp(group.name) }).first().click({ force: true });
-    const tap = await check(page, await tapResponse, true);
+    const tap = await check(page, await tapResponse, tapRestored);
     record("units-cache-2a", tap.pass, { ...tap, path: "tap-from-list" });
 
-    await page.evaluate((value) => localStorage.setItem("splitwisest.read-cache.v1", value), oldCache);
+    await restoreCache(page, oldCache);
+    const reloadRestored = await restoredLacksUnitBalances(page);
     const reloadResponse = waitGroupResponse(page);
     await page.reload({ waitUntil: "load" });
-    const reload = await check(page, await reloadResponse, true);
+    const reload = await check(page, await reloadResponse, reloadRestored);
     record("units-cache-2b", reload.pass, { ...reload, path: "reload" });
 
     await app.ctx.close();
     app = await launchApp();
     await app.page.goto(ORIGIN + "/", { waitUntil: "load" });
-    await app.page.evaluate((value) => localStorage.setItem("splitwisest.read-cache.v1", value), oldCache);
+    await restoreCache(app.page, oldCache);
+    const coldRestored = await restoredLacksUnitBalances(app.page);
     const coldResponse = waitGroupResponse(app.page);
     await app.page.goto(groupUrl, { waitUntil: "load" });
     await app.page.waitForFunction(() => Boolean(navigator.serviceWorker?.controller), null, { timeout: 20000 }).catch(() => {});
-    await closeDraftSheet(app.page);
-    await app.page.evaluate(({ key, value }) => localStorage.setItem(key, value), { key: draftKey, value: draftValue });
-    const cold = await check(app.page, await coldResponse, true);
+    const cold = await check(app.page, await coldResponse, coldRestored);
     record("units-cache-2c", cold.pass, { ...cold, path: "cold-launch" });
 
-    await app.page.evaluate((value) => localStorage.setItem("splitwisest.read-cache.v1", value), oldCache);
+    await restoreCache(app.page, oldCache);
+    const updateRestored = await restoredLacksUnitBalances(app.page);
     const updateResponse = waitGroupResponse(app.page);
     await app.page.evaluate(() => navigator.serviceWorker?.getRegistration().then((r) => r?.update()));
     await app.page.evaluate(() => {
@@ -691,9 +700,7 @@ async function suite() {
       window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
     });
     await app.page.reload({ waitUntil: "load" });
-    await closeDraftSheet(app.page);
-    await app.page.evaluate(({ key, value }) => localStorage.setItem(key, value), { key: draftKey, value: draftValue });
-    const update = await check(app.page, await updateResponse, true);
+    const update = await check(app.page, await updateResponse, updateRestored);
     record("units-cache-2d", update.pass, { ...update, path: "worker-update-resume-reload" });
   }
 
