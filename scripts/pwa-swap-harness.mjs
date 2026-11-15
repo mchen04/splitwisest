@@ -661,7 +661,7 @@ async function suite() {
     await closeDraftSheet(page);
     await page.evaluate(({ key, value }) => localStorage.setItem(key, value), { key: draftKey, value: draftValue });
     const tapResponse = waitGroupResponse(page);
-    await page.getByRole("link", { name: new RegExp(group.name) }).first().click();
+    await page.getByRole("link", { name: new RegExp(group.name) }).first().click({ force: true });
     const tap = await check(page, await tapResponse, true);
     record("units-cache-2a", tap.pass, { ...tap, path: "tap-from-list" });
 
