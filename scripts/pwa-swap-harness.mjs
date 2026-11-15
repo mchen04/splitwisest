@@ -587,13 +587,23 @@ async function suite() {
     const groupUrl = `${ORIGIN}/groups/${group.id}`;
     await page.goto(`${groupUrl}?add=1`, { waitUntil: "load" });
     await page.waitForFunction(() => Boolean(navigator.serviceWorker?.controller), null, { timeout: 20000 }).catch(() => {});
+    if (!(await page.evaluate(() => Boolean(navigator.serviceWorker?.controller)))) {
+      await page.reload({ waitUntil: "load" });
+      await page.waitForFunction(() => Boolean(navigator.serviceWorker?.controller), null, { timeout: 20000 }).catch(() => {});
+    }
     await sleep(1500);
     const draftKey = `splitwisest.draft.${me.user.id}.expense`;
     await page.locator("#expense-title").fill("Cache draft survives");
     await page.locator("#expense-amount").fill("1.23");
     await page.waitForFunction((key) => Boolean(localStorage.getItem(key)), draftKey, { timeout: 10000 });
+    await page.getByRole("dialog").getByRole("button", { name: "Close" }).click();
     await page.goto(`${ORIGIN}/groups`, { waitUntil: "load" });
     await sleep(1200);
+    const closeDraftSheet = async (target) => {
+      const close = target.getByRole("dialog").getByRole("button", { name: "Close" });
+      if (await close.count()) await close.first().click();
+    };
+    await closeDraftSheet(page);
     const before = await page.evaluate(({ groupId, draftKey }) => {
       const raw = localStorage.getItem("splitwisest.read-cache.v1");
       const parsed = raw ? JSON.parse(raw) : null;
@@ -646,6 +656,7 @@ async function suite() {
         .catch(() => null);
 
     await page.goto(`${ORIGIN}/groups`, { waitUntil: "load" });
+    await closeDraftSheet(page);
     const tapResponse = waitGroupResponse(page);
     await page.getByRole("link", { name: new RegExp(group.name) }).first().click();
     const tap = await check(page, await tapResponse, true);
@@ -664,6 +675,7 @@ async function suite() {
     const coldResponse = waitGroupResponse(app.page);
     await app.page.goto(groupUrl, { waitUntil: "load" });
     await app.page.waitForFunction(() => Boolean(navigator.serviceWorker?.controller), null, { timeout: 20000 }).catch(() => {});
+    await closeDraftSheet(app.page);
     const cold = await check(app.page, await coldResponse, true);
     record("units-cache-2c", cold.pass, { ...cold, path: "cold-launch" });
 
@@ -675,6 +687,7 @@ async function suite() {
       window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
     });
     await app.page.reload({ waitUntil: "load" });
+    await closeDraftSheet(app.page);
     const update = await check(app.page, await updateResponse, true);
     record("units-cache-2d", update.pass, { ...update, path: "worker-update-resume-reload" });
   }
