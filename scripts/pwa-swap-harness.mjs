@@ -592,7 +592,7 @@ async function suite() {
     await page.locator("#expense-title").fill("Cache draft survives");
     await page.locator("#expense-amount").fill("1.23");
     await page.waitForFunction((key) => Boolean(localStorage.getItem(key)), draftKey, { timeout: 10000 });
-    await page.goto(groupUrl, { waitUntil: "load" });
+    await page.goto(`${ORIGIN}/groups`, { waitUntil: "load" });
     await sleep(1200);
     const before = await page.evaluate(({ groupId, draftKey }) => {
       const raw = localStorage.getItem("splitwisest.read-cache.v1");
@@ -659,6 +659,7 @@ async function suite() {
 
     await app.ctx.close();
     app = await launchApp();
+    await app.page.goto(ORIGIN + "/", { waitUntil: "load" });
     await app.page.evaluate((value) => localStorage.setItem("splitwisest.read-cache.v1", value), oldCache);
     const coldResponse = waitGroupResponse(app.page);
     await app.page.goto(groupUrl, { waitUntil: "load" });
