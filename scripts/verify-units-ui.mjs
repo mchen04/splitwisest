@@ -292,9 +292,30 @@ async function runFormerFlow() {
   assert(body.includes("unit debt"), "Member list shows the owner's open unit amount");
   assert(body.includes("Money settled"), "Header says only money is settled");
   assert(!body.includes("Nobody owes anything in this group"), "Money card does not say nobody owes anything");
-  const titleWidth = await page.locator('[aria-label="Current group"] button[aria-label^="Switch group"] span.truncate').first().evaluate((el) => el.getBoundingClientRect().width);
-  assert(titleWidth >= 80, `Group title stays readable beside the balance (${Math.round(titleWidth)}px)`);
+  for (const width of [1024, 1100, 1280]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.waitForTimeout(150);
+    const header = await page.evaluate(() => {
+      const main = document.querySelector("main");
+      const section = document.querySelector('[aria-label="Current group"]');
+      const title = section.querySelector('button[aria-label^="Switch group"] span.truncate');
+      return {
+        title: title.getBoundingClientRect().width,
+        mainOverflow: main.scrollWidth - main.clientWidth,
+        sectionOverflow: section.scrollWidth - section.clientWidth,
+      };
+    });
+    assert(header.title >= 80, `${width} large text: group title stays readable (${Math.round(header.title)}px)`);
+    assert(header.mainOverflow <= 1, `${width} large text: page does not scroll sideways (${header.mainOverflow}px)`);
+    assert(header.sectionOverflow <= 1, `${width} large text: header content fits (${header.sectionOverflow}px)`);
+    if (width === 1024) await layout("1024-former-open", true);
+  }
   await layout("1280-former-open", true);
+  await page.evaluate(() => { sessionStorage.removeItem("units-ui-large-text"); document.documentElement.style.fontSize = ""; });
+  await page.setViewportSize({ width: 1024, height: 900 });
+  await page.waitForTimeout(150);
+  const display = await page.locator('[aria-label="Current group"]').evaluate((el) => getComputedStyle(el).display);
+  assert.equal(display, "grid", "1024 normal text keeps the one-row desktop header");
   results.push({ name: "former-open", groupId: group.id, unitName, passed: true });
 }
 

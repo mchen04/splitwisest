@@ -441,87 +441,90 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
   return (
     <AppShell title={detail?.group.name ?? "Group"}>
       {query}
-      <section className={`group-context group-hue-${groupId % 6} mb-2.5 md:shrink-0 lg:grid lg:grid-cols-[minmax(min(14rem,30%),1fr)_auto_minmax(9rem,auto)] lg:items-center lg:gap-x-4`} aria-label="Current group">
-        <div className="flex items-center gap-1.5">
-          {detail ? (
-            <div className="min-w-0 flex-1">
-              <GroupSwitcher
-                currentId={groupId}
-                currentName={detail.group.name}
-                currency={detail.group.currency}
-                memberCount={detail.members.length}
-              />
-            </div>
-          ) : (
-            <div className="min-w-0 flex-1">
-              <div className="skeleton h-8 w-56" />
-            </div>
-          )}
-          <Menu
-            label="Group menu"
-            trigger={
-              <button type="button" aria-label="Group menu" className="group-context-control">
-                <MoreHorizontal className="h-5 w-5" />
-              </button>
-            }
-          >
-            {/* Items that need the loaded group stay disabled until it arrives,
-                instead of silently doing nothing on a fresh page. */}
-            <MenuItem icon={<Copy className="h-4 w-4" />} onClick={copyInviteLink} disabled={!detail}>Copy invite link</MenuItem>
-            <MenuItem icon={<RefreshCcw className="h-4 w-4" />} onClick={() => setRecurringListOpen(true)}>Recurring expenses</MenuItem>
-            <MenuItem icon={<Download className="h-4 w-4" />} onClick={() => { window.location.href = `/api/groups/${groupId}/export`; }}>Export CSV</MenuItem>
-            <MenuItem icon={<Settings className="h-4 w-4" />} onClick={() => setSettingsOpen(true)} disabled={!detail}>Group settings</MenuItem>
-          </Menu>
-        </div>
+      <div className="@container mb-2.5 md:shrink-0">
+        <section className={`group-context group-hue-${groupId % 6} lg:@min-[45rem]:grid lg:@min-[45rem]:grid-cols-[minmax(min(14rem,30%),1fr)_auto_minmax(9rem,auto)] lg:@min-[45rem]:items-center lg:@min-[45rem]:gap-x-4`} aria-label="Current group">
+          <div className="flex items-center gap-1.5">
+            {detail ? (
+              <div className="min-w-0 flex-1">
+                <GroupSwitcher
+                  currentId={groupId}
+                  currentName={detail.group.name}
+                  currency={detail.group.currency}
+                  memberCount={detail.members.length}
+                />
+              </div>
+            ) : (
+              <div className="min-w-0 flex-1">
+                <div className="skeleton h-8 w-56" />
+              </div>
+            )}
+            <Menu
+              label="Group menu"
+              trigger={
+                <button type="button" aria-label="Group menu" className="group-context-control">
+                  <MoreHorizontal className="h-5 w-5" />
+                </button>
+              }
+            >
+              {/* Items that need the loaded group stay disabled until it arrives,
+                  instead of silently doing nothing on a fresh page. */}
+              <MenuItem icon={<Copy className="h-4 w-4" />} onClick={copyInviteLink} disabled={!detail}>Copy invite link</MenuItem>
+              <MenuItem icon={<RefreshCcw className="h-4 w-4" />} onClick={() => setRecurringListOpen(true)}>Recurring expenses</MenuItem>
+              <MenuItem icon={<Download className="h-4 w-4" />} onClick={() => { window.location.href = `/api/groups/${groupId}/export`; }}>Export CSV</MenuItem>
+              <MenuItem icon={<Settings className="h-4 w-4" />} onClick={() => setSettingsOpen(true)} disabled={!detail}>Group settings</MenuItem>
+            </Menu>
+          </div>
 
-        {/* Below lg the balance and the action it justifies share one row.
-            `lg:contents` hands both straight to the section's grid at lg. */}
-        <div className="mt-1.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 lg:mt-0 lg:contents">
-          {detail ? (
-            <p className={`tnum whitespace-nowrap text-amount font-semibold tracking-tight lg:whitespace-normal ${myGroupBalance > 0 ? "text-owed" : myGroupBalance < 0 ? "text-owe" : "text-[var(--group-ink)]"}`}>
-              {myGroupBalance === 0 ? (myUnitsOpen ? "Money settled" : "Settled up") : (
-                <>{myGroupBalance > 0 ? "Owed " : "You owe "}<Money cents={Math.abs(myGroupBalance)} currency={detail.group.currency} /></>
-              )}
-            </p>
-          ) : (
-            <div className="skeleton h-8 w-44" />
-          )}
-          <Button
-            /* The group color is per-instance, so it comes in as an inline style:
-               a utility class for it loses to the shared disabled: styling that every
-               Button carries. Dropping the style when disabled lets that grey show. */
-            variant="ghost"
-            /* opacity is the one hover affordance an inline background cannot swallow. */
-            className="shrink-0 hover:opacity-90 lg:w-full"
-            style={canSettle ? { background: "var(--group-color)", color: "var(--color-white)" } : undefined}
-            disabled={!canSettle}
-            title={canSettle ? undefined : "Invite a friend first"}
-            onClick={openSettle}
-          >
-            <HandCoins className="h-4 w-4" /> Settle up
-          </Button>
-        </div>
-        {detail && mySuggestions.length > 0 && (
-          <button
-            type="button"
-            onClick={() => setTab("balances")}
-            title="Show who owes who"
-            className="mt-0.5 flex max-w-full flex-wrap gap-x-1.5 text-left text-body text-[var(--group-muted)] hover:underline lg:col-span-full lg:mt-0 lg:justify-self-end"
-          >
-            {oneDirection && <span>{mySuggestions[0].from === me?.id ? "to" : "from"}</span>}
-            {mySuggestions.slice(0, 3).map((s, i) => (
-              <span key={i} className="flex gap-x-1.5 whitespace-nowrap">
-                {i > 0 && <span aria-hidden>·</span>}
-                <span>
-                  {oneDirection ? "" : s.from === me?.id ? "to " : "from "}
-                  {memberName(s.from === me?.id ? s.to : s.from)} <span className="tnum font-semibold">{fmtMoney(s.amountCents, currency)}</span>
+          {/* The balance and the action it justifies share one row until the header is
+              wide enough, in rem, for one grid row; then `contents` hands both to the grid.
+              Measuring the header in rem keeps large text on the stacked layout. */}
+          <div className="mt-1.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 lg:@min-[45rem]:mt-0 lg:@min-[45rem]:contents">
+            {detail ? (
+              <p className={`tnum whitespace-nowrap text-amount font-semibold tracking-tight lg:@min-[45rem]:whitespace-normal ${myGroupBalance > 0 ? "text-owed" : myGroupBalance < 0 ? "text-owe" : "text-[var(--group-ink)]"}`}>
+                {myGroupBalance === 0 ? (myUnitsOpen ? "Money settled" : "Settled up") : (
+                  <>{myGroupBalance > 0 ? "Owed " : "You owe "}<Money cents={Math.abs(myGroupBalance)} currency={detail.group.currency} /></>
+                )}
+              </p>
+            ) : (
+              <div className="skeleton h-8 w-44" />
+            )}
+            <Button
+              /* The group color is per-instance, so it comes in as an inline style:
+                 a utility class for it loses to the shared disabled: styling that every
+                 Button carries. Dropping the style when disabled lets that grey show. */
+              variant="ghost"
+              /* opacity is the one hover affordance an inline background cannot swallow. */
+              className="shrink-0 hover:opacity-90 lg:@min-[45rem]:w-full"
+              style={canSettle ? { background: "var(--group-color)", color: "var(--color-white)" } : undefined}
+              disabled={!canSettle}
+              title={canSettle ? undefined : "Invite a friend first"}
+              onClick={openSettle}
+            >
+              <HandCoins className="h-4 w-4" /> Settle up
+            </Button>
+          </div>
+          {detail && mySuggestions.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setTab("balances")}
+              title="Show who owes who"
+              className="mt-0.5 flex max-w-full flex-wrap gap-x-1.5 text-left text-body text-[var(--group-muted)] hover:underline lg:@min-[45rem]:col-span-full lg:@min-[45rem]:mt-0 lg:@min-[45rem]:justify-self-end"
+            >
+              {oneDirection && <span>{mySuggestions[0].from === me?.id ? "to" : "from"}</span>}
+              {mySuggestions.slice(0, 3).map((s, i) => (
+                <span key={i} className="flex gap-x-1.5 whitespace-nowrap">
+                  {i > 0 && <span aria-hidden>·</span>}
+                  <span>
+                    {oneDirection ? "" : s.from === me?.id ? "to " : "from "}
+                    {memberName(s.from === me?.id ? s.to : s.from)} <span className="tnum font-semibold">{fmtMoney(s.amountCents, currency)}</span>
+                  </span>
                 </span>
-              </span>
-            ))}
-            {mySuggestions.length > 3 && <span className="whitespace-nowrap">· +{mySuggestions.length - 3} more</span>}
-          </button>
-        )}
-      </section>
+              ))}
+              {mySuggestions.length > 3 && <span className="whitespace-nowrap">· +{mySuggestions.length - 3} more</span>}
+            </button>
+          )}
+        </section>
+      </div>
 
       {/* Members rail (wide screens) — a nested sidebar instead of a full-width
           horizontal strip. Below lg it would squeeze the list, so member nets
