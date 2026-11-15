@@ -146,14 +146,10 @@ async function xact() {
 }
 
 async function queryDelta(fn: () => Promise<unknown>) {
-  let best = Number.POSITIVE_INFINITY;
-  for (let i = 0; i < 3; i++) {
-    const before = await xact();
-    await fn();
-    const after = await xact();
-    best = Math.min(best, after - before - 1);
-  }
-  return best;
+  const before = await xact();
+  await fn();
+  const after = await xact();
+  return after - before - 1;
 }
 
 async function moneySnapshot(group: Group) {
@@ -493,9 +489,60 @@ async function main() {
   }));
   const allowedOnRemoval = await request(`/api/groups/${removalOnGroup.id}/members/${b.id}`, owner, undefined, "DELETE");
   check("ON member removal allows net-zero pairwise debts", allowedOnRemoval.status, 200);
-  const blockedOff = await request(`/api/groups/${removalOnGroup.id}`, owner, { autoReconcileUnits: false }, "PATCH");
-  check("turning off is refused with former-member unit debt", blockedOff.status, 400);
-  check("turning off names former members", blockedOff.text.includes("former members"), true);
+
+  const formerGroup = await createGroup(owner, "USD", "Former");
+  await join(formerGroup, b, owner);
+  await join(formerGroup, c, owner);
+  const formerUnit = await createUnit(formerGroup, owner, "former drinks");
+  await api(`/api/groups/${formerGroup.id}/expenses`, owner, expenseBody(formerGroup, formerUnit.id, {
+    title: "Former A", amountCents: 1000, payerId: owner.id,
+    participants: [owner, b].map((u) => ({ userId: u.id })),
+  }));
+  await api(`/api/groups/${formerGroup.id}/expenses`, b, expenseBody(formerGroup, formerUnit.id, {
+    title: "Former B", amountCents: 1000, payerId: b.id,
+    participants: [b, c].map((u) => ({ userId: u.id })),
+  }));
+  const formerRemoval = await request(`/api/groups/${formerGroup.id}/members/${b.id}`, owner, undefined, "DELETE");
+  check("net-zero former member can leave", formerRemoval.status, 200);
+  const formerOff = await request(`/api/groups/${formerGroup.id}`, owner, { autoReconcileUnits: false }, "PATCH");
+  check("turning off succeeds with former-member unit debt", formerOff.status, 200);
+  detail = await api(`/api/groups/${formerGroup.id}`, owner);
+  unit = detail.unitBalances.find((row: { name: string }) => row.name === "former drinks");
+  check("former-member rows show after turning off", byTriple(unit.obligations.map((row: { from: number; to: number; amountCents: number }) => [row.from, row.to, row.amountCents])), byTriple([
+    [b.id, owner.id, 500], [c.id, b.id, 500],
+  ]));
+  const formerRepay = await request(`/api/groups/${formerGroup.id}/settlements`, c, {
+    payerId: c.id, recipientId: b.id, amountCents: 500, currency: formerGroup.currency,
+    unitId: formerUnit.id, date: today, note: "former repay",
+  });
+  check("current member can repay a former member", formerRepay.status, 200);
+  detail = await api(`/api/groups/${formerGroup.id}`, owner);
+  unit = detail.unitBalances.find((row: { name: string }) => row.name === "former drinks");
+  check("former-member repayment clears that row", byTriple(unit.obligations.map((row: { from: number; to: number; amountCents: number }) => [row.from, row.to, row.amountCents])), byTriple([[b.id, owner.id, 500]]));
+  const ownerFormerRepay = await request(`/api/groups/${formerGroup.id}/settlements`, owner, {
+    payerId: b.id, recipientId: owner.id, amountCents: 500, currency: formerGroup.currency,
+    unitId: formerUnit.id, date: today, note: "former repay 2",
+  });
+  check("recipient can record the former member's repayment", ownerFormerRepay.status, 200);
+  detail = await api(`/api/groups/${formerGroup.id}`, owner);
+  unit = detail.unitBalances.find((row: { name: string }) => row.name === "former drinks");
+  check("former-member rows clear", unit.obligations, []);
+  const nonSide = await request(`/api/groups/${formerGroup.id}/settlements`, c, {
+    payerId: b.id, recipientId: owner.id, amountCents: 100, currency: formerGroup.currency,
+    unitId: formerUnit.id, date: today, note: "non-side",
+  });
+  check("non-side member cannot record a former-member repayment", nonSide.status, 403);
+  const stranger = await signup("stranger");
+  const strangerRepay = await request(`/api/groups/${formerGroup.id}/settlements`, stranger, {
+    payerId: b.id, recipientId: owner.id, amountCents: 100, currency: formerGroup.currency,
+    unitId: formerUnit.id, date: today, note: "stranger",
+  });
+  check("stranger cannot record a former-member repayment", strangerRepay.status, 403);
+  const moneyFormer = await request(`/api/groups/${formerGroup.id}/settlements`, owner, {
+    payerId: b.id, recipientId: owner.id, amountCents: 100, currency: formerGroup.currency,
+    date: today, note: "money former",
+  });
+  check("money with a former member is refused", moneyFormer.status, 400);
 
   const friendBalancesAfter = await api("/api/friends", owner);
   const friendB = friendBalancesAfter.friends.find((row: { id: number }) => row.id === b.id);

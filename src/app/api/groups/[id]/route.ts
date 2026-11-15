@@ -4,6 +4,7 @@ import { z } from "zod";
 import { badRequest, handler, forbidden } from "@/lib/api";
 import { requireUser } from "@/lib/auth";
 import { suggestSettlements } from "@/lib/balances";
+import { sql } from "@/lib/db";
 import { materializeRecurring } from "@/lib/expenses";
 import {
   deleteGroup, parseGroupId, renameGroupWithActivity, requireGroupMember, requireGroupViewerVersions,
@@ -45,6 +46,15 @@ export const GET = privateHandler(async (req: NextRequest, { params }: Ctx) => {
       obligations: result.obligations,
     };
   });
+  const unitUserIds = [...new Set(unitBalances.flatMap((unit) => [
+    ...unit.nets.map((row) => row.userId),
+    ...unit.gross.map((row) => row.userId),
+  ]))];
+  const unitPeople = unitUserIds.length === 0 ? [] : (await sql`
+    SELECT id, display_name FROM users WHERE id = ANY(${unitUserIds})
+  `).map((row) => ({
+    userId: Number(row.id), displayName: String(row.display_name),
+  }));
 
   return privateJson(req, {
     group: {
@@ -61,6 +71,7 @@ export const GET = privateHandler(async (req: NextRequest, { params }: Ctx) => {
     suggestions,
     units: aggregate.units,
     unitBalances,
+    unitPeople,
   });
 });
 

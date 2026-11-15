@@ -96,15 +96,39 @@ export async function recordGroupSettlement(
       AND EXISTS (SELECT 1 FROM unit_gate)
       AND EXISTS (
         SELECT 1 FROM group_members
-        WHERE group_id = ${groupId} AND user_id = ${body.payerId}
-      )
-      AND EXISTS (
-        SELECT 1 FROM group_members
-        WHERE group_id = ${groupId} AND user_id = ${body.recipientId}
-      )
-      AND EXISTS (
-        SELECT 1 FROM group_members
         WHERE group_id = ${groupId} AND user_id = ${createdBy}
+      )
+      AND (
+        (
+          ${body.unitId ?? null}::bigint IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM groups WHERE id = ${groupId} AND auto_reconcile_units)
+          AND (
+            (
+              ${createdBy} = ${body.payerId}
+              AND NOT EXISTS (
+                SELECT 1 FROM group_members
+                WHERE group_id = ${groupId} AND user_id = ${body.recipientId}
+              )
+            )
+            OR (
+              ${createdBy} = ${body.recipientId}
+              AND NOT EXISTS (
+                SELECT 1 FROM group_members
+                WHERE group_id = ${groupId} AND user_id = ${body.payerId}
+              )
+            )
+          )
+        )
+        OR (
+          EXISTS (
+            SELECT 1 FROM group_members
+            WHERE group_id = ${groupId} AND user_id = ${body.payerId}
+          )
+          AND EXISTS (
+            SELECT 1 FROM group_members
+            WHERE group_id = ${groupId} AND user_id = ${body.recipientId}
+          )
+        )
       )
     ),
     s AS (
