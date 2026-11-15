@@ -39,3 +39,4 @@ Read the selected recipe before running it.
 - [Edit and reload](edit.md) covers unchanged saves and amount changes.
 - [Balances](balances.md) covers debt rows and whole-yen totals.
 - [Custom units](units.md) covers group units, auto-reconcile, unit repayments, and money isolation.
+- [Custom units](units.md) also covers the stale read-cache upgrade, injection, isolation, and negative control.

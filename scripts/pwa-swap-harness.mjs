@@ -535,6 +535,54 @@ async function suite() {
     return app;
   };
 
+  if (wants("units-cache")) {
+    const { page } = await relaunch({ fresh: true });
+    await page.goto(ORIGIN + "/", { waitUntil: "load" });
+    await login(page, creds);
+    const groups = await page.evaluate(() => fetch("/api/groups").then((r) => r.json()));
+    const group = groups.groups[0];
+    const groupUrl = `${ORIGIN}/groups/${group.id}`;
+    await page.goto(groupUrl, { waitUntil: "load" });
+    await sleep(1500);
+    const oldCache = await page.evaluate(() => localStorage.getItem("splitwisest.read-cache.v1"));
+    await swapTo("B");
+    const requests = [];
+    page.on("request", (request) => {
+      if (request.url().includes(`/api/groups/${group.id}`)) requests.push(request.url());
+    });
+    await page.reload({ waitUntil: "load" });
+    await sleep(2500);
+    const body = await page.locator("body").innerText();
+    const signedIn = !page.url().includes("/login");
+    const fresh = requests.length > 0 && !body.includes("This page couldn’t load") && body.includes(group.name);
+    record("units-cache", Boolean(oldCache) && fresh && signedIn, {
+      groupId: group.id, oldCache: Boolean(oldCache), requests: requests.length, signedIn,
+    });
+    await app.ctx.close();
+    app = await launchApp();
+    const coldRequests = [];
+    app.page.on("request", (request) => {
+      if (request.url().includes(`/api/groups/${group.id}`)) coldRequests.push(request.url());
+    });
+    await app.page.goto(groupUrl, { waitUntil: "load" });
+    await sleep(2500);
+    const coldBody = await app.page.locator("body").innerText();
+    record("units-cache-cold", coldRequests.length > 0 && !coldBody.includes("This page couldn’t load") && coldBody.includes(group.name), {
+      groupId: group.id, requests: coldRequests.length, signedIn: !app.page.url().includes("/login"),
+    });
+    await app.page.evaluate(() => navigator.serviceWorker?.getRegistration().then((r) => r?.update()));
+    await app.page.evaluate(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+      window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+    });
+    await app.page.reload({ waitUntil: "load" });
+    await sleep(2500);
+    const updateBody = await app.page.locator("body").innerText();
+    record("units-cache-update", !updateBody.includes("This page couldn’t load") && updateBody.includes(group.name), {
+      groupId: group.id, signedIn: !app.page.url().includes("/login"),
+    });
+  }
+
   // S1: first install — launch at start_url, log in, worker installs, no reload.
   if (wants("install-fresh")) {
     const { page } = await relaunch({ fresh: true });

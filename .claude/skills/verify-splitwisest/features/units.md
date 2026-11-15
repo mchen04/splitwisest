@@ -56,3 +56,39 @@ End state that proves the feature:
 - A unit name up to 40 characters must not push row amounts or sheet buttons off screen at 320 wide.
 - The OFF-mode repayment check runs inside the group-locked transaction. Test it with concurrent requests, not sequential ones.
 - Run the WebKit matrix and the full suite on the compute machine, not on the coding Mac.
+
+## Stale read-cache upgrade
+
+Persisted reads live in `localStorage["splitwisest.read-cache.v1"]` as `{ owner, build, entries }`.
+`build` is `NEXT_PUBLIC_BUILD_ID`. Hydration discards the whole entry when the build is missing or differs, or when the owner cookie differs.
+The cache-owner cookie, session cookie, drafts (`splitwisest.draft.*`), push device (`splitwisest.push-device`), and server notification outbox are separate and are not cleared by this check.
+
+Run the genuine two-build upgrade on the compute machine:
+
+```sh
+node scripts/pwa-swap-harness.mjs build
+node scripts/pwa-swap-harness.mjs suite --scenario units-cache
+```
+
+The harness builds `4b2480f` as A and this tree as B, serves both on one local HTTPS origin, signs in on A, opens a money group, swaps to B, then checks the stale entry, cold launch, worker update, resume, and reload.
+Each scenario prints one JSON line and the command exits nonzero on failure.
+
+Run stale-cache injection, account isolation, and the negative control against a running build:
+
+```sh
+SPLITWISEST_BROWSER_URL=http://localhost:3391 \
+PLAYWRIGHT_BROWSERS_PATH="$HOME/Library/Caches/ms-playwright" \
+node .claude/skills/verify-splitwisest/scripts/verify-units-cache.mjs inject
+
+SPLITWISEST_BROWSER_URL=http://localhost:3391 \
+PLAYWRIGHT_BROWSERS_PATH="$HOME/Library/Caches/ms-playwright" \
+node .claude/skills/verify-splitwisest/scripts/verify-units-cache.mjs isolation
+
+SPLITWISEST_BROWSER_URL=https://localhost:3311 \
+PLAYWRIGHT_BROWSERS_PATH="$HOME/Library/Caches/ms-playwright" \
+node .claude/skills/verify-splitwisest/scripts/verify-units-cache.mjs negative
+```
+
+`inject` seeds a build-less v1 group detail and requires a fresh `/api/groups/:id` request, a rendered group, and a signed-in session.
+`isolation` seeds another account's entry and requires it not to paint.
+`negative` runs against the old build and passes only when the stale entry paints, proving the check goes red on `1c6a729` behavior.
