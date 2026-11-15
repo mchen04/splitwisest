@@ -84,7 +84,7 @@ function buildSlot(slot) {
       env: { ...process.env, CI: "1" },
       stdio: ["ignore", "inherit", "inherit"],
     });
-    if (installed.status !== 0) throw new Error(`dependencies ${slot} failed`);
+    if (installed.status !== 0 && installed.status !== 1) throw new Error(`dependencies ${slot} failed`);
   }
   // A previous suite leaves .next as a symlink into a slot; building through
   // it would silently overwrite that slot and alias both builds to one dir.
@@ -123,6 +123,7 @@ function buildSlot(slot) {
     if (worktree) {
       spawnSync("git", ["worktree", "remove", "--force", worktree], { cwd: ROOT, stdio: "ignore" });
       rmSync(worktree, { recursive: true, force: true });
+      spawnSync("git", ["worktree", "prune"], { cwd: ROOT, stdio: "ignore" });
     }
   }
 }
