@@ -101,3 +101,4 @@ node .claude/skills/verify-splitwisest/scripts/verify-units-cache.mjs negative
 `inject` seeds a build-less v1 group detail and requires a fresh `/api/groups/:id` request, a rendered group, and a signed-in session.
 `isolation` seeds another account's entry and requires it not to paint.
 `negative` runs against the old build and passes only when the stale entry causes no fresh `/api/groups/:id` request or the crash screen, proving the check goes red on `1c6a729` behavior.
+The script prints only user, group, and expense ids. Synthetic users cannot be deleted through the app, so their ids are listed for guarded cleanup; groups and expenses are deleted through the app's own delete paths.

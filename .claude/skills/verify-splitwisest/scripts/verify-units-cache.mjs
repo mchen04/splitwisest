@@ -11,6 +11,8 @@ const profile = mkdtempSync(join(tmpdir(), "splitwisest-units-cache-"));
 const password = "cache-check-password";
 const created = { users: [], groups: [], expenses: [] };
 const deleted = { groups: [], expenses: [] };
+const cleanupGroups = [];
+const cleanupExpenses = [];
 let passed = false;
 let detail = {};
 
@@ -35,14 +37,16 @@ async function setup(label) {
   const owner = { id: Number(me.json.user.id), cookies: signup.cookies };
   created.users.push(owner.id);
   const group = await api("/api/groups", owner.cookies, { name: `Cache group ${label} ${suffix}`, currency: "USD" });
-  created.groups.push({ id: group.json.id, owner });
+  created.groups.push(group.json.id);
+  cleanupGroups.push({ id: group.json.id, owner });
   const unit = await api(`/api/groups/${group.json.id}/units`, owner.cookies, { name: `cache-unit-${label}` });
   const expense = await api(`/api/groups/${group.json.id}/expenses`, owner.cookies, {
     title: `Fresh cache proof ${label}`, amountCents: 100, currency: "USD", unitId: unit.json.id,
     date: new Date().toISOString().slice(0, 10), payerId: owner.id, notes: "", splitMethod: "equal",
     participants: [{ userId: owner.id }],
   });
-  created.expenses.push({ id: expense.json.id, owner });
+  created.expenses.push(expense.json.id);
+  cleanupExpenses.push({ id: expense.json.id, owner });
   return { owner, group: group.json, unit: unit.json, expense: expense.json };
 }
 
@@ -74,13 +78,13 @@ async function launch(cookies, seed) {
 }
 
 async function cleanup() {
-  for (const group of created.groups) {
+  for (const group of cleanupGroups) {
     try {
       await api(`/api/groups/${group.id}`, group.owner.cookies, undefined, "DELETE");
       deleted.groups.push(group.id);
     } catch {}
   }
-  for (const expense of created.expenses) {
+  for (const expense of cleanupExpenses) {
     try {
       await api(`/api/expenses/${expense.id}`, expense.owner.cookies, undefined, "DELETE");
       deleted.expenses.push(expense.id);
