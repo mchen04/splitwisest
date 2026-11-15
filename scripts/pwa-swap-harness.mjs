@@ -665,6 +665,7 @@ async function suite() {
         && fields.rendered && fields.signedIn && fields.draftKept && fields.controlled
         && fields.restoredLackedUnitBalances };
     };
+    const shot = (target, name) => target.screenshot({ path: join(HDIR, `units-cache-${name}-${SHAS.B.slice(0, 7)}.png`) }).catch(() => {});
     const waitGroupResponse = (target) =>
       target.waitForResponse((r) => r.request().method() === "GET"
         && new URL(r.url()).pathname === `/api/groups/${group.id}`, { timeout: 20000 })
@@ -677,6 +678,7 @@ async function suite() {
     const tapResponse = waitGroupResponse(page);
     await page.getByRole("link", { name: new RegExp(group.name) }).first().click({ force: true });
     const tap = await check(page, await tapResponse, tapRestored);
+    await shot(page, "2a");
     record("units-cache-2a", tap.pass, { ...tap, path: "tap-from-list" });
 
     await restoreCache(page, oldCache);
@@ -684,6 +686,7 @@ async function suite() {
     const reloadResponse = waitGroupResponse(page);
     await page.reload({ waitUntil: "load" });
     const reload = await check(page, await reloadResponse, reloadRestored);
+    await shot(page, "2b");
     record("units-cache-2b", reload.pass, { ...reload, path: "reload" });
 
     await app.ctx.close();
@@ -695,6 +698,7 @@ async function suite() {
     await app.page.goto(groupUrl, { waitUntil: "load" });
     await app.page.waitForFunction(() => Boolean(navigator.serviceWorker?.controller), null, { timeout: 20000 }).catch(() => {});
     const cold = await check(app.page, await coldResponse, coldRestored);
+    await shot(app.page, "2c");
     record("units-cache-2c", cold.pass, { ...cold, path: "cold-launch" });
 
     await restoreCache(app.page, oldCache);
@@ -707,6 +711,7 @@ async function suite() {
     });
     await app.page.reload({ waitUntil: "load" });
     const update = await check(app.page, await updateResponse, updateRestored);
+    await shot(app.page, "2d");
     record("units-cache-2d", update.pass, { ...update, path: "worker-update-resume-reload" });
   }
 
