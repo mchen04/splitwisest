@@ -441,7 +441,7 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
   return (
     <AppShell title={detail?.group.name ?? "Group"}>
       {query}
-      <section className={`group-context group-hue-${groupId % 6} mb-2.5 md:shrink-0 lg:grid lg:grid-cols-[minmax(0,1fr)_auto_minmax(9rem,auto)] lg:items-center lg:gap-x-4`} aria-label="Current group">
+      <section className={`group-context group-hue-${groupId % 6} mb-2.5 md:shrink-0 lg:grid lg:grid-cols-[minmax(min(14rem,30%),1fr)_auto_minmax(9rem,auto)] lg:items-center lg:gap-x-4`} aria-label="Current group">
         <div className="flex items-center gap-1.5">
           {detail ? (
             <div className="min-w-0 flex-1">
@@ -478,7 +478,7 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
             `lg:contents` hands both straight to the section's grid at lg. */}
         <div className="mt-1.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 lg:mt-0 lg:contents">
           {detail ? (
-            <p className={`tnum whitespace-nowrap text-amount font-semibold tracking-tight ${myGroupBalance > 0 ? "text-owed" : myGroupBalance < 0 ? "text-owe" : "text-[var(--group-ink)]"}`}>
+            <p className={`tnum whitespace-nowrap text-amount font-semibold tracking-tight lg:whitespace-normal ${myGroupBalance > 0 ? "text-owed" : myGroupBalance < 0 ? "text-owe" : "text-[var(--group-ink)]"}`}>
               {myGroupBalance === 0 ? (myUnitsOpen ? "Money settled" : "Settled up") : (
                 <>{myGroupBalance > 0 ? "Owed " : "You owe "}<Money cents={Math.abs(myGroupBalance)} currency={detail.group.currency} /></>
               )}

@@ -279,6 +279,7 @@ async function runFormerFlow() {
   await api(`/api/groups/${group.id}`, owner.cookie, { autoReconcileUnits: true }, "PATCH");
   await page.setViewportSize({ width: 1280, height: 900 });
   await navigate(`${origin}/groups/${group.id}`);
+  await page.evaluate(() => { sessionStorage.setItem("units-ui-large-text", "1"); document.documentElement.style.fontSize = "150%"; });
   await page.locator('[data-group-tab="balances"]:visible').click().catch(() => {});
   const heading = page.getByRole("heading", { name: new RegExp(`^${unitName}\\s+simplified$`) });
   await heading.waitFor();
@@ -291,6 +292,8 @@ async function runFormerFlow() {
   assert(body.includes("unit debt"), "Member list shows the owner's open unit amount");
   assert(body.includes("Money settled"), "Header says only money is settled");
   assert(!body.includes("Nobody owes anything in this group"), "Money card does not say nobody owes anything");
+  const titleWidth = await page.locator('[aria-label="Current group"] button[aria-label^="Switch group"] span.truncate').first().evaluate((el) => el.getBoundingClientRect().width);
+  assert(titleWidth >= 80, `Group title stays readable beside the balance (${Math.round(titleWidth)}px)`);
   await layout("1280-former-open", true);
   results.push({ name: "former-open", groupId: group.id, unitName, passed: true });
 }
