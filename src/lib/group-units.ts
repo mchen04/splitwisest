@@ -12,8 +12,17 @@ export async function createGroupUnit(groupId: number, userId: number, rawName: 
     WITH ins AS (
       INSERT INTO group_units (group_id, name, created_by)
       VALUES (${groupId}, ${name}, ${userId})
-      ON CONFLICT (group_id, lower(btrim(name))) DO UPDATE SET name = group_units.name
+      ON CONFLICT (group_id, lower(btrim(name))) DO NOTHING
       RETURNING id, name
+    ),
+    existing AS (
+      SELECT id, name FROM group_units
+      WHERE group_id = ${groupId} AND lower(btrim(name)) = lower(btrim(${name}))
+    ),
+    unit AS (
+      SELECT id, name FROM ins
+      UNION ALL
+      SELECT id, name FROM existing WHERE NOT EXISTS (SELECT 1 FROM ins)
     ),
     a AS (
       INSERT INTO activity (group_id, actor_id, type, summary, data)
@@ -23,7 +32,7 @@ export async function createGroupUnit(groupId: number, userId: number, rawName: 
       FROM ins
       RETURNING 1
     )
-    SELECT id, name FROM ins`,
+    SELECT id, name FROM unit`,
   ]);
   return { id: Number(rows[0].id), name: rows[0].name as string };
 }
