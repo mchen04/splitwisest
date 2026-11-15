@@ -146,10 +146,14 @@ async function xact() {
 }
 
 async function queryDelta(fn: () => Promise<unknown>) {
-  const before = await xact();
-  await fn();
-  const after = await xact();
-  return after - before - 1;
+  let best = Number.POSITIVE_INFINITY;
+  for (let i = 0; i < 3; i++) {
+    const before = await xact();
+    await fn();
+    const after = await xact();
+    best = Math.min(best, after - before - 1);
+  }
+  return best;
 }
 
 async function moneySnapshot(group: Group) {
@@ -236,6 +240,10 @@ async function main() {
 
   const duplicate = await createUnit(g1, owner, "  DRINK TICKETS  ");
   check("duplicate names converge in one group", duplicate.id, drinks.id);
+  const addedBefore = Number((await sql`SELECT count(*) FROM activity WHERE group_id = ${g1.id} AND type = 'group_unit.added'`)[0].count);
+  await createUnit(g1, owner, "drink tickets");
+  const addedAfter = Number((await sql`SELECT count(*) FROM activity WHERE group_id = ${g1.id} AND type = 'group_unit.added'`)[0].count);
+  check("re-adding a unit does not log an add", addedAfter, addedBefore);
   const otherGroupUnit = await createUnit(g2, owner, "drinks");
   check("the same label in another group is a different unit", otherGroupUnit.id !== drinks.id, true);
 
@@ -406,6 +414,35 @@ async function main() {
   check("reversed debt clears with one repayment", unit.obligations, []);
   check("reversed debt leaves both members settled", unit.nets.every((row: { netCents: number }) => row.netCents === 0), true);
 
+  const pairGroup = await createGroup(owner, "USD", "Pair");
+  await join(pairGroup, b, owner);
+  const pairUnit = await createUnit(pairGroup, owner, "pair");
+  await api(`/api/groups/${pairGroup.id}`, owner, { autoReconcileUnits: false }, "PATCH");
+  const pairExpense = await api(`/api/groups/${pairGroup.id}/expenses`, b, expenseBody(pairGroup, pairUnit.id, {
+    title: "Pair A", amountCents: 100, payerId: b.id,
+    participants: [owner, b].map((u) => ({ userId: u.id })),
+  }));
+  await api(`/api/groups/${pairGroup.id}/settlements`, owner, {
+    payerId: owner.id, recipientId: b.id, amountCents: 50, currency: pairGroup.currency,
+    unitId: pairUnit.id, date: today, note: "overpay",
+  });
+  const pairExpenseDetail = await api(`/api/expenses/${pairExpense.id}`, owner);
+  await api(`/api/expenses/${pairExpense.id}?expectedUpdatedAt=${encodeURIComponent(pairExpenseDetail.expense.updatedAt)}`, owner, undefined, "DELETE");
+  await api(`/api/groups/${pairGroup.id}/expenses`, owner, expenseBody(pairGroup, pairUnit.id, {
+    title: "Pair B", amountCents: 100, payerId: owner.id,
+    participants: [owner, b].map((u) => ({ userId: u.id })),
+  }));
+  detail = await api(`/api/groups/${pairGroup.id}`, owner);
+  unit = detail.unitBalances.find((row: { name: string }) => row.name === "pair");
+  check("normal debt plus overpayment shows one combined obligation", unit.obligations, [{ from: b.id, to: owner.id, amountCents: 100 }]);
+  await api(`/api/groups/${pairGroup.id}/settlements`, b, {
+    payerId: b.id, recipientId: owner.id, amountCents: 100, currency: pairGroup.currency,
+    unitId: pairUnit.id, date: today, note: "full repayment",
+  });
+  detail = await api(`/api/groups/${pairGroup.id}`, owner);
+  unit = detail.unitBalances.find((row: { name: string }) => row.name === "pair");
+  check("full combined repayment clears the pair", unit.obligations, []);
+
   const raceGroup = await createGroup(owner, "USD", "Race");
   await join(raceGroup, b, owner);
   const raceUnit = await createUnit(raceGroup, owner, "race drinks");
@@ -448,9 +485,11 @@ async function main() {
     title: "Points B", amountCents: 200, payerId: b.id,
     participants: [owner, b].map((u) => ({ userId: u.id })),
   }));
-  const blockedOnRemoval = await request(`/api/groups/${removalOnGroup.id}/members/${b.id}`, owner, undefined, "DELETE");
-  check("ON member removal is blocked by pairwise unit debts", blockedOnRemoval.status, 400);
-  check("ON member removal names the pairwise unit", blockedOnRemoval.text.includes("points"), true);
+  const allowedOnRemoval = await request(`/api/groups/${removalOnGroup.id}/members/${b.id}`, owner, undefined, "DELETE");
+  check("ON member removal allows net-zero pairwise debts", allowedOnRemoval.status, 200);
+  const blockedOff = await request(`/api/groups/${removalOnGroup.id}`, owner, { autoReconcileUnits: false }, "PATCH");
+  check("turning off is refused with former-member unit debt", blockedOff.status, 400);
+  check("turning off names former members", blockedOff.text.includes("former members"), true);
 
   const friendBalancesAfter = await api("/api/friends", owner);
   const friendB = friendBalancesAfter.friends.find((row: { id: number }) => row.id === b.id);

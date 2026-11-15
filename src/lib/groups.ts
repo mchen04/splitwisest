@@ -1,5 +1,5 @@
 import { sql } from "./db";
-import { forbidden, notFound } from "./api";
+import { badRequest, forbidden, notFound } from "./api";
 import { AuthError, markSessionOwner, newInviteCode, requireSessionToken, requireUser, SessionUser } from "./auth";
 import type { MemberBalance } from "./balances";
 
@@ -212,13 +212,39 @@ export async function setGroupAutoReconcile(groupId: number, userId: number, ena
   const [, rows] = await sql.transaction((tx) => [
     tx`SELECT pg_advisory_xact_lock(${groupId}::int)`,
     tx`
-    WITH upd AS (
+    WITH current AS (
+      SELECT auto_reconcile_units FROM groups WHERE id = ${groupId}
+    ),
+    blocked AS (
+      SELECT 1
+      FROM group_units gu
+      WHERE gu.group_id = ${groupId}
+        AND (SELECT auto_reconcile_units FROM current)
+        AND NOT ${enabled}
+        AND EXISTS (
+          SELECT 1 FROM group_unit_directed(gu.group_id) d
+          WHERE d.unit_id = gu.id
+            AND (
+              NOT EXISTS (
+                SELECT 1 FROM group_members gm
+                WHERE gm.group_id = gu.group_id AND gm.user_id = d.debtor_id
+              )
+              OR NOT EXISTS (
+                SELECT 1 FROM group_members gm
+                WHERE gm.group_id = gu.group_id AND gm.user_id = d.creditor_id
+              )
+            )
+        )
+      LIMIT 1
+    ),
+    upd AS (
       UPDATE groups SET auto_reconcile_units = ${enabled}
       WHERE id = ${groupId}
         AND EXISTS (
           SELECT 1 FROM group_members
           WHERE group_id = ${groupId} AND user_id = ${userId}
         )
+        AND NOT EXISTS (SELECT 1 FROM blocked)
       RETURNING auto_reconcile_units
     ),
     a AS (
@@ -233,10 +259,13 @@ export async function setGroupAutoReconcile(groupId: number, userId: number, ena
       FROM upd
       RETURNING 1
     )
-    SELECT auto_reconcile_units FROM upd`,
+    SELECT (SELECT auto_reconcile_units FROM upd) AS enabled,
+      EXISTS (SELECT 1 FROM blocked) AS blocked,
+      EXISTS (SELECT 1 FROM current) AS found`,
   ]);
-  if (rows.length === 0) notFound();
-  return Boolean(rows[0].auto_reconcile_units);
+  if (!rows[0]?.found) notFound();
+  if (rows[0].blocked) badRequest("Settle open unit debts with former members before turning off");
+  return Boolean(rows[0].enabled);
 }
 
 export async function deleteGroup(
