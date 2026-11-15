@@ -811,9 +811,9 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
                   {rows.map((row) => {
                     const mine = me?.id === row.from || me?.id === row.to;
                     return (
-                      <li key={`${row.from}:${row.to}`} className="flex min-h-[var(--row-h)] items-center gap-3 px-4 py-1.5">
+                      <li key={`${row.from}:${row.to}`} className="flex min-h-[var(--row-h)] flex-wrap items-center gap-x-3 gap-y-1 px-4 py-1.5">
                         <Avatar name={memberName(row.from)} size="sm" />
-                        <span className="min-w-0 flex-1 text-body">{suggestionText(row)}</span>
+                        <span className="min-w-[8rem] flex-1 text-body">{suggestionText(row)}</span>
                         <span className={`tnum shrink-0 text-row font-semibold ${row.from === me?.id ? "text-owe" : row.to === me?.id ? "text-owed" : ""}`}>
                           {formatUnitQuantity(row.amountCents)}<span className="sr-only"> {unit.name}</span>
                         </span>
@@ -821,6 +821,7 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
                           <Button
                             size="sm"
                             variant="secondary"
+                            className="ml-auto"
                             onClick={() => openUnitSettle({ id: unit.unitId, name: unit.name }, row.from, row.to, row.amountCents)}
                             aria-label={`Record ${unit.name} payment: ${memberName(row.from)} pays ${memberName(row.to)}`}
                           >

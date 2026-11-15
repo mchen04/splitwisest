@@ -62,7 +62,7 @@ export function SettleFields({
           </Select>
         </Field>}
       </div>}
-      <div className="grid grid-cols-[minmax(0,10rem)_minmax(0,1fr)] gap-2">
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,10rem),1fr))] gap-2">
         <Field label="Date">
           <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
         </Field>
