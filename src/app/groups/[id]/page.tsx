@@ -357,7 +357,7 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
 
   const memberName = (uid: number) =>
     detail?.members.find((m) => m.id === uid)?.displayName
-    ?? detail?.unitPeople.find((p) => p.userId === uid)?.displayName
+    ?? detail?.unitPeople?.find((p) => p.userId === uid)?.displayName
     ?? "Someone";
   const visibleBalances = detail?.balances.filter((b) => {
     const q = memberQuery.trim().toLowerCase();
@@ -1080,7 +1080,9 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
             onSaved={refreshAll}
             groupId={groupId}
             members={detail.members}
-            people={detail.unitPeople.map((p) => ({ id: p.userId, displayName: p.displayName }))}
+            people={settleUnit && !detail.group.autoReconcileUnits
+              ? (detail.unitPeople ?? []).map((p) => ({ id: p.userId, displayName: p.displayName }))
+              : undefined}
             meId={me.id}
             defaultCurrency={detail.group.currency}
             prefill={settlePrefill}
@@ -1097,7 +1099,9 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
             }}
             groupId={groupId}
             members={detail.members}
-            people={detail.unitPeople.map((p) => ({ id: p.userId, displayName: p.displayName }))}
+            people={editingSettlement?.unitId && !detail.group.autoReconcileUnits
+              ? (detail.unitPeople ?? []).map((p) => ({ id: p.userId, displayName: p.displayName }))
+              : undefined}
             meId={me.id}
             defaultCurrency={detail.group.currency}
             existing={editingSettlement}

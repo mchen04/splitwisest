@@ -156,6 +156,61 @@ async function verifyShares(context: BrowserContext, page: Page) {
   }
 }
 
+async function verifySettlePeople(context: BrowserContext, page: Page) {
+  const [ann, ben, cat] = users;
+  const today = new Date().toISOString().slice(0, 10);
+  const usd = fixtureGroups.find((group) => group.currency === "USD")!;
+  await api(context, "/api/auth/login", { username: ann.username, password });
+  await api(context, `/api/groups/${usd.id}/expenses`, {
+    title: "Settle money", amountCents: 900, currency: "USD", date: today, payerId: ann.id,
+    notes: "", splitMethod: "equal", participants: [ann, ben, cat].map((user) => ({ userId: user.id })),
+  });
+  await page.goto(`${base}/groups/${usd.id}`);
+  await page.getByRole("tab", { name: "Balances", exact: true }).click();
+  await page.getByRole("button", { name: "Record payment: Ben pays Ann", exact: true }).click();
+  const moneyForm = page.getByRole("dialog", { name: "Settle up", exact: true });
+  const moneyOptions = await moneyForm.getByLabel("Who received").locator("option").allTextContents();
+  assert.deepEqual(moneyOptions.sort(), ["Ann", "Ben", "Cat"]);
+  const moneySaved = page.waitForResponse((r) => r.url().endsWith(`/api/groups/${usd.id}/settlements`) && r.request().method() === "POST");
+  await moneyForm.getByRole("button", { name: /^Record/ }).click();
+  assert.equal((await moneySaved).status(), 200);
+  proofs.push({ action: "money settle lists current members", options: moneyOptions });
+
+  const group = await api(context, "/api/groups", { name: `QA Settle ${randomBytes(4).toString("hex")}`, currency: "USD" });
+  fixtureGroups.push({ id: group.id, currency: "USD" });
+  for (const user of [ben, cat]) {
+    await api(context, "/api/auth/login", { username: user.username, password });
+    await api(context, "/api/groups/join", { code: group.inviteCode });
+  }
+  await api(context, "/api/auth/login", { username: ann.username, password });
+  const unit = await api(context, `/api/groups/${group.id}/units`, { name: "drinks" });
+  const participants = [ann, ben, cat].map((user) => ({ userId: user.id }));
+  await api(context, `/api/groups/${group.id}/expenses`, {
+    title: "Settle money", amountCents: 900, currency: "USD", date: today, payerId: ann.id,
+    notes: "", splitMethod: "equal", participants,
+  });
+  await api(context, `/api/groups/${group.id}/expenses`, {
+    title: "Settle drinks", amountCents: 900, currency: "USD", date: today, payerId: ann.id,
+    notes: "", splitMethod: "equal", participants, unitId: unit.id,
+  });
+  await api(context, `/api/groups/${group.id}/settlements`, {
+    payerId: cat.id, recipientId: ann.id, amountCents: 300, currency: "USD", date: today, note: "",
+  });
+  await api(context, `/api/groups/${group.id}/settlements`, {
+    payerId: cat.id, recipientId: ann.id, amountCents: 300, currency: "USD", date: today, note: "", unitId: unit.id,
+  });
+  const removed = await context.request.delete(`${base}/api/groups/${group.id}/members/${cat.id}`);
+  assert.equal(removed.status(), 200, await removed.text());
+  await page.goto(`${base}/groups/${group.id}`);
+  await page.getByRole("tab", { name: "Balances", exact: true }).click();
+  await page.getByRole("button", { name: "Record payment: Ben pays Ann", exact: true }).click();
+  const unitGroupForm = page.getByRole("dialog", { name: "Settle up", exact: true });
+  const unitGroupOptions = await unitGroupForm.getByLabel("Who received").locator("option").allTextContents();
+  assert.deepEqual(unitGroupOptions.sort(), ["Ann", "Ben"]);
+  proofs.push({ action: "money settle omits former member", options: unitGroupOptions });
+  await unitGroupForm.getByRole("button", { name: "Cancel", exact: true }).click();
+}
+
 async function main() {
   const failures: string[] = [];
   await mkdir(evidence, { recursive: true });
@@ -171,6 +226,7 @@ async function main() {
     failedPage = page;
     page.setDefaultTimeout(30_000);
     await verifyShares(context, page);
+    await verifySettlePeople(context, page);
     if (feature === "shares") return;
     const yen = fixtureGroups.find((g) => g.currency === "JPY")!;
     await page.goto(`${base}/groups/${yen.id}`);
