@@ -224,6 +224,15 @@ async function main() {
     check(`unit ${split.method} keeps its unit`, [saved.unitId, saved.unitName, saved.currency, saved.convertedCents], [drinks.id, "drink tickets", g1.currency, split.amountCents]);
   }
 
+  const jpyGroup = await createGroup(owner, "JPY", "JPY units");
+  await join(jpyGroup, b, owner);
+  const jpyUnit = await createUnit(jpyGroup, owner, "tickets");
+  const jpyExpense = await api(`/api/groups/${jpyGroup.id}/expenses`, owner, expenseBody(jpyGroup, jpyUnit.id, {
+    title: "JPY unit", amountCents: 100, participants: [owner, b].map((u) => ({ userId: u.id })),
+  }));
+  const jpySaved = await expenseDetail(jpyExpense.id);
+  check("unit shares use hundredths in JPY", jpySaved.shares.map((s: { shareCents: number }) => s.shareCents).sort((a: number, b: number) => a - b), [50, 50]);
+
   const beforeRejected = Number((await sql`SELECT count(*) FROM expenses WHERE group_id = ${g1.id}`)[0].count);
   const forged = await request(`/api/groups/${g1.id}/expenses`, owner, expenseBody(g1, otherGroupUnit.id, { title: "Forged" }));
   check("a unit from another group is rejected", forged.status, 400);
@@ -243,6 +252,20 @@ async function main() {
     payerId: owner.id, participantIds: users.slice(0, 3).map((u) => u.id), notes: "", cadence: "monthly", startDate: today,
   })).status, 400);
   check("a forged unit recurring rule writes nothing", Number((await sql`SELECT count(*) FROM recurring_expenses WHERE group_id = ${g1.id}`)[0].count), beforeRecurring);
+
+  const recurringUnit = await api(`/api/groups/${g1.id}/recurring`, owner, {
+    title: "Recurring unit", amountCents: 100, currency: g1.currency, unitId: drinks.id,
+    payerId: owner.id, participantIds: [owner.id, b.id], notes: "", cadence: "monthly", startDate: today,
+  });
+  const recurringRule = (await api(`/api/groups/${g1.id}/recurring`, owner)).recurring.find((row: { id: number }) => row.id === recurringUnit.id);
+  const recurringEdit = await api(`/api/recurring/${recurringRule.id}`, owner, {
+    title: recurringRule.title, amountCents: recurringRule.amountCents, currency: recurringRule.currency,
+    payerId: recurringRule.payerId, participantIds: recurringRule.participantIds, notes: recurringRule.notes,
+    cadence: recurringRule.cadence, nextDate: String(recurringRule.nextDate).slice(0, 10), active: true,
+    expectedUpdatedAt: recurringRule.updatedAt,
+  }, "PATCH");
+  check("recurring edit without unitId keeps the unit", Number((await sql`SELECT unit_id FROM recurring_expenses WHERE id = ${recurringRule.id}`)[0].unit_id), drinks.id);
+  await api(`/api/recurring/${recurringRule.id}?expectedUpdatedAt=${encodeURIComponent(recurringEdit.updatedAt)}`, owner, undefined, "DELETE");
 
   check("a unit on the direct settlement route is rejected", (await request("/api/settlements", owner, {
     friendId: b.id, direction: "i-paid", amountCents: 100, currency: g1.currency, unitId: drinks.id, date: today, note: "direct unit",
@@ -308,6 +331,34 @@ async function main() {
   check("historic excess shows as the reverse obligation", unit.obligations.some((row: { from: number; to: number; amountCents: number }) => row.from === owner.id && row.to === b.id && row.amountCents > 0), true);
   await api(`/api/groups/${g1.id}`, owner, { autoReconcileUnits: true }, "PATCH");
 
+  const reverseGroup = await createGroup(owner, "USD", "Reverse");
+  await join(reverseGroup, b, owner);
+  const reverseUnit = await createUnit(reverseGroup, owner, "reverse");
+  await api(`/api/groups/${reverseGroup.id}`, owner, { autoReconcileUnits: false }, "PATCH");
+  const reverseExpense = await api(`/api/groups/${reverseGroup.id}/expenses`, owner, expenseBody(reverseGroup, reverseUnit.id, {
+    title: "Reverse debt", amountCents: 200, payerId: owner.id,
+    participants: [owner, b].map((u) => ({ userId: u.id })),
+  }));
+  await api(`/api/groups/${reverseGroup.id}/settlements`, b, {
+    payerId: b.id, recipientId: owner.id, amountCents: 100, currency: reverseGroup.currency,
+    unitId: reverseUnit.id, date: today, note: "repay",
+  });
+  const reverseDetail = await api(`/api/expenses/${reverseExpense.id}`, owner);
+  await api(`/api/expenses/${reverseExpense.id}?expectedUpdatedAt=${encodeURIComponent(reverseDetail.expense.updatedAt)}`, owner, undefined, "DELETE");
+  detail = await api(`/api/groups/${reverseGroup.id}`, owner);
+  unit = detail.unitBalances.find((row: { name: string }) => row.name === "reverse");
+  check("over-repayment appears as the reverse obligation", byTriple(unit.obligations.map((row: { from: number; to: number; amountCents: number }) => [row.from, row.to, row.amountCents])), byTriple([
+    [owner.id, b.id, 100],
+  ]));
+  await api(`/api/groups/${reverseGroup.id}/settlements`, owner, {
+    payerId: owner.id, recipientId: b.id, amountCents: 100, currency: reverseGroup.currency,
+    unitId: reverseUnit.id, date: today, note: "clear reverse",
+  });
+  detail = await api(`/api/groups/${reverseGroup.id}`, owner);
+  unit = detail.unitBalances.find((row: { name: string }) => row.name === "reverse");
+  check("reversed debt clears with one repayment", unit.obligations, []);
+  check("reversed debt leaves both members settled", unit.nets.every((row: { netCents: number }) => row.netCents === 0), true);
+
   const raceGroup = await createGroup(owner, "USD", "Race");
   await join(raceGroup, b, owner);
   const raceUnit = await createUnit(raceGroup, owner, "race drinks");
@@ -338,6 +389,21 @@ async function main() {
   check("member removal is blocked by an unsettled unit", blockedRemoval.status, 400);
   check("member removal names the unsettled unit", blockedRemoval.text.includes("chores"), true);
   check("blocked member removal keeps membership", Number((await sql`SELECT count(*) FROM group_members WHERE group_id = ${removalGroup.id} AND user_id = ${b.id}`)[0].count), 1);
+
+  const removalOnGroup = await createGroup(owner, "USD", "Removal ON");
+  await join(removalOnGroup, b, owner);
+  const removalOnUnit = await createUnit(removalOnGroup, owner, "points");
+  await api(`/api/groups/${removalOnGroup.id}/expenses`, owner, expenseBody(removalOnGroup, removalOnUnit.id, {
+    title: "Points A", amountCents: 200, payerId: owner.id,
+    participants: [owner, b].map((u) => ({ userId: u.id })),
+  }));
+  await api(`/api/groups/${removalOnGroup.id}/expenses`, b, expenseBody(removalOnGroup, removalOnUnit.id, {
+    title: "Points B", amountCents: 200, payerId: b.id,
+    participants: [owner, b].map((u) => ({ userId: u.id })),
+  }));
+  const blockedOnRemoval = await request(`/api/groups/${removalOnGroup.id}/members/${b.id}`, owner, undefined, "DELETE");
+  check("ON member removal is blocked by pairwise unit debts", blockedOnRemoval.status, 400);
+  check("ON member removal names the pairwise unit", blockedOnRemoval.text.includes("points"), true);
 
   const friendBalancesAfter = await api("/api/friends", owner);
   const friendB = friendBalancesAfter.friends.find((row: { id: number }) => row.id === b.id);
@@ -378,12 +444,20 @@ async function main() {
     payerId: b.id, recipientId: owner.id, amountCents: 50, currency: g1.currency, unitId: drinks.id, date: today, note: "edit settlement",
   })).id;
   const settlementRow = (await api(`/api/groups/${g1.id}/settlements`, owner)).settlements.find((s: { id: number }) => s.id === settlementId);
+  const paymentHistory = await api(`/api/settlements?friendId=${b.id}`, owner);
+  const historyUnit = paymentHistory.settlements.find((s: { id: number }) => s.id === settlementId);
+  check("payment history carries unit fields", [historyUnit.unitId, historyUnit.unitName], [drinks.id, "drink tickets"]);
   const settlementEdit = await api(`/api/settlements/${settlementId}`, b, {
     amountCents: 60, currency: g1.currency, unitId: drinks.id, date: today, note: "edited", expectedUpdatedAt: settlementRow.updatedAt,
   }, "PATCH");
   check("edit a unit settlement", Number((await sql`SELECT amount_cents FROM settlements WHERE id = ${settlementId}`)[0].amount_cents), 60);
   await api(`/api/settlements/${settlementId}?expectedUpdatedAt=${encodeURIComponent(settlementEdit.updatedAt)}`, b, undefined, "DELETE");
   check("delete a unit settlement", Number((await sql`SELECT count(*) FROM settlements WHERE id = ${settlementId}`)[0].count), 0);
+
+  const unitActivity = await sql`
+    SELECT count(*)::int AS count FROM activity
+    WHERE group_id = ${g1.id} AND type IN ('group_unit.added', 'group.units_reconcile')`;
+  check("unit activity reaches the refresh path", Number(unitActivity[0].count) >= 2, true);
 
   const moneyAfter = await moneySnapshot(g1);
   check("money balances are byte-identical after unit data", moneyAfter, moneyBefore);

@@ -78,23 +78,7 @@ function friendGroupRows(
   return query`
     WITH groups_for_viewer AS MATERIALIZED (
       SELECT g.id AS group_id, g.name AS group_name, g.currency, g.auto_reconcile_units,
-        CASE WHEN EXISTS (SELECT 1 FROM group_units gu WHERE gu.group_id = g.id) THEN
-          jsonb_build_object(
-            'units', (SELECT jsonb_agg(jsonb_build_object('id', gu.id, 'name', gu.name)
-                ORDER BY gu.name, gu.id) FROM group_units gu WHERE gu.group_id = g.id),
-            'totals', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
-                'unitId', t.unit_id, 'userId', t.user_id,
-                'paidCents', t.paid_cents, 'owedCents', t.owed_cents,
-                'settledOutCents', t.settled_out_cents, 'settledInCents', t.settled_in_cents)
-                ORDER BY t.unit_id, t.user_id), '[]'::jsonb)
-              FROM group_unit_totals(g.id) t),
-            'directed', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
-                'unitId', d.unit_id, 'debtorId', d.debtor_id,
-                'creditorId', d.creditor_id, 'amountCents', d.amount_cents)
-                ORDER BY d.unit_id, d.debtor_id, d.creditor_id), '[]'::jsonb)
-              FROM group_unit_directed(g.id) d)
-          )
-        ELSE NULL END AS unit_data
+        group_unit_data(g.id) AS unit_data
       FROM groups g
       JOIN group_members me ON me.group_id = g.id AND me.user_id = ${userId}
       WHERE ${friendFilter}::bigint IS NULL OR EXISTS (

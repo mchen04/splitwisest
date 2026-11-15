@@ -32,6 +32,12 @@ describe("diffExpense — one field at a time", () => {
     ]);
   });
 
+  it("detects a denomination change at the same amount", () => {
+    const changes = diffExpense(snap({ unitName: "drinks" }), snap({ unitName: "chores" }));
+    expect(fields(changes)).toEqual(["amount"]);
+    expect(describeChange(changes[0])).toBe("changed the amount from 42 drinks to 42 chores");
+  });
+
   it("detects the currency without leaking derived conversion fields", () => {
     const changes = diffExpense(base, snap({ currency: "EUR" }));
     expect(fields(changes)).toEqual(["currency"]);

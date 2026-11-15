@@ -198,7 +198,7 @@ export default function BalancesPage() {
             ))}
             {reminders.map((n) => {
               const from = friends?.find((f) => f.id === n.fromId);
-              const iOwe = from?.obligations.some((o) => o.netCents < 0);
+              const iOwe = from?.obligations.some((o) => o.kind !== "unit" && o.netCents < 0);
               return (
                 <li key={`n-${n.id}`} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2">
                   <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent-soft text-accent-dark"><Bell className="h-4 w-4" /></span>

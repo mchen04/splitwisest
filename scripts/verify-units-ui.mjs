@@ -1,4 +1,3 @@
-// Real local app + synthetic fixtures only. Keep fixtures and evidence outside git.
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve, relative } from "node:path";

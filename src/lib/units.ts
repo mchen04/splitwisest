@@ -102,20 +102,11 @@ export interface UnitViewerRow {
 }
 
 function normalizeDirected(rows: UnitDirectedRow[]): UnitObligation[] {
-  const raw = new Map<string, number>();
-  for (const row of rows) {
-    const key = `${row.debtorId}:${row.creditorId}`;
-    raw.set(key, (raw.get(key) ?? 0) + row.amountCents);
-  }
   const normalized = new Map<string, number>();
-  for (const [key, amountCents] of raw) {
-    if (amountCents === 0) continue;
-    const [from, to] = key.split(":").map(Number);
-    const [a, b, amount] = amountCents > 0
-      ? [from, to, amountCents]
-      : [to, from, -amountCents];
-    const normalizedKey = `${a}:${b}`;
-    normalized.set(normalizedKey, (normalized.get(normalizedKey) ?? 0) + amount);
+  for (const row of rows) {
+    if (row.amountCents <= 0) continue;
+    const key = `${row.debtorId}:${row.creditorId}`;
+    normalized.set(key, (normalized.get(key) ?? 0) + row.amountCents);
   }
   const obligations: UnitObligation[] = [];
   for (const [key, amountCents] of normalized) {
@@ -194,23 +185,42 @@ function aggregateLedger(
     return row;
   };
   for (const id of memberIds) rowFor(id);
-  const directed: UnitDirectedRow[] = [];
+  const obligations = new Map<string, number>();
+  const excess = new Map<string, number>();
   for (const expense of expenses) {
     rowFor(expense.payerId).paidCents += expense.amountCents;
     for (const share of expense.shares) {
       rowFor(share.userId).owedCents += share.shareCents;
       if (share.userId !== expense.payerId) {
-        directed.push({ unitId: 0, debtorId: share.userId, creditorId: expense.payerId, amountCents: share.shareCents });
+        const key = `${share.userId}:${expense.payerId}`;
+        obligations.set(key, (obligations.get(key) ?? 0) + share.shareCents);
       }
     }
   }
   for (const settlement of settlements) {
     rowFor(settlement.payerId).settledOutCents += settlement.amountCents;
     rowFor(settlement.recipientId).settledInCents += settlement.amountCents;
-    directed.push({
-      unitId: 0, debtorId: settlement.payerId, creditorId: settlement.recipientId,
-      amountCents: -settlement.amountCents,
-    });
+    let remaining = settlement.amountCents;
+    const reverseKey = `${settlement.recipientId}:${settlement.payerId}`;
+    const reverseExcess = Math.min(remaining, excess.get(reverseKey) ?? 0);
+    excess.set(reverseKey, (excess.get(reverseKey) ?? 0) - reverseExcess);
+    remaining -= reverseExcess;
+    const key = `${settlement.payerId}:${settlement.recipientId}`;
+    const applied = Math.min(remaining, obligations.get(key) ?? 0);
+    obligations.set(key, (obligations.get(key) ?? 0) - applied);
+    remaining -= applied;
+    if (remaining > 0) excess.set(key, (excess.get(key) ?? 0) + remaining);
+  }
+  const directed: UnitDirectedRow[] = [];
+  for (const [key, amountCents] of obligations) {
+    if (amountCents <= 0) continue;
+    const [debtorId, creditorId] = key.split(":").map(Number);
+    directed.push({ unitId: 0, debtorId, creditorId, amountCents });
+  }
+  for (const [key, amountCents] of excess) {
+    if (amountCents <= 0) continue;
+    const [payerId, recipientId] = key.split(":").map(Number);
+    directed.push({ unitId: 0, debtorId: recipientId, creditorId: payerId, amountCents });
   }
   return { totals: [...totals.values()], directed };
 }

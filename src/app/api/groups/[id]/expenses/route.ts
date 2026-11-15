@@ -62,11 +62,15 @@ export const GET = privateHandler(async (req: NextRequest, { params }: Ctx) => {
           -- Per-expense largest-remainder allocation so displayed converted shares
           -- sum EXACTLY to converted_cents (matches group_balance_rows()).
           SELECT es.user_id, es.share_cents,
-            ((div(es.share_cents::numeric * e.converted_cents, e.amount_cents::numeric * ${step})
+            ((div(es.share_cents::numeric * e.converted_cents,
+              e.amount_cents::numeric * CASE WHEN e.unit_id IS NULL THEN ${step}::bigint ELSE 1 END)
               + CASE WHEN row_number() OVER (
-                    ORDER BY mod(es.share_cents::numeric * e.converted_cents, e.amount_cents::numeric * ${step}) DESC, es.user_id)
-                  <= e.converted_cents / ${step} - sum(div(es.share_cents::numeric * e.converted_cents, e.amount_cents::numeric * ${step})) OVER ()
-                THEN 1 ELSE 0 END) * ${step})::bigint AS converted_share_cents
+                    ORDER BY mod(es.share_cents::numeric * e.converted_cents,
+                      e.amount_cents::numeric * CASE WHEN e.unit_id IS NULL THEN ${step}::bigint ELSE 1 END) DESC, es.user_id)
+                  <= e.converted_cents / CASE WHEN e.unit_id IS NULL THEN ${step}::bigint ELSE 1 END
+                    - sum(div(es.share_cents::numeric * e.converted_cents,
+                      e.amount_cents::numeric * CASE WHEN e.unit_id IS NULL THEN ${step}::bigint ELSE 1 END)) OVER ()
+                THEN 1 ELSE 0 END) * CASE WHEN e.unit_id IS NULL THEN ${step}::bigint ELSE 1 END)::bigint AS converted_share_cents
           FROM expense_shares es WHERE es.expense_id = e.id
         ) a) AS shares
     FROM expenses e

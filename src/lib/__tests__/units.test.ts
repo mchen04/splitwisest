@@ -72,6 +72,21 @@ describe("unit balances", () => {
     expect(result.obligations).toEqual([{ from: 1, to: 2, amountCents: 100 }]);
   });
 
+  it("clears a reversed excess with one repayment", () => {
+    const result = computeUnitBalances(ids, [
+      expense(1, 200, [[1, 100], [2, 100]]),
+    ], [
+      { payerId: 2, recipientId: 1, amountCents: 200 },
+      { payerId: 1, recipientId: 2, amountCents: 100 },
+    ], false);
+    expect(result.obligations).toEqual([]);
+    expect(result.nets).toEqual([
+      { userId: 1, netCents: 0 },
+      { userId: 2, netCents: 0 },
+      { userId: 3, netCents: 0 },
+    ]);
+  });
+
   it("adds a repayment to the same direction instead of duplicating it", () => {
     const result = computeUnitBalances(ids, [
       expense(2, 200, [[1, 100], [2, 100]]),

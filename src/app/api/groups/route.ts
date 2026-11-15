@@ -22,13 +22,7 @@ export const GET = privateHandler(async (req?: NextRequest) => {
       COALESCE((SELECT rs.last_id FROM read_state rs
         WHERE rs.user_id = ${userId} AND rs.scope = 'msg:group:' || g.id), 0) AS read_message_id,
       COALESCE(b.net_cents, 0) AS my_net_cents
-      , COALESCE((
-        SELECT jsonb_agg(jsonb_build_object(
-          'unitId', u.unit_id, 'name', u.unit_name, 'reconcile', u.reconcile,
-          'netCents', u.net_cents, 'owesCents', u.owes_cents, 'owedCents', u.owed_cents)
-          ORDER BY u.unit_name, u.unit_id)
-        FROM group_unit_viewer_rows(g.id, ${userId}) u
-      ), '[]'::jsonb) AS unit_summary
+      , group_unit_viewer_json(g.id, ${userId}) AS unit_summary
     FROM groups g JOIN group_members gm ON gm.group_id = g.id
     LEFT JOIN LATERAL group_balance_rows(g.id) b ON b.user_id = ${userId}
     WHERE gm.user_id = ${userId}

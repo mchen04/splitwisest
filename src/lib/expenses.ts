@@ -731,7 +731,12 @@ export async function updateRecurringExpenseWithActivity(
     expectedUpdatedAt: string;
   }
 ) {
-  const unit = body.unitId != null ? await requireGroupUnit(groupId, body.unitId) : null;
+  const existing = await sql`
+    SELECT unit_id FROM recurring_expenses WHERE id = ${id} AND group_id = ${groupId}`;
+  const effectiveUnitId = body.unitId === undefined
+    ? (existing[0]?.unit_id == null ? null : Number(existing[0].unit_id))
+    : body.unitId;
+  const unit = effectiveUnitId != null ? await requireGroupUnit(groupId, effectiveUnitId) : null;
   const currency = unit ? await groupCurrencyFor(groupId) : body.currency;
   await validateExpenseActors(groupId, user.id, body);
   if (!unit) validateCurrencyAmount(body.amountCents, body.currency);
@@ -765,7 +770,7 @@ export async function updateRecurringExpenseWithActivity(
     upd AS (
       UPDATE recurring_expenses r SET
         title = ${body.title}, amount_cents = ${body.amountCents}, currency = ${currency},
-        unit_id = ${body.unitId ?? null},
+        unit_id = CASE WHEN ${body.unitId === undefined} THEN r.unit_id ELSE ${body.unitId ?? null} END,
         payer_id = ${body.payerId}, category_id = ${body.categoryId ?? null},
         participant_ids = ${body.participantIds}, notes = ${body.notes}, cadence = ${body.cadence},
         next_date = ${body.nextDate},

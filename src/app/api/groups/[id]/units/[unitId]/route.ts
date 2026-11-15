@@ -17,7 +17,7 @@ export const PATCH = handler(async (req: NextRequest, { params }: Ctx) => {
   if (!Number.isInteger(unitId)) notFound();
   await requireGroupMember(groupId, user.id);
   const { name } = Body.parse(await req.json());
-  const unit = await renameGroupUnit(groupId, unitId, name);
+  const unit = await renameGroupUnit(groupId, unitId, user.id, name);
   return NextResponse.json(unit);
 });
 
@@ -28,6 +28,6 @@ export const DELETE = handler(async (req: NextRequest, { params }: Ctx) => {
   const unitId = Number(rawUnitId);
   if (!Number.isInteger(unitId)) notFound();
   await requireGroupMember(groupId, user.id);
-  await deleteGroupUnit(groupId, unitId);
+  await deleteGroupUnit(groupId, unitId, user.id);
   return NextResponse.json({ ok: true });
 });

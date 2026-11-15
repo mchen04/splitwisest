@@ -498,24 +498,68 @@ async function main() {
 
   await sql`CREATE OR REPLACE FUNCTION group_unit_directed(target_group_id bigint, exclude_settlement_id bigint DEFAULT NULL)
     RETURNS TABLE(unit_id bigint, unit_name text, debtor_id bigint, creditor_id bigint, amount_cents bigint)
-    LANGUAGE sql
+    LANGUAGE plpgsql
     STABLE
     AS $$
-      WITH rows AS (
-        SELECT e.unit_id, es.user_id AS debtor_id, e.payer_id AS creditor_id, es.share_cents AS amount_cents
-        FROM expenses e
-        JOIN expense_shares es ON es.expense_id = e.id
-        WHERE e.group_id = target_group_id AND e.unit_id IS NOT NULL AND es.user_id <> e.payer_id
-        UNION ALL
-        SELECT s.unit_id, s.payer_id, s.recipient_id, -s.amount_cents
-        FROM settlements s
-        WHERE s.group_id = target_group_id AND s.unit_id IS NOT NULL
-          AND (exclude_settlement_id IS NULL OR s.id <> exclude_settlement_id)
-      )
-      SELECT r.unit_id, gu.name, r.debtor_id, r.creditor_id, SUM(r.amount_cents)::bigint
-      FROM rows r
-      JOIN group_units gu ON gu.id = r.unit_id
-      GROUP BY r.unit_id, gu.name, r.debtor_id, r.creditor_id
+      DECLARE
+        obligations jsonb := '{}'::jsonb;
+        excess jsonb := '{}'::jsonb;
+        rec record;
+        k text;
+        x bigint;
+        take bigint;
+      BEGIN
+        FOR rec IN
+          SELECT e.unit_id, es.user_id AS debtor_id, e.payer_id AS creditor_id, SUM(es.share_cents)::bigint AS cents
+          FROM expenses e
+          JOIN expense_shares es ON es.expense_id = e.id
+          WHERE e.group_id = target_group_id AND e.unit_id IS NOT NULL AND es.user_id <> e.payer_id
+          GROUP BY e.unit_id, es.user_id, e.payer_id
+        LOOP
+          k := rec.unit_id || ':' || rec.debtor_id || ':' || rec.creditor_id;
+          obligations := jsonb_set(obligations, ARRAY[k],
+            to_jsonb(COALESCE((obligations->>k)::bigint, 0) + rec.cents));
+        END LOOP;
+        FOR rec IN
+          SELECT s.unit_id, s.payer_id, s.recipient_id, s.amount_cents
+          FROM settlements s
+          WHERE s.group_id = target_group_id AND s.unit_id IS NOT NULL
+            AND (exclude_settlement_id IS NULL OR s.id <> exclude_settlement_id)
+          ORDER BY s.id
+        LOOP
+          x := rec.amount_cents;
+          k := rec.unit_id || ':' || rec.recipient_id || ':' || rec.payer_id;
+          take := LEAST(x, COALESCE((excess->>k)::bigint, 0));
+          excess := jsonb_set(excess, ARRAY[k], to_jsonb(COALESCE((excess->>k)::bigint, 0) - take));
+          x := x - take;
+          k := rec.unit_id || ':' || rec.payer_id || ':' || rec.recipient_id;
+          take := LEAST(x, COALESCE((obligations->>k)::bigint, 0));
+          obligations := jsonb_set(obligations, ARRAY[k], to_jsonb(COALESCE((obligations->>k)::bigint, 0) - take));
+          x := x - take;
+          IF x > 0 THEN
+            excess := jsonb_set(excess, ARRAY[k], to_jsonb(COALESCE((excess->>k)::bigint, 0) + x));
+          END IF;
+        END LOOP;
+        RETURN QUERY
+          SELECT gu.id, gu.name, rows.debtor_id, rows.creditor_id, rows.amount_cents
+          FROM (
+            SELECT split_part(key, ':', 1)::bigint AS unit_id,
+              split_part(key, ':', 2)::bigint AS debtor_id,
+              split_part(key, ':', 3)::bigint AS creditor_id,
+              val::bigint AS amount_cents
+            FROM jsonb_each_text(obligations) e(key, val)
+            WHERE val::bigint > 0
+            UNION ALL
+            SELECT split_part(key, ':', 1)::bigint,
+              split_part(key, ':', 3)::bigint,
+              split_part(key, ':', 2)::bigint,
+              val::bigint
+            FROM jsonb_each_text(excess) e(key, val)
+            WHERE val::bigint > 0
+          ) rows
+          JOIN group_units gu ON gu.id = rows.unit_id
+          ORDER BY gu.name, rows.debtor_id, rows.creditor_id;
+      END;
     $$`;
 
   await sql`DROP FUNCTION IF EXISTS unit_directed_obligation(bigint, bigint, bigint, bigint)`;
@@ -528,12 +572,11 @@ async function main() {
   LANGUAGE sql
   STABLE
   AS $$
-    SELECT GREATEST(0, COALESCE(SUM(CASE WHEN d.debtor_id = target_debtor_id AND d.creditor_id = target_creditor_id
-        THEN d.amount_cents ELSE 0 END), 0))
-      + GREATEST(0, -COALESCE(SUM(CASE WHEN d.debtor_id = target_creditor_id AND d.creditor_id = target_debtor_id
-        THEN d.amount_cents ELSE 0 END), 0))
+    SELECT COALESCE(MAX(d.amount_cents), 0)
     FROM group_unit_directed(target_group_id, exclude_settlement_id) d
     WHERE d.unit_id = target_unit_id
+      AND d.debtor_id = target_debtor_id
+      AND d.creditor_id = target_creditor_id
   $$`;
 
   await sql`CREATE OR REPLACE FUNCTION group_unit_viewer_rows(target_group_id bigint, target_user_id bigint)
@@ -571,6 +614,44 @@ async function main() {
     ORDER BY gu.name, gu.id
   $$`;
 
+  await sql`CREATE OR REPLACE FUNCTION group_unit_data(target_group_id bigint)
+  RETURNS jsonb
+  LANGUAGE sql
+  STABLE
+  AS $$
+    SELECT CASE WHEN EXISTS (SELECT 1 FROM group_units gu WHERE gu.group_id = target_group_id) THEN
+      jsonb_build_object(
+        'units', (SELECT jsonb_agg(jsonb_build_object('id', gu.id, 'name', gu.name) ORDER BY gu.name, gu.id)
+          FROM group_units gu WHERE gu.group_id = target_group_id),
+        'totals', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+            'unitId', t.unit_id, 'userId', t.user_id,
+            'paidCents', t.paid_cents, 'owedCents', t.owed_cents,
+            'settledOutCents', t.settled_out_cents, 'settledInCents', t.settled_in_cents)
+            ORDER BY t.unit_id, t.user_id), '[]'::jsonb)
+          FROM group_unit_totals(target_group_id) t),
+        'directed', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+            'unitId', d.unit_id, 'debtorId', d.debtor_id,
+            'creditorId', d.creditor_id, 'amountCents', d.amount_cents)
+            ORDER BY d.unit_id, d.debtor_id, d.creditor_id), '[]'::jsonb)
+          FROM group_unit_directed(target_group_id) d)
+      )
+    END
+  $$`;
+
+  await sql`CREATE OR REPLACE FUNCTION group_unit_viewer_json(target_group_id bigint, target_user_id bigint)
+  RETURNS jsonb
+  LANGUAGE sql
+  STABLE
+  AS $$
+    SELECT CASE WHEN EXISTS (SELECT 1 FROM group_units gu WHERE gu.group_id = target_group_id)
+      THEN COALESCE((SELECT jsonb_agg(jsonb_build_object(
+        'unitId', u.unit_id, 'name', u.unit_name, 'reconcile', u.reconcile,
+        'netCents', u.net_cents, 'owesCents', u.owes_cents, 'owedCents', u.owed_cents)
+        ORDER BY u.unit_name, u.unit_id)
+        FROM group_unit_viewer_rows(target_group_id, target_user_id) u), '[]'::jsonb)
+      ELSE '[]'::jsonb END
+  $$`;
+
   await sql`CREATE OR REPLACE FUNCTION group_unit_member_unsettled(target_group_id bigint, target_user_id bigint)
   RETURNS TABLE(unit_id bigint, unit_name text, reconcile boolean, net_cents bigint, owes_cents bigint, owed_cents bigint)
   LANGUAGE sql
@@ -578,8 +659,7 @@ async function main() {
   AS $$
     SELECT v.unit_id, v.unit_name, v.reconcile, v.net_cents, v.owes_cents, v.owed_cents
     FROM group_unit_viewer_rows(target_group_id, target_user_id) v
-    WHERE (v.reconcile AND v.net_cents <> 0)
-       OR (NOT v.reconcile AND (v.owes_cents <> 0 OR v.owed_cents <> 0))
+    WHERE v.net_cents <> 0 OR v.owes_cents <> 0 OR v.owed_cents <> 0
     ORDER BY v.unit_name, v.unit_id
   $$`;
 

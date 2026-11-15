@@ -116,18 +116,20 @@ function namesFor(shares: ExpenseSnapshot["shares"], ids: number[]): string[] {
 export function diffExpense(prev: ExpenseSnapshot, next: ExpenseSnapshot): Change[] {
   const changes: Change[] = [];
 
-  if (prev.amountCents !== next.amountCents) {
+  const prevUnit = prev.unitName ?? null;
+  const nextUnit = next.unitName ?? null;
+  if (prev.amountCents !== next.amountCents || prevUnit !== nextUnit) {
     changes.push({
       field: "amount",
       fromCents: prev.amountCents,
       toCents: next.amountCents,
       fromCurrency: prev.currency,
       toCurrency: next.currency,
-      fromUnitName: prev.unitName ?? null,
-      toUnitName: next.unitName ?? null,
+      fromUnitName: prevUnit,
+      toUnitName: nextUnit,
     });
   }
-  if (prev.currency !== next.currency && (prev.unitName ?? null) === (next.unitName ?? null)) {
+  if (prev.currency !== next.currency && prevUnit === nextUnit) {
     changes.push({ field: "currency", from: prev.currency, to: next.currency });
   }
   if (prev.payerName !== next.payerName) {

@@ -220,18 +220,20 @@ function diffSettlement(
   next: { amountCents: number; currency: string; unitName?: string | null; date: string; note: string }
 ): Change[] {
   const changes: Change[] = [];
-  if (prev.amountCents !== next.amountCents) {
+  const prevUnit = prev.unitName ?? null;
+  const nextUnit = next.unitName ?? null;
+  if (prev.amountCents !== next.amountCents || prevUnit !== nextUnit) {
     changes.push({
       field: "amount",
       fromCents: prev.amountCents,
       toCents: next.amountCents,
       fromCurrency: prev.currency,
       toCurrency: next.currency,
-      fromUnitName: prev.unitName ?? null,
-      toUnitName: next.unitName ?? null,
+      fromUnitName: prevUnit,
+      toUnitName: nextUnit,
     });
   }
-  if (prev.currency !== next.currency && (prev.unitName ?? null) === (next.unitName ?? null)) {
+  if (prev.currency !== next.currency && prevUnit === nextUnit) {
     changes.push({ field: "currency", from: prev.currency, to: next.currency });
   }
   if (prev.date !== next.date) changes.push({ field: "date", from: prev.date, to: next.date });
@@ -269,11 +271,8 @@ export async function updateSettlementWithActivity(
       ? tx`SELECT pg_advisory_xact_lock(${userA}::int, ${userB}::int)`
       : tx`SELECT pg_advisory_xact_lock(${settlement.groupId}::int)`,
     tx`
-    WITH lock AS (
-      SELECT pg_advisory_xact_lock(${settlement.groupId ?? userA}::int)
-    ),
-    unit_gate AS (
-      SELECT 1 FROM lock
+    WITH unit_gate AS (
+      SELECT 1
       WHERE ${unitId}::bigint IS NULL
         OR ${settlement.groupId}::bigint IS NULL
         OR EXISTS (SELECT 1 FROM groups WHERE id = ${settlement.groupId} AND auto_reconcile_units)
