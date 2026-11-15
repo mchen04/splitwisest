@@ -14,6 +14,7 @@ const PatchBody = z.object({
   title: z.string().trim().min(1, "Title is required").max(120),
   amountCents: z.number().int().positive().max(100_000_000_000),
   currency: z.string().refine((c) => CURRENCIES.includes(c), "Unsupported currency"),
+  unitId: z.number().int().positive().nullable().optional(),
   payerId: z.number().int().positive(),
   categoryId: z.number().int().positive().nullable().optional(),
   participantIds: z.array(z.number().int().positive()).min(1, "At least one participant"),

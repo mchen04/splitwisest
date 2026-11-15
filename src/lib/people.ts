@@ -30,6 +30,8 @@ export interface PersonProfile {
     title: string;
     amountCents: number;
     currency: string;
+    unitId: number | null;
+    unitName: string | null;
     date: string;
     payerId: number;
     payerName: string;
@@ -44,6 +46,8 @@ export interface PersonProfile {
     recipientName: string;
     amountCents: number;
     currency: string;
+    unitId: number | null;
+    unitName: string | null;
     date: string;
     note: string;
   }[];
@@ -98,9 +102,11 @@ export async function loadPersonProfile(viewerId: number, personId: number): Pro
     isSelf ? Promise.resolve([] as FriendObligation[]) : pairwiseFriendObligations(viewerId, personId),
     groupIds.length === 0 ? Promise.resolve([] as Record<string, unknown>[]) : sql`
     SELECT e.id, e.group_id, g.name AS group_name, e.title, e.converted_cents, g.currency,
+      e.unit_id, gu.name AS unit_name,
       e.expense_date, e.payer_id, p.display_name AS payer_name
     FROM expenses e
     JOIN groups g ON g.id = e.group_id
+    LEFT JOIN group_units gu ON gu.id = e.unit_id
     JOIN users p ON p.id = e.payer_id
     WHERE e.group_id = ANY(${groupIds})
       AND (
@@ -115,6 +121,7 @@ export async function loadPersonProfile(viewerId: number, personId: number): Pro
     loadVisibleSettlementHistory({ viewerId, personId, isSelf, isFriend, groupIds }),
   ]);
   const netByCurrency = obligations.reduce<Record<string, number>>((net, obligation) => {
+    if (obligation.kind === "unit") return net;
     net[obligation.currency] = (net[obligation.currency] ?? 0) + obligation.netCents;
     if (net[obligation.currency] === 0) delete net[obligation.currency];
     return net;
@@ -138,6 +145,8 @@ export async function loadPersonProfile(viewerId: number, personId: number): Pro
       title: e.title,
       amountCents: Number(e.converted_cents),
       currency: e.currency,
+      unitId: e.unit_id === null ? null : Number(e.unit_id),
+      unitName: (e.unit_name as string | null) ?? null,
       date: e.expense_date,
       payerId: Number(e.payer_id),
       payerName: e.payer_name,

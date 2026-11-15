@@ -14,11 +14,12 @@ export const GET = privateHandler(async (req: NextRequest) => {
   const friendId = intParam(req.nextUrl.searchParams.get("friendId"));
   const { rows: [rows] } = await readSession((userId) => [sql`
     SELECT s.id, s.group_id, g.name AS group_name, s.payer_id, s.recipient_id,
-      s.amount_cents, s.currency, s.settled_date, s.note, s.updated_at,
+      s.amount_cents, s.currency, s.unit_id, gu.name AS unit_name, s.settled_date, s.note, s.updated_at,
       to_char(s.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS updated_at_token,
       p.display_name AS payer_name, r.display_name AS recipient_name
     FROM settlements s
     LEFT JOIN groups g ON g.id = s.group_id
+    LEFT JOIN group_units gu ON gu.id = s.unit_id
     JOIN users p ON p.id = s.payer_id JOIN users r ON r.id = s.recipient_id
     WHERE (s.payer_id = ${userId} OR s.recipient_id = ${userId})
       AND (${friendId}::bigint IS NULL OR s.payer_id = ${friendId} OR s.recipient_id = ${friendId})
@@ -37,6 +38,8 @@ export const GET = privateHandler(async (req: NextRequest) => {
       recipientName: s.recipient_name,
       amountCents: Number(s.amount_cents),
       currency: s.currency,
+      unitId: s.unit_id === null ? null : Number(s.unit_id),
+      unitName: s.unit_name ?? null,
       date: s.settled_date,
       note: s.note,
       updatedAt: versionToken(s.updated_at_token),
@@ -67,6 +70,7 @@ export const POST = handler(async (req: NextRequest) => {
       recipientId,
       amountCents: body.amountCents,
       currency: body.currency,
+      unitId: body.unitId,
       date: body.date,
       note: body.note,
     },

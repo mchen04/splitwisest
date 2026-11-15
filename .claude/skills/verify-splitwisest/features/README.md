@@ -38,3 +38,4 @@ Read the selected recipe before running it.
 - [Itemized bills](itemized.md) covers tax, tip, and saved adjustment precision.
 - [Edit and reload](edit.md) covers unchanged saves and amount changes.
 - [Balances](balances.md) covers debt rows and whole-yen totals.
+- [Custom units](units.md) covers group units, auto-reconcile, unit repayments, and money isolation.

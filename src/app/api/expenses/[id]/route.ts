@@ -14,8 +14,10 @@ type Ctx = { params: Promise<{ id: string }> };
 
 async function loadExpense(id: number, userId: number) {
   const rows = await sql`
-    SELECT e.*, to_char(e.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS updated_at_token
+    SELECT e.*, gu.name AS unit_name,
+      to_char(e.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS updated_at_token
     FROM expenses e
+    LEFT JOIN group_units gu ON gu.id = e.unit_id
     WHERE e.id = ${id}`;
   if (rows.length === 0) notFound("Expense not found");
   const e = rows[0];
@@ -32,8 +34,10 @@ export const GET = privateHandler(async (req: NextRequest, { params }: Ctx) => {
   const { rows: [rows, shares, items, attachments] } = await readSession((userId) => [
     sql`
       SELECT e.*, to_char(e.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS updated_at_token,
+        gu.name AS unit_name,
         EXISTS (SELECT 1 FROM group_members gm WHERE gm.group_id = e.group_id AND gm.user_id = ${userId}) AS is_member
       FROM expenses e
+      LEFT JOIN group_units gu ON gu.id = e.unit_id
       WHERE e.id = ${id}`,
     sql`
       SELECT es.user_id, es.share_cents, es.raw_input, u.display_name
@@ -51,6 +55,8 @@ export const GET = privateHandler(async (req: NextRequest, { params }: Ctx) => {
       amountCents: Number(e.amount_cents),
       currency: e.currency,
       convertedCents: Number(e.converted_cents),
+      unitId: e.unit_id === null ? null : Number(e.unit_id),
+      unitName: e.unit_name ?? null,
       date: e.expense_date,
       payerId: Number(e.payer_id),
       categoryId: e.category_id ? Number(e.category_id) : null,
@@ -97,6 +103,8 @@ export const DELETE = handler(async (req: NextRequest, { params }: Ctx) => {
     title: e.title,
     amountCents: Number(e.amount_cents),
     currency: e.currency,
+    unitId: e.unit_id === null ? null : Number(e.unit_id),
+    unitName: e.unit_name ?? null,
     expectedUpdatedAt,
   }, user);
   return NextResponse.json({ ok: true });

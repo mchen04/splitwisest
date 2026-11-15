@@ -30,10 +30,11 @@ export const GET = privateHandler(async (req: NextRequest, { params }: Ctx) => {
   if (pageRequest.complete) {
     const rows = await sql`
       SELECT e.converted_cents, e.expense_date, p.display_name AS payer_name,
-        c.name AS category_name
+        c.name AS category_name, e.unit_id, gu.name AS unit_name
       FROM expenses e
       JOIN users p ON p.id = e.payer_id
       LEFT JOIN categories c ON c.id = e.category_id
+      LEFT JOIN group_units gu ON gu.id = e.unit_id
       WHERE e.group_id = ${groupId}`;
     return privateJson(req, {
       hasMore: false,
@@ -42,6 +43,8 @@ export const GET = privateHandler(async (req: NextRequest, { params }: Ctx) => {
         date: e.expense_date,
         payerName: e.payer_name,
         categoryName: e.category_name,
+        unitId: e.unit_id === null ? null : Number(e.unit_id),
+        unitName: e.unit_name ?? null,
       })),
     });
   }
@@ -51,6 +54,7 @@ export const GET = privateHandler(async (req: NextRequest, { params }: Ctx) => {
       e.payer_id,
       to_char(e.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS updated_at_token,
       p.display_name AS payer_name, c.name AS category_name,
+      e.unit_id, gu.name AS unit_name,
       (SELECT COUNT(*) FROM attachments a WHERE a.expense_id = e.id) AS attachment_count,
       (SELECT json_agg(json_build_object('userId', a.user_id, 'shareCents', a.share_cents,
         'convertedShareCents', a.converted_share_cents))
@@ -58,16 +62,21 @@ export const GET = privateHandler(async (req: NextRequest, { params }: Ctx) => {
           -- Per-expense largest-remainder allocation so displayed converted shares
           -- sum EXACTLY to converted_cents (matches group_balance_rows()).
           SELECT es.user_id, es.share_cents,
-            ((div(es.share_cents::numeric * e.converted_cents, e.amount_cents::numeric * ${step})
+            ((div(es.share_cents::numeric * e.converted_cents,
+              e.amount_cents::numeric * CASE WHEN e.unit_id IS NULL THEN ${step}::bigint ELSE 1 END)
               + CASE WHEN row_number() OVER (
-                    ORDER BY mod(es.share_cents::numeric * e.converted_cents, e.amount_cents::numeric * ${step}) DESC, es.user_id)
-                  <= e.converted_cents / ${step} - sum(div(es.share_cents::numeric * e.converted_cents, e.amount_cents::numeric * ${step})) OVER ()
-                THEN 1 ELSE 0 END) * ${step})::bigint AS converted_share_cents
+                    ORDER BY mod(es.share_cents::numeric * e.converted_cents,
+                      e.amount_cents::numeric * CASE WHEN e.unit_id IS NULL THEN ${step}::bigint ELSE 1 END) DESC, es.user_id)
+                  <= e.converted_cents / CASE WHEN e.unit_id IS NULL THEN ${step}::bigint ELSE 1 END
+                    - sum(div(es.share_cents::numeric * e.converted_cents,
+                      e.amount_cents::numeric * CASE WHEN e.unit_id IS NULL THEN ${step}::bigint ELSE 1 END)) OVER ()
+                THEN 1 ELSE 0 END) * CASE WHEN e.unit_id IS NULL THEN ${step}::bigint ELSE 1 END)::bigint AS converted_share_cents
           FROM expense_shares es WHERE es.expense_id = e.id
         ) a) AS shares
     FROM expenses e
     JOIN users p ON p.id = e.payer_id
     LEFT JOIN categories c ON c.id = e.category_id
+    LEFT JOIN group_units gu ON gu.id = e.unit_id
     WHERE e.group_id = ${groupId}
       AND (${text}::text IS NULL OR e.title ILIKE '%' || ${text} || '%' ESCAPE '\' OR e.notes ILIKE '%' || ${text} || '%' ESCAPE '\')
       AND (${categoryId}::bigint IS NULL OR e.category_id = ${categoryId})
@@ -91,6 +100,8 @@ export const GET = privateHandler(async (req: NextRequest, { params }: Ctx) => {
       payerId: Number(e.payer_id),
       payerName: e.payer_name,
       categoryName: e.category_name,
+      unitId: e.unit_id === null ? null : Number(e.unit_id),
+      unitName: e.unit_name ?? null,
       updatedAt: versionToken(e.updated_at_token),
       attachmentCount: Number(e.attachment_count),
       shares: e.shares ?? [],

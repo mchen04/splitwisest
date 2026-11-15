@@ -5,6 +5,7 @@ import { Plus, Trash2 } from "lucide-react";
 import { fmtMoney } from "@/lib/client";
 import { currencyStep, currencySymbol } from "@/lib/currencies";
 import { splitEqual } from "@/lib/money";
+import { formatUnitAmount } from "@/lib/units";
 import { Button, IconButton, Input, radioGroupKeyDown, radioTabIndex } from "./ui";
 import { Member } from "./expense-form";
 
@@ -30,7 +31,7 @@ const LEGEND = "mb-1.5 block text-body font-medium text-ink-soft";
 // Participant picker for equal/exact/percentage/shares: a checkbox per member
 // plus, for weighted methods, the per-member value input.
 export function ParticipantSplit({
-  members, selected, method, values, amountCents, currency, onToggle, onValue, idPrefix = "p",
+  members, selected, method, values, amountCents, currency, unitName = null, onToggle, onValue, idPrefix = "p",
 }: {
   members: Member[];
   selected: Set<number>;
@@ -38,11 +39,13 @@ export function ParticipantSplit({
   values: Record<number, string>;
   amountCents: number;
   currency: string;
+  unitName?: string | null;
   participantCount: number;
   onToggle: (id: number) => void;
   onValue: (id: number, value: string) => void;
   idPrefix?: string;
 }) {
+  const amountText = (cents: number) => unitName ? formatUnitAmount(cents, unitName) : fmtMoney(cents, currency);
   if (method === "solo") {
     return (
       <fieldset>
@@ -62,7 +65,7 @@ export function ParticipantSplit({
               >
                 <span className="block truncate text-body font-medium">{member.displayName}</span>
                 {checked && amountCents > 0 && (
-                  <span className="tnum block truncate text-meta text-ink-faint">{fmtMoney(amountCents, currency)}</span>
+                  <span className="tnum block truncate text-meta text-ink-faint">{amountText(amountCents)}</span>
                 )}
               </button>
             );
@@ -74,7 +77,7 @@ export function ParticipantSplit({
 
   if (method === "equal") {
     const ids = members.filter((member) => selected.has(member.id)).map((member) => member.id);
-    const shares = ids.length ? splitEqual(amountCents, ids, currencyStep(currency)) : new Map<number, number>();
+    const shares = ids.length ? splitEqual(amountCents, ids, unitName ? 1 : currencyStep(currency)) : new Map<number, number>();
     return (
       <fieldset>
         <legend className={LEGEND}>Participants</legend>
@@ -96,7 +99,7 @@ export function ParticipantSplit({
                   <span className="block truncate text-body font-medium">{member.displayName}</span>
                   {checked && amountCents > 0 && (
                     <span className="tnum block truncate text-meta text-ink-faint">
-                      ≈ {fmtMoney(shares.get(member.id) ?? 0, currency)}
+                      ≈ {amountText(shares.get(member.id) ?? 0)}
                     </span>
                   )}
                 </span>
@@ -137,7 +140,7 @@ export function ParticipantSplit({
                     placeholder={method === "exact" ? "0.00" : method === "percentage" ? "%" : "1"}
                   />
                   <span className="min-w-4 text-meta text-ink-faint">
-                    {method === "percentage" ? "%" : method === "exact" ? currencySymbol(currency) : "×"}
+                    {method === "percentage" ? "%" : method === "exact" ? (unitName ?? currencySymbol(currency)) : "×"}
                   </span>
                 </div>
               )}
@@ -155,6 +158,7 @@ export function ItemizedSplit({
   items,
   setItems,
   currency,
+  unitName = null,
   subtotalCents,
   taxEnabled,
   taxRate,
@@ -172,6 +176,7 @@ export function ItemizedSplit({
   items: ItemRow[];
   setItems: Dispatch<SetStateAction<ItemRow[]>>;
   currency: string;
+  unitName?: string | null;
   subtotalCents: number;
   taxEnabled: boolean;
   taxRate: string;
@@ -185,6 +190,7 @@ export function ItemizedSplit({
   onTipEnabled: (enabled: boolean) => void;
   onTipRate: (rate: string) => void;
 }) {
+  const amountText = (cents: number) => unitName ? formatUnitAmount(cents, unitName) : fmtMoney(cents, currency);
   const patch = (idx: number, next: Partial<ItemRow>) =>
     setItems((arr) => arr.map((x, i) => (i === idx ? { ...x, ...next } : x)));
 
@@ -270,7 +276,7 @@ export function ItemizedSplit({
                 className="!w-24 text-right"
                 aria-label="Tax rate"
               />
-              <span className="text-body text-ink-faint">% = {fmtMoney(taxCents, currency)}</span>
+              <span className="text-body text-ink-faint">% = {amountText(taxCents)}</span>
             </div>
             <label className="flex min-h-[var(--control-h-sm)] items-center gap-2 text-body font-medium">
               <input
@@ -290,16 +296,16 @@ export function ItemizedSplit({
                 className="!w-24 text-right"
                 aria-label="Tip rate"
               />
-              <span className="text-body text-ink-faint">% = {fmtMoney(tipCents, currency)}</span>
+              <span className="text-body text-ink-faint">% = {amountText(tipCents)}</span>
             </div>
           </div>
           <div className="mt-3 grid grid-cols-3 gap-2 border-t border-line pt-3 text-body">
             <span className="text-ink-faint">Subtotal</span>
             <span className="text-ink-faint">Adjustments</span>
             <span className="text-right font-semibold">Total</span>
-            <span className="tnum">{fmtMoney(subtotalCents, currency)}</span>
-            <span className="tnum">{fmtMoney(taxCents + tipCents, currency)}</span>
-            <span className="tnum text-right font-semibold">{fmtMoney(totalCents, currency)}</span>
+            <span className="tnum">{amountText(subtotalCents)}</span>
+            <span className="tnum">{amountText(taxCents + tipCents)}</span>
+            <span className="tnum text-right font-semibold">{amountText(totalCents)}</span>
           </div>
         </div>
       </div>

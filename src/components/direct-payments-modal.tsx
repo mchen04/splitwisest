@@ -5,6 +5,9 @@ import { HandCoins, Pencil, Trash2 } from "lucide-react";
 import { api, ApiClientError, fmtMoney, fmtDate, useApiData } from "@/lib/client";
 import { Modal, Button, IconButton, LoadError, RowMeta, confirmAction, toast } from "./ui";
 import { DirectSettleModal } from "./direct-settle-modal";
+import { SettleModal } from "./settle-modal";
+import { formatUnitAmount } from "@/lib/units";
+import type { Member } from "./expense-form";
 
 interface DirectSettlement {
   id: number;
@@ -16,6 +19,8 @@ interface DirectSettlement {
   recipientName: string;
   amountCents: number;
   currency: string;
+  unitId: number | null;
+  unitName: string | null;
   date: string;
   note: string;
   updatedAt: string;
@@ -50,7 +55,9 @@ export function DirectPaymentsModal({
   async function remove(s: DirectSettlement) {
     if (!(await confirmAction({
       title: "Delete payment?",
-      message: `Delete this recorded payment of ${fmtMoney(s.amountCents, s.currency)}? Balances will update.`,
+      message: `Delete this recorded payment of ${s.unitId && s.unitName
+        ? formatUnitAmount(s.amountCents, s.unitName)
+        : fmtMoney(s.amountCents, s.currency)}? Balances will update.`,
       confirmLabel: "Delete payment",
       danger: true,
     }))) return;
@@ -107,7 +114,9 @@ export function DirectPaymentsModal({
                 </span>
                 {updating
                   ? <span role="status" className="text-meta text-ink-faint">Updating…</span>
-                  : <span className="tnum text-body font-semibold">{fmtMoney(s.amountCents, s.currency)}</span>}
+                  : <span className="tnum text-body font-semibold">{s.unitId && s.unitName
+                    ? formatUnitAmount(s.amountCents, s.unitName)
+                    : fmtMoney(s.amountCents, s.currency)}</span>}
                 <IconButton size="sm" variant="accent" label="Edit payment" onClick={() => setEditing(s)}>
                   <Pencil className="h-4 w-4" />
                 </IconButton>
@@ -121,16 +130,58 @@ export function DirectPaymentsModal({
         )}
       </Modal>
 
-      <DirectSettleModal
-        friend={editing ? { id: friend.id, displayName: friend.displayName, obligations: [], netByCurrency: {} } : null}
-        onClose={() => setEditing(null)}
-        onSaved={() => {
-          if (editing) setEdited({ id: editing.id, list: data?.settlements ?? null });
-          reload();
-          onChanged();
-        }}
-        existing={editing}
-      />
+      {editing?.unitId && editing.groupId !== null ? (
+        <UnitPaymentEditor
+          settlement={editing}
+          meId={meId}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEdited({ id: editing.id, list: data?.settlements ?? null });
+            reload();
+            onChanged();
+          }}
+        />
+      ) : (
+        <DirectSettleModal
+          friend={editing ? { id: friend.id, displayName: friend.displayName, obligations: [], netByCurrency: {} } : null}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            if (editing) setEdited({ id: editing.id, list: data?.settlements ?? null });
+            reload();
+            onChanged();
+          }}
+          existing={editing}
+        />
+      )}
     </>
+  );
+}
+
+function UnitPaymentEditor({
+  settlement,
+  meId,
+  onClose,
+  onSaved,
+}: {
+  settlement: DirectSettlement;
+  meId: number;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const { data } = useApiData<{ group: { currency: string }; members: Member[] }>(
+    `/api/groups/${settlement.groupId}`, 0, { sync: false }
+  );
+  if (!data || settlement.groupId === null) return null;
+  return (
+    <SettleModal
+      open
+      onClose={onClose}
+      onSaved={onSaved}
+      groupId={settlement.groupId}
+      members={data.members}
+      meId={meId}
+      defaultCurrency={data.group.currency}
+      existing={settlement}
+    />
   );
 }

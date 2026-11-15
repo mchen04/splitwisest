@@ -9,6 +9,7 @@ export interface AuthorizedGroup {
   currency: string;
   inviteCode: string;
   createdBy: number;
+  autoReconcileUnits: boolean;
 }
 
 export function parseGroupId(value: string): number {
@@ -19,7 +20,7 @@ export function parseGroupId(value: string): number {
 
 export async function requireGroupMember(groupId: number, userId: number): Promise<AuthorizedGroup> {
   const rows = await sql`
-    SELECT g.id, g.name, g.currency, g.invite_code, g.created_by,
+    SELECT g.id, g.name, g.currency, g.invite_code, g.created_by, g.auto_reconcile_units,
       EXISTS (
         SELECT 1 FROM group_members gm
         WHERE gm.group_id = g.id AND gm.user_id = ${userId}
@@ -38,6 +39,7 @@ function authorizedGroup(row: Record<string, unknown> | undefined): AuthorizedGr
     currency: row.currency as string,
     inviteCode: row.invite_code as string,
     createdBy: Number(row.created_by),
+    autoReconcileUnits: Boolean(row.auto_reconcile_units),
   };
 }
 
@@ -60,7 +62,13 @@ export interface GroupMember {
 export async function requireGroupViewerVersions(
   rawId: string,
   includeDetail = false,
-): Promise<AuthorizedGroup & { versions: GroupVersions; members: GroupMember[]; balances: MemberBalance[] }> {
+): Promise<AuthorizedGroup & {
+  versions: GroupVersions;
+  members: GroupMember[];
+  balances: MemberBalance[];
+  units: { id: number; name: string }[];
+  unitData: unknown;
+}> {
   const token = await requireSessionToken();
   // A malformed id keeps the old order: an invalid session still answers 401.
   if (!Number.isInteger(Number(rawId))) await requireUser();
@@ -70,8 +78,9 @@ export async function requireGroupViewerVersions(
       SELECT s.user_id AS id FROM sessions s JOIN users u ON u.id = s.user_id
       WHERE s.token = ${token} AND s.expires_at > now() AND u.deleted_at IS NULL
     ),
-    group_viewer AS MATERIALIZED (
-      SELECT v.viewer_id, g.id, g.name, g.currency, g.invite_code, g.created_by, m.is_member
+    gv AS MATERIALIZED (
+      SELECT v.viewer_id, g.id, g.name, g.currency, g.invite_code, g.created_by,
+        g.auto_reconcile_units, m.is_member
       FROM (SELECT (SELECT id FROM viewer) AS viewer_id) v
       LEFT JOIN groups g ON g.id = ${groupId}
       CROSS JOIN LATERAL (
@@ -80,20 +89,25 @@ export async function requireGroupViewerVersions(
     ),
     members AS MATERIALIZED (
       SELECT u.id, u.display_name, u.username
-      FROM group_viewer g JOIN group_members gm ON gm.group_id = g.id
+      FROM gv g JOIN group_members gm ON gm.group_id = g.id
       JOIN users u ON u.id = gm.user_id WHERE g.is_member
     ),
     balances AS MATERIALIZED (
       SELECT b.user_id, b.display_name, b.net_cents
-      FROM group_viewer g CROSS JOIN LATERAL group_balance_rows(g.id) b
+      FROM gv g CROSS JOIN LATERAL group_balance_rows(g.id) b
       WHERE g.is_member
+    ),
+    ud AS MATERIALIZED (
+      SELECT group_unit_data(g.id) AS data FROM gv g WHERE g.is_member
     )
     SELECT g.*,
       CASE WHEN g.is_member THEN md5(jsonb_build_array(g.name, g.currency, g.invite_code, g.created_by,
+        g.auto_reconcile_units,
         (SELECT jsonb_agg(jsonb_build_array(u.id, u.display_name, u.username) ORDER BY u.id)
          FROM members u),
         (SELECT jsonb_agg(jsonb_build_array(b.user_id, b.display_name, b.net_cents) ORDER BY b.user_id)
-         FROM balances b))::text) END AS detail_version,
+         FROM balances b),
+        (SELECT data FROM ud))::text) END AS detail_version,
       CASE WHEN g.is_member THEN md5(jsonb_build_array(
         (SELECT jsonb_agg(jsonb_build_array(o.id, o.title, o.amount_cents, o.updated_at) ORDER BY o.id)
          FROM group_obligations o WHERE o.group_id = g.id),
@@ -108,8 +122,11 @@ export async function requireGroupViewerVersions(
       END AS members,
       CASE WHEN ${includeDetail} AND g.is_member THEN
         (SELECT jsonb_agg(to_jsonb(b) ORDER BY b.display_name, b.user_id) FROM balances b)
-      END AS balances
-    FROM group_viewer g`;
+      END AS balances,
+      CASE WHEN ${includeDetail} AND g.is_member THEN
+        (SELECT data FROM ud)
+      END AS unit_data
+    FROM gv g`;
   if (rows[0].viewer_id === null) throw new AuthError();
   // Like requireUser, a confirmed session refreshes the owner cookie even when 404/403 follows.
   await markSessionOwner(Number(rows[0].viewer_id));
@@ -126,6 +143,10 @@ export async function requireGroupViewerVersions(
     balances: ((rows[0].balances ?? []) as { user_id: number; display_name: string; net_cents: number }[]).map((b) => ({
       userId: Number(b.user_id), displayName: b.display_name, netCents: Number(b.net_cents),
     })),
+    units: (((rows[0].unit_data as { units?: { id: number; name: string }[] } | null)?.units ?? [])).map((u) => ({
+      id: Number(u.id), name: u.name,
+    })),
+    unitData: rows[0].unit_data,
   };
 }
 
@@ -185,6 +206,37 @@ export async function renameGroupWithActivity(groupId: number, user: SessionUser
     SELECT id FROM upd`,
   ]);
   if (rows.length === 0) notFound();
+}
+
+export async function setGroupAutoReconcile(groupId: number, userId: number, enabled: boolean) {
+  const [, rows] = await sql.transaction((tx) => [
+    tx`SELECT pg_advisory_xact_lock(${groupId}::int)`,
+    tx`
+    WITH upd AS (
+      UPDATE groups SET auto_reconcile_units = ${enabled}
+      WHERE id = ${groupId}
+        AND EXISTS (
+          SELECT 1 FROM group_members
+          WHERE group_id = ${groupId} AND user_id = ${userId}
+        )
+      RETURNING auto_reconcile_units
+    ),
+    a AS (
+      INSERT INTO activity (group_id, actor_id, type, summary, data)
+      SELECT ${groupId}, ${userId}, 'group.units_reconcile',
+        (SELECT display_name FROM users WHERE id = ${userId}) || ' ' ||
+          CASE WHEN ${enabled} THEN 'turned on simplify unit balances'
+            ELSE 'turned off simplify unit balances' END,
+        jsonb_build_object('actionText',
+          CASE WHEN ${enabled} THEN 'turned on simplify unit balances'
+            ELSE 'turned off simplify unit balances' END)
+      FROM upd
+      RETURNING 1
+    )
+    SELECT auto_reconcile_units FROM upd`,
+  ]);
+  if (rows.length === 0) notFound();
+  return Boolean(rows[0].auto_reconcile_units);
 }
 
 export async function deleteGroup(
@@ -257,6 +309,11 @@ export async function removeGroupMemberWithActivity({
       JOIN group_obligations go ON go.id = a.obligation_id
       WHERE go.group_id = ${groupId} AND a.user_id = ${targetId}
     ),
+    unit_unsettled AS (
+      SELECT unit_name, reconcile, net_cents, owes_cents, owed_cents
+      FROM group_unit_member_unsettled(${groupId}, ${targetId})
+      LIMIT 1
+    ),
     del AS (
       DELETE FROM group_members
       USING member_balance, active_recurring_refs, group_balance_refs
@@ -265,6 +322,7 @@ export async function removeGroupMemberWithActivity({
         AND member_balance.net_cents = 0
         AND active_recurring_refs.ref_count = 0
         AND group_balance_refs.ref_count = 0
+        AND NOT EXISTS (SELECT 1 FROM unit_unsettled)
       RETURNING user_id
     ),
     t AS (
@@ -284,6 +342,11 @@ export async function removeGroupMemberWithActivity({
       (SELECT net_cents FROM member_balance) AS net_cents,
       (SELECT ref_count FROM active_recurring_refs) AS active_recurring_refs,
       (SELECT ref_count FROM group_balance_refs) AS group_balance_refs,
+      (SELECT unit_name FROM unit_unsettled) AS unit_name,
+      (SELECT reconcile FROM unit_unsettled) AS unit_reconcile,
+      (SELECT net_cents FROM unit_unsettled) AS unit_net_cents,
+      (SELECT owes_cents FROM unit_unsettled) AS unit_owes_cents,
+      (SELECT owed_cents FROM unit_unsettled) AS unit_owed_cents,
       (SELECT count(*) FROM del)::int AS removed`,
   ]);
   return {
@@ -291,5 +354,10 @@ export async function removeGroupMemberWithActivity({
     netCents: Number(rows[0]?.net_cents ?? 0),
     activeRecurringRefs: Number(rows[0]?.active_recurring_refs ?? 0),
     groupBalanceRefs: Number(rows[0]?.group_balance_refs ?? 0),
+    unitName: (rows[0]?.unit_name as string | null) ?? null,
+    unitReconcile: Boolean(rows[0]?.unit_reconcile),
+    unitNetCents: Number(rows[0]?.unit_net_cents ?? 0),
+    unitOwesCents: Number(rows[0]?.unit_owes_cents ?? 0),
+    unitOwedCents: Number(rows[0]?.unit_owed_cents ?? 0),
   };
 }

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Receipt, Search, SlidersHorizontal, X } from "lucide-react";
 import { fmtMoney, fmtDate, useApiData, useFilters } from "@/lib/client";
+import { formatUnitAmount } from "@/lib/units";
 import { AppShell } from "@/components/shell";
 import { Card, EmptyState, Input, Select, Button, Chip, DateField, LoadError, RowMeta, RowTitle, SectionLabel } from "@/components/ui";
 
@@ -14,6 +15,8 @@ interface Expense {
   title: string;
   amountCents: number;
   currency: string;
+  unitId: number | null;
+  unitName: string | null;
   date: string;
   payerName: string;
   categoryName: string | null;
@@ -137,7 +140,9 @@ export default function ExpensesPage() {
                         {fmtDate(e.date)} · {e.payerName} paid{e.categoryName ? ` · ${e.categoryName}` : ""}
                       </RowMeta>
                     </span>
-                    <span className="tnum shrink-0 text-body font-semibold">{fmtMoney(e.amountCents, e.currency)}</span>
+                    <span className="tnum shrink-0 text-body font-semibold">{e.unitId && e.unitName
+                      ? formatUnitAmount(e.amountCents, e.unitName)
+                      : fmtMoney(e.amountCents, e.currency)}</span>
                   </Link>
                 </li>
               );

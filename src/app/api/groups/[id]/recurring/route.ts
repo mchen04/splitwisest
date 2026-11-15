@@ -14,9 +14,11 @@ type Ctx = { params: Promise<{ id: string }> };
 
 export const GET = privateHandler(async (req: NextRequest, { params }: Ctx) => {
   const { rows: [rows] } = await readGroup((await params).id, (groupId) => [sql`
-    SELECT r.*, to_char(r.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS updated_at_token,
+    SELECT r.*, gu.name AS unit_name,
+      to_char(r.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS updated_at_token,
       u.display_name AS payer_name, c.name AS category_name
     FROM recurring_expenses r
+    LEFT JOIN group_units gu ON gu.id = r.unit_id
     JOIN users u ON u.id = r.payer_id
     LEFT JOIN categories c ON c.id = r.category_id
     WHERE r.group_id = ${groupId} ORDER BY r.id`]);
@@ -26,6 +28,8 @@ export const GET = privateHandler(async (req: NextRequest, { params }: Ctx) => {
       title: r.title,
       amountCents: Number(r.amount_cents),
       currency: r.currency,
+      unitId: r.unit_id === null ? null : Number(r.unit_id),
+      unitName: r.unit_name ?? null,
       payerId: Number(r.payer_id),
       payerName: r.payer_name,
       categoryId: r.category_id ? Number(r.category_id) : null,
@@ -45,6 +49,7 @@ const Body = z.object({
   title: z.string().trim().min(1, "Title is required").max(120),
   amountCents: z.number().int().positive().max(100_000_000_000),
   currency: z.string().refine((c) => CURRENCIES.includes(c), "Unsupported currency"),
+  unitId: z.number().int().positive().nullable().optional(),
   payerId: z.number().int().positive(),
   categoryId: z.number().int().positive().nullable().optional(),
   participantIds: z.array(z.number().int().positive()).min(1, "At least one participant"),

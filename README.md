@@ -4,7 +4,7 @@
 
 SplitWisest tracks shared expenses, group balances, and payments made outside the app.
 It never moves money or connects to banks.
-Groups support multiple currencies, five expense split methods, recurring expenses, chat, and receipt attachments.
+Groups support multiple currencies, five expense split methods, custom nonmonetary units, recurring expenses, chat, and receipt attachments.
 The app also provides friend balances, an activity feed, CSV export, an inbox, and optional Web Push.
 
 The stack uses Next.js App Router, React, TypeScript, Tailwind CSS, Neon PostgreSQL, and Vitest.
@@ -65,6 +65,8 @@ pnpm build
 | `pnpm verify:profiles` | Profile access through app routes. |
 | `pnpm verify:money-ledger` | Stored money, API results, and SQL balances. |
 | `pnpm verify:money-form` | Browser previews, saves, and edits. |
+| `pnpm verify:units` | Unit CRUD, splits, balances, reconciliation, and money isolation through HTTP and SQL. |
+| `pnpm verify:units-ui` | Unit flows and layout at phone and desktop widths in WebKit. |
 | `pnpm verify:notifications` | Notification events, access, and delivery. |
 | `pnpm verify:monthly-reminders` | Monthly eligibility, concurrency, and delivery. |
 
@@ -72,6 +74,7 @@ HTTP checks need a running app and the same database exports.
 `SPLITWISEST_BASE_URL` selects the app origin.
 Use disposable local data: these checks create and delete fixtures.
 Money and notification checks need dedicated databases; see [database checks](docs/DATABASE.md#database-checks).
+The units check uses `splitwisest_units_qa` and an app on port 3392.
 See [PWA checks](docs/PWA.md) for mobile layouts, drafts, and updates across builds.
 
 ## Deploy

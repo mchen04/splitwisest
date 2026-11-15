@@ -414,6 +414,7 @@ export function Modal({
   footer,
   wide = false,
   closeDisabled = false,
+  returnFocusId,
 }: {
   open: boolean;
   onClose: () => void;
@@ -422,15 +423,20 @@ export function Modal({
   footer?: ReactNode;
   wide?: boolean;
   closeDisabled?: boolean;
+  returnFocusId?: string;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
   const onCloseRef = useRef(onClose);
   useEffect(() => {
     onCloseRef.current = onClose;
   }, [onClose]);
   useEffect(() => {
     if (!open) return;
-    const previouslyFocused = document.activeElement as HTMLElement | null;
+    if (!returnFocusRef.current) {
+      returnFocusRef.current = (returnFocusId ? document.getElementById(returnFocusId) : null)
+        ?? document.activeElement as HTMLElement | null;
+    }
     const focusables = () =>
       [...(panelRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? [])]
         // Unchecked radios (tabIndex -1) are not Tab stops.
@@ -469,9 +475,16 @@ export function Modal({
       document.removeEventListener("keydown", onKey);
       modalStack.splice(modalStack.indexOf(layer), 1);
       if (modalStack.length === 0) document.body.style.overflow = "";
-      previouslyFocused?.focus?.();
+      const previouslyFocused = returnFocusRef.current;
+      returnFocusRef.current = null;
+      const returnTarget = previouslyFocused?.isConnected
+        ? previouslyFocused
+        : previouslyFocused?.id
+          ? document.getElementById(previouslyFocused.id)
+          : null;
+      returnTarget?.focus?.();
     };
-  }, [open]);
+  }, [open, returnFocusId]);
   if (!open) return null;
   return (
     <div

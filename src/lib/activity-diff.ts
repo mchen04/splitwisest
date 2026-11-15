@@ -1,4 +1,5 @@
 import { fmtMoney } from "./money";
+import { formatUnitAmount } from "./units";
 
 /** Fields a person would care about. Derived values (fx rate, converted amount,
  *  updated_at) are deliberately absent — they move on their own and read as noise. */
@@ -37,6 +38,8 @@ export interface MoneyChange {
   toCents: number;
   fromCurrency: string;
   toCurrency: string;
+  fromUnitName?: string | null;
+  toUnitName?: string | null;
 }
 export interface TextChange {
   field: "currency" | "payer" | "splitMethod" | "date" | "category" | "title";
@@ -58,6 +61,7 @@ export interface ExpenseSnapshot {
   title: string;
   amountCents: number;
   currency: string;
+  unitName?: string | null;
   date: string;
   payerName: string;
   categoryName: string | null;
@@ -112,16 +116,20 @@ function namesFor(shares: ExpenseSnapshot["shares"], ids: number[]): string[] {
 export function diffExpense(prev: ExpenseSnapshot, next: ExpenseSnapshot): Change[] {
   const changes: Change[] = [];
 
-  if (prev.amountCents !== next.amountCents) {
+  const prevUnit = prev.unitName ?? null;
+  const nextUnit = next.unitName ?? null;
+  if (prev.amountCents !== next.amountCents || prevUnit !== nextUnit) {
     changes.push({
       field: "amount",
       fromCents: prev.amountCents,
       toCents: next.amountCents,
       fromCurrency: prev.currency,
       toCurrency: next.currency,
+      fromUnitName: prevUnit,
+      toUnitName: nextUnit,
     });
   }
-  if (prev.currency !== next.currency) {
+  if (prev.currency !== next.currency && prevUnit === nextUnit) {
     changes.push({ field: "currency", from: prev.currency, to: next.currency });
   }
   if (prev.payerName !== next.payerName) {
@@ -185,7 +193,11 @@ function joinNames(names: string[]): string {
 export function describeChange(change: Change): string {
   switch (change.field) {
     case "amount":
-      return `changed the amount from ${fmtMoney(change.fromCents, change.fromCurrency)} to ${fmtMoney(change.toCents, change.toCurrency)}`;
+      return `changed the amount from ${change.fromUnitName
+        ? formatUnitAmount(change.fromCents, change.fromUnitName)
+        : fmtMoney(change.fromCents, change.fromCurrency)} to ${change.toUnitName
+        ? formatUnitAmount(change.toCents, change.toUnitName)
+        : fmtMoney(change.toCents, change.toCurrency)}`;
     case "currency":
       return `changed the currency from ${change.from} to ${change.to}`;
     case "payer":

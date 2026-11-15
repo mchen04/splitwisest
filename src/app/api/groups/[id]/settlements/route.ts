@@ -23,10 +23,12 @@ export const GET = privateHandler(async (req: NextRequest, { params }: Ctx) => {
   const limit = Math.min(Math.max(Number(req.nextUrl.searchParams.get("limit")) || 50, 1), 200);
   const { rows: [rows] } = await readGroup((await params).id, (groupId) => [sql`
     SELECT s.id, s.payer_id, s.recipient_id, s.amount_cents, s.currency, s.converted_cents,
+      s.unit_id, gu.name AS unit_name,
       s.settled_date, s.note, s.updated_at,
       to_char(s.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS updated_at_token,
       p.display_name AS payer_name, r.display_name AS recipient_name
     FROM settlements s
+    LEFT JOIN group_units gu ON gu.id = s.unit_id
     JOIN users p ON p.id = s.payer_id JOIN users r ON r.id = s.recipient_id
     WHERE s.group_id = ${groupId} ORDER BY s.settled_date DESC, s.id DESC LIMIT ${limit + 1}`]);
   const hasMore = rows.length > limit;
@@ -42,6 +44,8 @@ export const GET = privateHandler(async (req: NextRequest, { params }: Ctx) => {
       amountCents: Number(s.amount_cents),
       currency: s.currency,
       convertedCents: Number(s.converted_cents),
+      unitId: s.unit_id === null ? null : Number(s.unit_id),
+      unitName: s.unit_name ?? null,
       date: s.settled_date,
       note: s.note,
       updatedAt: versionToken(s.updated_at_token),
@@ -56,7 +60,7 @@ export const POST = handler(async (req: NextRequest, { params }: Ctx) => {
   const body = Body.parse(await req.json());
   if (body.payerId === body.recipientId) badRequest("Payer and recipient must be different");
   let expectedBalances: [number, number][] | undefined;
-  if (body.settleFullBalance) {
+  if (body.settleFullBalance && body.unitId == null) {
     const balances = await groupBalances(groupId);
     const transfer = suggestSettlements(balances).find(
       (item) => item.from === body.payerId && item.to === body.recipientId

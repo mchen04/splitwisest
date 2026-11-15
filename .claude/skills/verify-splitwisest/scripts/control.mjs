@@ -17,7 +17,7 @@ const evidence = resolve(work, "evidence");
 const statePath = resolve(work, "instance.json");
 const docker = existsSync("/Applications/Docker.app/Contents/Resources/bin/docker")
   ? "/Applications/Docker.app/Contents/Resources/bin/docker" : "docker";
-const container = `splitwisest-local-${hash}-postgres-1`;
+const container = process.env.SPLITWISEST_PG_CONTAINER ?? `splitwisest-local-${hash}-postgres-1`;
 const database = "splitwisest_money_qa";
 
 function run(command, args, env = process.env, transcript) {
@@ -82,7 +82,7 @@ async function launch() {
   };
   writeFileSync(statePath, JSON.stringify(state));
   const env = { ...environment(state), SPLITWISEST_PG_PORT: String(pgPort), SPLITWISEST_PROXY_PORT: String(proxyPort) };
-  run("pnpm", ["db:local"], env);
+  if (!process.env.SPLITWISEST_PG_CONTAINER) run("pnpm", ["db:local"], env);
   if (!psql(`SELECT 1 FROM pg_database WHERE datname = '${database}'`, true)) {
     psql(`CREATE DATABASE ${database}`);
     state.databaseCreated = true;
@@ -125,20 +125,30 @@ async function doctor() {
   const sql = neon(state.databaseUrl);
   const rows = await sql`SELECT current_database() AS name, to_regclass('users') AS users,
     to_regclass('expense_shares') AS shares, to_regprocedure('group_balance_rows(bigint)') AS balances,
-    to_regclass('notifications') AS notifications`;
+    to_regclass('notifications') AS notifications, to_regclass('group_units') AS units`;
   assert.equal(rows[0].name, database);
-  for (const key of ["users", "shares", "balances", "notifications"]) assert(rows[0][key], `Missing ${key}; migration is incomplete`);
+  for (const key of ["users", "shares", "balances", "notifications", "units"]) assert(rows[0][key], `Missing ${key}; migration is incomplete`);
   console.log(`PASS doctor: owned app at ${state.base}, migrated local database`);
 }
 
 async function drive() {
   await doctor();
   const state = readState();
+  const feature = process.argv[3] ?? "shares";
+  assert(["shares", "all", "units"].includes(feature), "Use drive shares, drive all, or drive units");
+  if (feature === "units") {
+    assert(process.env.PLAYWRIGHT_BROWSERS_PATH || process.env.PLAYWRIGHT_WEBKIT_EXECUTABLE,
+      "Set PLAYWRIGHT_BROWSERS_PATH to a folder holding the lockfile's WebKit build");
+    run("pnpm", ["exec", "tsx", "scripts/verify-units.ts"], environment(state), resolve(evidence, "drive-units-api.log"));
+    run("node", ["scripts/verify-units-ui.mjs"], {
+      ...environment(state), UNITS_UI_ORIGIN: state.base, UNITS_UI_EVIDENCE_DIR: resolve(evidence, "units-ui"),
+    }, resolve(evidence, "drive-units-ui.log"));
+    console.log(`PASS drive units: ${evidence}`);
+    return;
+  }
   const browserPath = process.env.SPLITWISEST_CHROMIUM_PATH
     ?? `${homedir()}/Library/Caches/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-mac-arm64/chrome-headless-shell`;
   assert(existsSync(browserPath), "Set SPLITWISEST_CHROMIUM_PATH to an installed Chromium executable");
-  const feature = process.argv[3] ?? "shares";
-  assert(["shares", "all"].includes(feature), "Use drive shares or drive all");
   run("pnpm", ["exec", "tsx", "scripts/verify-money-form.ts"], {
     ...environment(state), SPLITWISEST_CHROMIUM_PATH: browserPath, SPLITWISEST_MONEY_FORM_FEATURE: feature,
   }, resolve(evidence, `drive-${feature}.log`));
@@ -165,12 +175,13 @@ async function cleanup() {
   unlinkSync(statePath);
   const expected = ["after-form.png", "after-saved.png", "after-balances.png", "after-edit-reload.png", "money-form-proof.json"];
   const retained = expected.filter((file) => existsSync(resolve(evidence, file)));
-  console.log(`PASS cleanup: owned server removed; ${retained.length}/${expected.length} proof artifacts retained at ${evidence}`);
+  const units = existsSync(resolve(evidence, "units-ui")) ? "; unit screenshots retained in units-ui" : "";
+  console.log(`PASS cleanup: owned server removed; ${retained.length}/${expected.length} proof artifacts retained at ${evidence}${units}`);
 }
 
 const command = process.argv[2];
 try {
-  assert(["launch", "doctor", "drive", "cleanup"].includes(command), "Use launch, doctor, drive [shares|all], or cleanup");
+  assert(["launch", "doctor", "drive", "cleanup"].includes(command), "Use launch, doctor, drive [shares|all|units], or cleanup");
   await ({ launch, doctor, drive, cleanup })[command]();
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));

@@ -17,7 +17,9 @@
     "verify:notifications": "tsx scripts/verify-notifications.ts",
     "verify:monthly-reminders": "tsx scripts/verify-monthly-reminders.ts",
     "verify:money-ledger": "tsx scripts/verify-money-ledger.ts",
-    "verify:money-form": "tsx scripts/verify-money-form.ts"
+    "verify:money-form": "tsx scripts/verify-money-form.ts",
+    "verify:units": "tsx scripts/verify-units.ts",
+    "verify:units-ui": "node scripts/verify-units-ui.mjs"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",

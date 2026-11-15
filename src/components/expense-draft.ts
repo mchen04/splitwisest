@@ -9,6 +9,7 @@ export interface ExpenseFields {
   title: string;
   amount: string;
   currency: string;
+  unitId: number | null;
   date: string;
   payerId: number;
   categoryId: number | "";

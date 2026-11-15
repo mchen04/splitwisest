@@ -1,6 +1,6 @@
 ---
 name: verify-splitwisest
-description: Verify Splitwisest's real web expense forms, Shares allocations, edits, and balances with local PostgreSQL and headless Chromium. Use after money-form changes or when reproducing expense split bugs.
+description: Verify Splitwisest's real web expense forms, splits, custom units, balances, and read performance with local PostgreSQL, WebKit, and Chromium. Use after money, unit, or balance changes, or when reproducing split and balance bugs.
 ---
 
 # Verify Splitwisest
@@ -29,6 +29,7 @@ Use `http://localhost:3391`. Opening Next through `127.0.0.1` can block its brow
 An occupied app port, existing instance record, or checkout dev lock stops launch.
 Do not reuse that instance or remove its lock. Finish the owning run first.
 Different checkouts require distinct `SPLITWISEST_VERIFY_PORT`, `SPLITWISEST_PG_PORT`, and `SPLITWISEST_PROXY_PORT` values.
+Set `SPLITWISEST_PG_CONTAINER` to reuse a running Postgres container with its proxy instead of `pnpm db:local`, for example when Docker has no room for new volumes.
 Two dev servers cannot safely share this checkout's `.next` directory.
 The helper stores its server PID and process start time outside the repo.
 
@@ -63,6 +64,15 @@ It opens `Balances`, checks each debtor's `Record payment: <name> pays Ann` row,
 Edits start at `View USD proportional shares`, then `Edit`, and finish through `Save changes`.
 Do not replace those writes with API expense creation or internal setters when proving Shares.
 
+```sh
+PLAYWRIGHT_BROWSERS_PATH=<task-owned folder with the lockfile WebKit> \
+.claude/skills/verify-splitwisest/scripts/control.mjs drive units
+```
+
+`units` runs `scripts/verify-units.ts` against the API and SQL, then `scripts/verify-units-ui.mjs` in WebKit.
+Read [custom units](features/units.md) for the semantics and the proof it requires.
+The API summary must report zero failures, and every named screenshot must show its step.
+
 ## Evidence
 
 The helper stores proof files under `~/.cache/splitwisest/verify-<checkout hash>/evidence/` by default.
@@ -83,6 +93,31 @@ JPY 101 must allocate 5100/2500/2500 internal cents, all divisible by 100.
 Equal JPY weights must preserve the total despite rounding.
 Open screenshots before claiming visual proof. A screenshot alone does not prove persistence.
 An unmet precondition is a failed journey. Record it; do not weaken assertions or silently skip an entry point.
+
+## Performance
+
+Measure money and unit reads with a fixed seed, the same machine, and the same command on both sides.
+`scripts/bench.mts` seeds a dedicated database whose name contains `bench`, then times reads.
+
+```sh
+export DATABASE_URL=postgres://postgres:postgres@127.0.0.1:<pg port>/splitwisest_bench
+export NEON_LOCAL_PROXY=http://127.0.0.1:<proxy port>/sql SPLITWISEST_BENCH_DIR=<folder outside git>
+pnpm exec tsx .claude/skills/verify-splitwisest/scripts/bench.mts seed
+pnpm exec tsx .claude/skills/verify-splitwisest/scripts/bench.mts seed-units
+node .claude/skills/verify-splitwisest/scripts/sql-relay.mjs 54545 "$NEON_LOCAL_PROXY" &
+SPLITWISEST_BASE_URL=http://127.0.0.1:<port> SPLITWISEST_BENCH_RELAY=http://127.0.0.1:54545 \
+  pnpm exec tsx .claude/skills/verify-splitwisest/scripts/bench.mts measure --label <side> --phase warm --reps 30
+pnpm exec tsx .claude/skills/verify-splitwisest/scripts/bench.mts sql --label <side>
+```
+
+`seed` writes 10,500 money expenses across six groups. Run `seed-units` only on a separate copy, because it adds unit rows.
+Start `next start` with `NEON_LOCAL_PROXY` pointed at the relay so `queriesPerRequest` counts database round trips.
+Run `--phase cold` once right after a fresh server start and database restart.
+Alternate old and new builds for at least five rounds and compare medians with their ranges.
+Expected round trips per request are 1 for groups, 3 for friends, 2 for group detail, 2 for group expenses, 1 for expenses, and 1 for sync.
+A count change is a regression even when timings look similar. Every result line must report `errors: 0`.
+Reapply every changed scoped migration to each bench database before measuring, or the new build fails fast with errors that look like speedups.
+`scripts/ui-shots.mjs <label>` captures the same group screens at phone and desktop sizes for before/after comparison.
 
 ## Cleanup
 
@@ -118,6 +153,6 @@ pnpm exec tsx scripts/verify-money-form.ts
 ```
 
 Keep `SPLITWISEST_CHROMIUM_PATH` exported for this command.
-Do not run `pnpm build` or the full suite on this Mac.
+Do not run `pnpm build`, the full suite, benchmarks, or browser matrices on the coding Mac; use the compute machine.
 For money-form changes, run `share-input.test.ts`, `money.test.ts`, `money-invariants.test.ts`, `tsc --noEmit`, and `pnpm lint`.
 Use `/maintain-verification-skill` when routes, controls, or money rules change.
