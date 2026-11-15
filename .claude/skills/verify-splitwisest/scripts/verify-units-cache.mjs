@@ -36,7 +36,8 @@ async function setup(label) {
   const me = await api("/api/me", signup.cookies);
   const owner = { id: Number(me.json.user.id), cookies: signup.cookies };
   created.users.push(owner.id);
-  const group = await api("/api/groups", owner.cookies, { name: `Cache group ${label} ${suffix}`, currency: "USD" });
+  const groupName = `Cache group ${label} ${suffix}`;
+  const group = await api("/api/groups", owner.cookies, { name: groupName, currency: "USD" });
   created.groups.push(group.json.id);
   cleanupGroups.push({ id: group.json.id, owner });
   const unit = await api(`/api/groups/${group.json.id}/units`, owner.cookies, { name: `cache-unit-${label}` });
@@ -47,7 +48,7 @@ async function setup(label) {
   });
   created.expenses.push(expense.json.id);
   cleanupExpenses.push({ id: expense.json.id, owner });
-  return { owner, group: group.json, unit: unit.json, expense: expense.json };
+  return { owner, group: { ...group.json, name: groupName }, unit: unit.json, expense: expense.json };
 }
 
 const oldDetail = (group) => ({
@@ -102,16 +103,20 @@ try {
   if (scenario === "isolation") {
     const a = await setup("a");
     const b = await setup("b");
-    const { context, page } = await launch(b.owner.cookies);
-    const build = await buildId(page);
+    const control = await launch(b.owner.cookies);
+    const build = await buildId(control.page);
     const ownSeed = JSON.stringify({
       owner: String(b.owner.id), build,
       entries: [["/api/groups", { groups: [{ id: b.group.id, name: b.group.name, currency: "USD" }] }, Date.now()]],
     });
-    await page.evaluate((value) => localStorage.setItem("splitwisest.read-cache.v1", value), ownSeed);
-    await page.goto(new URL("/groups", base).href, { waitUntil: "load" });
-    await page.waitForTimeout(1000);
-    const controlPainted = (await page.locator("body").innerText()).includes(b.group.name);
+    await control.context.addInitScript((value) => {
+      localStorage.setItem("splitwisest.read-cache.v1", value);
+    }, ownSeed);
+    await control.page.goto(new URL("/groups", base).href, { waitUntil: "load" });
+    await control.page.waitForTimeout(1000);
+    const controlPainted = (await control.page.locator("body").innerText()).includes(b.group.name);
+    await control.context.close();
+    const iso = await launch(b.owner.cookies);
     const seed = JSON.stringify({
       owner: String(a.owner.id), build,
       entries: [
@@ -119,31 +124,31 @@ try {
         [`/api/groups/${a.group.id}`, oldDetail(a.group), Date.now()],
       ],
     });
-    await page.evaluate((value) => localStorage.setItem("splitwisest.read-cache.v1", value), seed);
-    await page.goto(new URL("/groups", base).href, { waitUntil: "load" });
-    await page.waitForTimeout(1000);
-    const leaked = (await page.locator("body").innerText()).includes(a.group.name);
+    await iso.page.goto(new URL("/offline.html", base).href, { waitUntil: "load" });
+    await iso.page.evaluate((value) => localStorage.setItem("splitwisest.read-cache.v1", value), seed);
+    await iso.page.goto(new URL("/groups", base).href, { waitUntil: "load" });
+    await iso.page.waitForTimeout(1000);
+    const leaked = (await iso.page.locator("body").innerText()).includes(a.group.name);
     await api(`/api/groups/${b.group.id}/expenses`, b.owner.cookies, {
       title: "Isolation fresh proof", amountCents: 100, currency: "USD", unitId: b.unit.id,
       date: new Date().toISOString().slice(0, 10), payerId: b.owner.id, notes: "", splitMethod: "equal",
       participants: [{ userId: b.owner.id }],
     });
-    await page.goto(new URL(`/groups/${b.group.id}`, base).href, { waitUntil: "load" });
-    await page.waitForTimeout(1500);
-    const fresh = (await page.locator("body").innerText()).includes("Isolation fresh proof");
+    await iso.page.goto(new URL(`/groups/${b.group.id}`, base).href, { waitUntil: "load" });
+    await iso.page.waitForTimeout(1500);
+    const fresh = (await iso.page.locator("body").innerText()).includes("Isolation fresh proof");
     detail = { controlPainted, leaked, fresh };
     passed = controlPainted && !leaked && fresh;
-    await context.close();
+    await iso.context.close();
   } else {
     const data = await setup(scenario);
     const path = `/api/groups/${data.group.id}`;
     const { context, page } = await launch(data.owner.cookies);
-    const build = await buildId(page);
     const seed = JSON.stringify({
-      owner: String(data.owner.id), build, entries: [[path, oldDetail(data.group), Date.now()]],
+      owner: String(data.owner.id), entries: [[path, oldDetail(data.group), Date.now()]],
     });
-    await page.evaluate((value) => localStorage.setItem("splitwisest.read-cache.v1", value), seed);
     await page.goto(new URL("/offline.html", base).href, { waitUntil: "load" });
+    await page.evaluate((value) => localStorage.setItem("splitwisest.read-cache.v1", value), seed);
     const seeded = await page.evaluate(() => localStorage.getItem("splitwisest.read-cache.v1"));
     assert.equal(seeded, seed, "seed was not present before app navigation");
     const requests = [];
