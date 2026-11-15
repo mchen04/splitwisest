@@ -595,6 +595,12 @@ async function suite() {
     }
     await sleep(1500);
     const draftKey = `splitwisest.draft.${me.user.id}.expense`;
+    try {
+      await page.getByRole("dialog", { name: "Add expense" }).waitFor({ state: "visible", timeout: 30000 });
+      await page.locator("#expense-title").waitFor({ state: "visible", timeout: 10000 });
+    } catch (error) {
+      throw new Error(`units-cache draft: add-expense sheet did not open: ${error instanceof Error ? error.message : String(error)}`);
+    }
     await page.locator("#expense-title").fill("Cache draft survives");
     await page.locator("#expense-amount").fill("1.23");
     await page.waitForFunction((key) => Boolean(localStorage.getItem(key)), draftKey, { timeout: 10000 });
