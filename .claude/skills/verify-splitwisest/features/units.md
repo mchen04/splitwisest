@@ -66,12 +66,19 @@ The cache-owner cookie, session cookie, drafts (`splitwisest.draft.*`), push dev
 Run the genuine two-build upgrade on the compute machine:
 
 ```sh
-node scripts/pwa-swap-harness.mjs build
+node scripts/pwa-swap-harness.mjs build --old-ref 4b2480f
 node scripts/pwa-swap-harness.mjs suite --scenario units-cache
 ```
 
-The harness builds `4b2480f` as A and this tree as B, serves both on one local HTTPS origin, signs in on A, opens a money group, swaps to B, then checks the stale entry, cold launch, worker update, resume, and reload.
+The harness builds `4b2480f` as A in a temporary git worktree and this tree as B, serves both on one local HTTPS origin, signs in on A, opens a money group, swaps to B, then checks the stale entry, cold launch, worker update, resume, and reload.
 Each scenario prints one JSON line and the command exits nonzero on failure.
+
+The inverse proof builds B from the released `1c6a729` tree and must fail:
+
+```sh
+node scripts/pwa-swap-harness.mjs build --old-ref 4b2480f --new-ref 1c6a729
+node scripts/pwa-swap-harness.mjs suite --scenario units-cache
+```
 
 Run stale-cache injection, account isolation, and the negative control against a running build:
 
@@ -91,4 +98,4 @@ node .claude/skills/verify-splitwisest/scripts/verify-units-cache.mjs negative
 
 `inject` seeds a build-less v1 group detail and requires a fresh `/api/groups/:id` request, a rendered group, and a signed-in session.
 `isolation` seeds another account's entry and requires it not to paint.
-`negative` runs against the old build and passes only when the stale entry paints, proving the check goes red on `1c6a729` behavior.
+`negative` runs against the old build and passes only when the stale entry causes no fresh `/api/groups/:id` request or the crash screen, proving the check goes red on `1c6a729` behavior.

@@ -9,31 +9,41 @@ const base = process.env.SPLITWISEST_BROWSER_URL ?? "http://localhost:3391";
 const scenario = process.argv[2] ?? "inject";
 const profile = mkdtempSync(join(tmpdir(), "splitwisest-units-cache-"));
 const password = "cache-check-password";
+const created = { users: [], groups: [], expenses: [] };
+const deleted = { groups: [], expenses: [] };
 let passed = false;
 let detail = {};
 
-async function api(path, cookie, body) {
+async function api(path, cookies, body, method) {
   const res = await fetch(new URL(path, base), {
-    method: body ? "POST" : "GET",
-    headers: { ...(cookie ? { cookie } : {}), ...(body ? { "content-type": "application/json" } : {}) },
+    method: method ?? (body ? "POST" : "GET"),
+    headers: {
+      ...(cookies?.length ? { cookie: cookies.map((c) => c.split(";")[0]).join("; ") } : {}),
+      ...(body ? { "content-type": "application/json" } : {}),
+    },
     body: body ? JSON.stringify(body) : undefined,
   });
   const text = await res.text();
   assert(res.ok, `${path}: ${res.status} ${text}`);
-  return { json: text ? JSON.parse(text) : null, cookie: res.headers.get("set-cookie")?.split(";")[0] };
+  return { json: text ? JSON.parse(text) : null, cookies: res.headers.getSetCookie?.() ?? [] };
 }
 
 async function setup(label) {
   const suffix = Math.random().toString(16).slice(2, 10);
   const signup = await api("/api/auth/signup", null, { username: `cache_${label}_${suffix}`, displayName: `Cache ${label}`, password });
-  const me = await api("/api/me", signup.cookie);
-  const owner = { cookie: signup.cookie, id: Number(me.json.user.id) };
-  const group = await api("/api/groups", owner.cookie, { name: `Cache group ${suffix}`, currency: "USD" });
-  const expense = await api(`/api/groups/${group.json.id}/expenses`, owner.cookie, {
-    title: "Fresh cache proof", amountCents: 100, currency: "USD", date: new Date().toISOString().slice(0, 10),
-    payerId: owner.id, notes: "", splitMethod: "equal", participants: [{ userId: owner.id }],
+  const me = await api("/api/me", signup.cookies);
+  const owner = { id: Number(me.json.user.id), cookies: signup.cookies };
+  created.users.push(owner.id);
+  const group = await api("/api/groups", owner.cookies, { name: `Cache group ${label} ${suffix}`, currency: "USD" });
+  created.groups.push({ id: group.json.id, owner });
+  const unit = await api(`/api/groups/${group.json.id}/units`, owner.cookies, { name: `cache-unit-${label}` });
+  const expense = await api(`/api/groups/${group.json.id}/expenses`, owner.cookies, {
+    title: `Fresh cache proof ${label}`, amountCents: 100, currency: "USD", unitId: unit.json.id,
+    date: new Date().toISOString().slice(0, 10), payerId: owner.id, notes: "", splitMethod: "equal",
+    participants: [{ userId: owner.id }],
   });
-  return { owner, group: group.json, expense: expense.json, suffix };
+  created.expenses.push({ id: expense.json.id, owner });
+  return { owner, group: group.json, unit: unit.json, expense: expense.json };
 }
 
 const oldDetail = (group) => ({
@@ -41,7 +51,7 @@ const oldDetail = (group) => ({
   members: [], balances: [], suggestions: [],
 });
 
-async function launch(cookie, seed) {
+async function launch(cookies, seed) {
   const context = await webkit.launchPersistentContext(profile, {
     ...(devices["iPhone 16 Pro"] ?? devices["iPhone 15 Pro"]),
     serviceWorkers: "allow",
@@ -51,37 +61,69 @@ async function launch(cookie, seed) {
     Object.defineProperty(navigator, "standalone", { get: () => true, configurable: true });
     if (seedValue) localStorage.setItem("splitwisest.read-cache.v1", seedValue);
   }, { seedValue: seed });
-  await context.addCookies([{
-    name: "sw_session", value: cookie.split("=").slice(1).join("="),
-    domain: new URL(base).hostname, path: "/", secure: base.startsWith("https://"), sameSite: "Lax",
-  }]);
+  await context.addCookies(cookies.map((cookie) => {
+    const [pair] = cookie.split(";");
+    const [name, ...value] = pair.split("=");
+    return {
+      name, value: value.join("="), domain: new URL(base).hostname, path: "/",
+      secure: base.startsWith("https://"), sameSite: "Lax",
+    };
+  }));
   const page = context.pages()[0] ?? await context.newPage();
   return { context, page };
 }
 
+async function cleanup() {
+  for (const group of created.groups) {
+    try {
+      await api(`/api/groups/${group.id}`, group.owner.cookies, undefined, "DELETE");
+      deleted.groups.push(group.id);
+    } catch {}
+  }
+  for (const expense of created.expenses) {
+    try {
+      await api(`/api/expenses/${expense.id}`, expense.owner.cookies, undefined, "DELETE");
+      deleted.expenses.push(expense.id);
+    } catch {}
+  }
+}
+
 try {
-  const data = await setup(scenario);
-  const path = `/api/groups/${data.group.id}`;
-  const seed = JSON.stringify({
-    owner: String(data.owner.id),
-    entries: [[path, oldDetail(data.group), Date.now()]],
-  });
-  if (scenario === "negative") {
-    const { context, page } = await launch(data.owner.cookie, seed);
-    await page.goto(new URL(`/groups/${data.group.id}`, base).href, { waitUntil: "load" });
-    await page.waitForTimeout(1500);
-    detail = { stalePainted: (await page.locator("body").innerText()).includes(data.group.name) };
-    passed = detail.stalePainted;
-    await context.close();
-  } else if (scenario === "isolation") {
-    const { context, page } = await launch("sw_session=other-owner", seed);
+  if (scenario === "isolation") {
+    const a = await setup("a");
+    const b = await setup("b");
+    const seed = JSON.stringify({
+      owner: String(a.owner.id), build: process.env.SPLITWISEST_BUILD_ID ?? "",
+      entries: [
+        ["/api/groups", { groups: [{ id: a.group.id, name: a.group.name, currency: "USD" }] }, Date.now()],
+        [`/api/groups/${a.group.id}`, oldDetail(a.group), Date.now()],
+      ],
+    });
+    const { context, page } = await launch(b.owner.cookies, seed);
     await page.goto(new URL("/groups", base).href, { waitUntil: "load" });
     await page.waitForTimeout(1000);
-    detail = { leaked: (await page.locator("body").innerText()).includes(data.group.name) };
-    passed = !detail.leaked;
+    const leaked = (await page.locator("body").innerText()).includes(a.group.name);
+    await api(`/api/groups/${b.group.id}/expenses`, b.owner.cookies, {
+      title: "Isolation fresh proof", amountCents: 100, currency: "USD", unitId: b.unit.id,
+      date: new Date().toISOString().slice(0, 10), payerId: b.owner.id, notes: "", splitMethod: "equal",
+      participants: [{ userId: b.owner.id }],
+    });
+    await page.goto(new URL(`/groups/${b.group.id}`, base).href, { waitUntil: "load" });
+    await page.waitForTimeout(1500);
+    const fresh = (await page.locator("body").innerText()).includes("Isolation fresh proof");
+    detail = { leaked, fresh };
+    passed = !leaked && fresh;
     await context.close();
   } else {
-    const { context, page } = await launch(data.owner.cookie, seed);
+    const data = await setup(scenario);
+    const path = `/api/groups/${data.group.id}`;
+    const seed = JSON.stringify({
+      owner: String(data.owner.id), entries: [[path, oldDetail(data.group), Date.now()]],
+    });
+    const { context, page } = await launch(data.owner.cookies, seed);
+    await page.goto(new URL("/offline.html", base).href, { waitUntil: "load" });
+    const seeded = await page.evaluate(() => localStorage.getItem("splitwisest.read-cache.v1"));
+    assert.equal(seeded, seed, "seed was not present before app navigation");
     const requests = [];
     page.on("request", (request) => {
       if (request.url().includes(path)) requests.push(request.url());
@@ -89,17 +131,21 @@ try {
     await page.goto(new URL(`/groups/${data.group.id}`, base).href, { waitUntil: "load" });
     await page.waitForTimeout(2500);
     const body = await page.locator("body").innerText();
-    detail = {
-      requests: requests.length,
-      signedIn: !page.url().includes("/login"),
-      rendered: body.includes(data.group.name) && !body.includes("This page couldn’t load"),
-    };
-    passed = detail.requests > 0 && detail.signedIn && detail.rendered;
+    const crashed = body.includes("This page couldn’t load");
+    const fresh = body.includes(data.unit.name) && !crashed;
+    if (scenario === "negative") {
+      detail = { seeded: Boolean(seeded), requests: requests.length, crashed, fresh };
+      passed = requests.length === 0 || crashed;
+    } else {
+      detail = { seeded: Boolean(seeded), requests: requests.length, crashed, fresh, signedIn: !page.url().includes("/login") };
+      passed = requests.length > 0 && fresh && detail.signedIn;
+    }
     await context.close();
   }
 } finally {
+  await cleanup();
   rmSync(profile, { recursive: true, force: true });
 }
 
-console.log(JSON.stringify({ scenario, pass: passed, ...detail }));
+console.log(JSON.stringify({ scenario, pass: passed, created, deleted, ...detail }));
 process.exitCode = passed ? 0 : 1;

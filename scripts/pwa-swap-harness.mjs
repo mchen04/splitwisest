@@ -39,7 +39,6 @@ for (const key of ["DATABASE_URL", "NEON_LOCAL_PROXY"]) {
 }
 const HDIR = join(ROOT, ".pwa-harness");
 const NEXT_DIR = join(ROOT, ".next");
-const SHAS = { A: "a".repeat(40), B: "b".repeat(40) };
 const args = process.argv.slice(2);
 const cmd = args[0];
 const flag = (name, dflt) => {
@@ -47,6 +46,9 @@ const flag = (name, dflt) => {
   return i >= 0 ? args[i + 1] : dflt;
 };
 const PORT = Number(flag("port", "3311"));
+const OLD_REF = flag("old-ref", "4b2480f");
+const NEW_REF = flag("new-ref", null);
+const SHAS = { A: OLD_REF, B: NEW_REF ?? spawnSync("git", ["rev-parse", "HEAD"], { cwd: ROOT, encoding: "utf8" }).stdout.trim() };
 // The app must run over HTTPS: the production session cookie is Secure, and
 // WebKit (unlike Chromium) drops Secure cookies on plain http://localhost. A
 // local TLS-terminating proxy on PORT fronts `next start` on INNER_PORT.
@@ -69,35 +71,49 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function buildSlot(slot) {
   console.error(`[harness] building slot ${slot} (GITHUB_SHA=${SHAS[slot].slice(0, 8)}…)`);
+  const ref = slot === "A" ? OLD_REF : NEW_REF;
+  const worktree = ref ? join(HDIR, `worktree-${slot}`) : null;
+  const cwd = worktree ?? ROOT;
+  if (worktree) {
+    mkdirSync(HDIR, { recursive: true });
+    rmSync(worktree, { recursive: true, force: true });
+    const added = spawnSync("git", ["worktree", "add", "--detach", worktree, ref], { cwd: ROOT, stdio: "inherit" });
+    if (added.status !== 0) throw new Error(`worktree ${ref} failed`);
+    symlinkSync(join(ROOT, "node_modules"), join(worktree, "node_modules"));
+  }
   // A previous suite leaves .next as a symlink into a slot; building through
   // it would silently overwrite that slot and alias both builds to one dir.
   if (existsSync(NEXT_DIR) && lstatSync(NEXT_DIR).isSymbolicLink()) rmSync(NEXT_DIR);
-  const res = spawnSync("pnpm", ["build"], {
-    cwd: ROOT,
-    env: { ...process.env, GITHUB_SHA: SHAS[slot] },
-    stdio: ["ignore", "inherit", "inherit"],
-  });
-  if (res.status !== 0) throw new Error(`build ${slot} failed`);
-  const dest = join(HDIR, `build-${slot}`);
-  rmSync(dest, { recursive: true, force: true });
-  mkdirSync(HDIR, { recursive: true });
-  renameSync(NEXT_DIR, dest);
-  const files = [];
-  const walk = (dir) => {
-    for (const e of readdirSync(dir)) {
-      const p = join(dir, e);
-      if (statSync(p).isDirectory()) walk(p);
-      else files.push("/_next/static/" + relative(join(dest, "static"), p));
-    }
-  };
-  walk(join(dest, "static"));
-  // next start serves public/ live from the repo, so the per-build worker
-  // script must be snapshotted with its build and swapped alongside .next.
-  const swPath = join(ROOT, "public/sw.js");
-  if (existsSync(swPath)) writeFileSync(join(dest, "harness-sw.js"), readFileSync(swPath));
-  const info = { slot, sha: SHAS[slot], buildId: readFileSync(join(dest, "BUILD_ID"), "utf8").trim(), staticFiles: files };
-  writeFileSync(join(dest, "harness-info.json"), JSON.stringify(info));
-  return info;
+  try {
+    const res = spawnSync("pnpm", ["build"], {
+      cwd,
+      env: { ...process.env, GITHUB_SHA: SHAS[slot] },
+      stdio: ["ignore", "inherit", "inherit"],
+    });
+    if (res.status !== 0) throw new Error(`build ${slot} failed`);
+    const dest = join(HDIR, `build-${slot}`);
+    rmSync(dest, { recursive: true, force: true });
+    mkdirSync(HDIR, { recursive: true });
+    renameSync(join(cwd, ".next"), dest);
+    const files = [];
+    const walk = (dir) => {
+      for (const e of readdirSync(dir)) {
+        const p = join(dir, e);
+        if (statSync(p).isDirectory()) walk(p);
+        else files.push("/_next/static/" + relative(join(dest, "static"), p));
+      }
+    };
+    walk(join(dest, "static"));
+    // next start serves public/ live from the repo, so the per-build worker
+    // script must be snapshotted with its build and swapped alongside .next.
+    const swPath = join(cwd, "public/sw.js");
+    if (existsSync(swPath)) writeFileSync(join(dest, "harness-sw.js"), readFileSync(swPath));
+    const info = { slot, sha: SHAS[slot], buildId: readFileSync(join(dest, "BUILD_ID"), "utf8").trim(), staticFiles: files };
+    writeFileSync(join(dest, "harness-info.json"), JSON.stringify(info));
+    return info;
+  } finally {
+    if (worktree) spawnSync("git", ["worktree", "remove", "--force", worktree], { cwd: ROOT, stdio: "ignore" });
+  }
 }
 
 function loadInfo(slot) {
