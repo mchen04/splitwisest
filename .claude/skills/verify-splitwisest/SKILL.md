@@ -115,6 +115,7 @@ Run `--phase cold` once right after a fresh server start and database restart.
 Alternate old and new builds for at least five rounds and compare medians with their ranges.
 Expected round trips per request are 1 for groups, 3 for friends, 2 for group detail, 2 for group expenses, 1 for expenses, and 1 for sync.
 A count change is a regression even when timings look similar. Every result line must report `errors: 0`.
+Reapply every changed scoped migration to each bench database before measuring, or the new build fails fast with errors that look like speedups.
 `scripts/ui-shots.mjs <label>` captures the same group screens at phone and desktop sizes for before/after comparison.
 
 ## Cleanup
