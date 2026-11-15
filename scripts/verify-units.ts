@@ -581,6 +581,35 @@ async function main() {
   const removedFormer = await request(`/api/settlements/${recorded.id}?expectedUpdatedAt=${encodeURIComponent(within.data.updatedAt)}`, owner, undefined, "DELETE");
   check("deleting a former-member repayment succeeds", removedFormer.status, 200);
 
+  const moneyEditGroup = await createGroup(owner, "USD", "Money edit");
+  await join(moneyEditGroup, b, owner);
+  const moneyEditUnit = await createUnit(moneyEditGroup, owner, "money edit drinks");
+  await api(`/api/groups/${moneyEditGroup.id}/expenses`, owner, expenseBody(moneyEditGroup, moneyEditUnit.id, {
+    title: "Money edit unit", amountCents: 1000, payerId: owner.id,
+    participants: [owner, b].map((u) => ({ userId: u.id })),
+  }));
+  await api(`/api/groups/${moneyEditGroup.id}/expenses`, b, expenseBody(moneyEditGroup, moneyEditUnit.id, {
+    title: "Money edit unit back", amountCents: 1000, payerId: b.id,
+    participants: [owner, b].map((u) => ({ userId: u.id })),
+  }));
+  await api(`/api/groups/${moneyEditGroup.id}/expenses`, owner, {
+    title: "Money edit money", amountCents: 1000, currency: "USD", date: today, payerId: owner.id,
+    notes: "", splitMethod: "equal", participants: [owner, b].map((u) => ({ userId: u.id })),
+  });
+  const moneySettlement = await api(`/api/groups/${moneyEditGroup.id}/settlements`, b, {
+    payerId: b.id, recipientId: owner.id, amountCents: 500, currency: "USD", date: today, note: "money",
+  });
+  await request(`/api/groups/${moneyEditGroup.id}/members/${b.id}`, owner, undefined, "DELETE");
+  await request(`/api/groups/${moneyEditGroup.id}`, owner, { autoReconcileUnits: false }, "PATCH");
+  const beforeMoneyEdit = await api(`/api/groups/${moneyEditGroup.id}`, owner);
+  const moneyToUnit = await request(`/api/settlements/${moneySettlement.id}`, owner, {
+    amountCents: 200, currency: "USD", unitId: moneyEditUnit.id, date: today,
+    note: "", expectedUpdatedAt: moneySettlement.updatedAt,
+  }, "PATCH");
+  check("money-to-unit edit with a former member is refused", moneyToUnit.status, 400);
+  const afterMoneyEdit = await api(`/api/groups/${moneyEditGroup.id}`, owner);
+  check("refused money-to-unit edit leaves balances unchanged", afterMoneyEdit.balances, beforeMoneyEdit.balances);
+
   const friendBalancesAfter = await api("/api/friends", owner);
   const friendB = friendBalancesAfter.friends.find((row: { id: number }) => row.id === b.id);
   const unitObligations = friendB.obligations.filter((row: { kind?: string }) => row.kind === "unit");

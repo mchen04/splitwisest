@@ -330,7 +330,8 @@ export async function updateSettlementWithActivity(
                 )
               )
               OR (
-                ${unitId}::bigint IS NOT NULL
+                ${settlement.unitId}::bigint IS NOT NULL
+                AND ${unitId}::bigint = ${settlement.unitId}
                 AND NOT EXISTS (SELECT 1 FROM groups WHERE id = ${settlement.groupId} AND auto_reconcile_units)
                 AND (
                   (
