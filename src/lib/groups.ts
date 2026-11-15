@@ -261,7 +261,10 @@ export async function setGroupAutoReconcile(groupId: number, userId: number, ena
     )
     SELECT (SELECT auto_reconcile_units FROM upd) AS enabled,
       EXISTS (SELECT 1 FROM blocked) AS blocked,
-      EXISTS (SELECT 1 FROM current) AS found`,
+      EXISTS (
+        SELECT 1 FROM group_members
+        WHERE group_id = ${groupId} AND user_id = ${userId}
+      ) AS found`,
   ]);
   if (!rows[0]?.found) notFound();
   if (rows[0].blocked) badRequest("Settle open unit debts with former members before turning off");
