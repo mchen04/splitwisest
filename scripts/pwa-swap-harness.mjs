@@ -609,8 +609,9 @@ async function suite() {
     record("units-cache-a", before.hasEntry && !before.detailHasUnitBalances && before.controlled && before.draftKept, {
       groupId: group.id, ...before,
     });
+    const oldCache = await page.evaluate(() => localStorage.getItem("splitwisest.read-cache.v1"));
     await swapTo("B");
-    const check = async (target, response) => {
+    const check = async (target, response, restoredLackedUnitBalances) => {
       const data = response ? await response.json().catch(() => null) : null;
       await sleep(1200);
       let body = "";
@@ -633,9 +634,11 @@ async function suite() {
         signedIn,
         draftKept,
         controlled,
+        restoredLackedUnitBalances,
       };
       return { ...fields, pass: fields.requested && fields.unitBalances && !fields.errorScreen
-        && fields.rendered && fields.signedIn && fields.draftKept && fields.controlled };
+        && fields.rendered && fields.signedIn && fields.draftKept && fields.controlled
+        && fields.restoredLackedUnitBalances };
     };
     const waitGroupResponse = (target) =>
       target.waitForResponse((r) => r.request().method() === "GET"
@@ -645,22 +648,25 @@ async function suite() {
     await page.goto(`${ORIGIN}/groups`, { waitUntil: "load" });
     const tapResponse = waitGroupResponse(page);
     await page.getByRole("link", { name: new RegExp(group.name) }).first().click();
-    const tap = await check(page, await tapResponse);
+    const tap = await check(page, await tapResponse, true);
     record("units-cache-2a", tap.pass, { ...tap, path: "tap-from-list" });
 
+    await page.evaluate((value) => localStorage.setItem("splitwisest.read-cache.v1", value), oldCache);
     const reloadResponse = waitGroupResponse(page);
     await page.reload({ waitUntil: "load" });
-    const reload = await check(page, await reloadResponse);
+    const reload = await check(page, await reloadResponse, true);
     record("units-cache-2b", reload.pass, { ...reload, path: "reload" });
 
     await app.ctx.close();
     app = await launchApp();
+    await app.page.evaluate((value) => localStorage.setItem("splitwisest.read-cache.v1", value), oldCache);
     const coldResponse = waitGroupResponse(app.page);
     await app.page.goto(groupUrl, { waitUntil: "load" });
     await app.page.waitForFunction(() => Boolean(navigator.serviceWorker?.controller), null, { timeout: 20000 }).catch(() => {});
-    const cold = await check(app.page, await coldResponse);
+    const cold = await check(app.page, await coldResponse, true);
     record("units-cache-2c", cold.pass, { ...cold, path: "cold-launch" });
 
+    await app.page.evaluate((value) => localStorage.setItem("splitwisest.read-cache.v1", value), oldCache);
     const updateResponse = waitGroupResponse(app.page);
     await app.page.evaluate(() => navigator.serviceWorker?.getRegistration().then((r) => r?.update()));
     await app.page.evaluate(() => {
@@ -668,7 +674,7 @@ async function suite() {
       window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
     });
     await app.page.reload({ waitUntil: "load" });
-    const update = await check(app.page, await updateResponse);
+    const update = await check(app.page, await updateResponse, true);
     record("units-cache-2d", update.pass, { ...update, path: "worker-update-resume-reload" });
   }
 
