@@ -539,11 +539,47 @@ async function main() {
     unitId: formerUnit.id, date: today, note: "stranger",
   });
   check("stranger cannot record a former-member repayment", strangerRepay.status, 403);
+  const neverMember = await request(`/api/groups/${formerGroup.id}/settlements`, owner, {
+    payerId: stranger.id, recipientId: owner.id, amountCents: 100, currency: formerGroup.currency,
+    unitId: formerUnit.id, date: today, note: "never member",
+  });
+  check("a never-member cannot be a unit repayment side", neverMember.status, 400);
   const moneyFormer = await request(`/api/groups/${formerGroup.id}/settlements`, owner, {
     payerId: b.id, recipientId: owner.id, amountCents: 100, currency: formerGroup.currency,
     date: today, note: "money former",
   });
   check("money with a former member is refused", moneyFormer.status, 400);
+
+  const editGroup = await createGroup(owner, "USD", "Edit former");
+  await join(editGroup, b, owner);
+  await join(editGroup, c, owner);
+  const editUnit = await createUnit(editGroup, owner, "edit drinks");
+  await api(`/api/groups/${editGroup.id}/expenses`, owner, expenseBody(editGroup, editUnit.id, {
+    title: "Edit former", amountCents: 1000, payerId: owner.id,
+    participants: [owner, b].map((u) => ({ userId: u.id })),
+  }));
+  await api(`/api/groups/${editGroup.id}/expenses`, b, expenseBody(editGroup, editUnit.id, {
+    title: "Edit former back", amountCents: 1000, payerId: b.id,
+    participants: [owner, b].map((u) => ({ userId: u.id })),
+  }));
+  await request(`/api/groups/${editGroup.id}/members/${b.id}`, owner, undefined, "DELETE");
+  await request(`/api/groups/${editGroup.id}`, owner, { autoReconcileUnits: false }, "PATCH");
+  const recorded = await api(`/api/groups/${editGroup.id}/settlements`, owner, {
+    payerId: b.id, recipientId: owner.id, amountCents: 200, currency: editGroup.currency,
+    unitId: editUnit.id, date: today, note: "editable",
+  });
+  const above = await request(`/api/settlements/${recorded.id}`, owner, {
+    amountCents: 600, currency: editGroup.currency, unitId: editUnit.id, date: today,
+    note: "", expectedUpdatedAt: recorded.updatedAt,
+  }, "PATCH");
+  check("editing a former-member repayment above the obligation is refused", above.status, 400);
+  const within = await request(`/api/settlements/${recorded.id}`, owner, {
+    amountCents: 400, currency: editGroup.currency, unitId: editUnit.id, date: today,
+    note: "within", expectedUpdatedAt: recorded.updatedAt,
+  }, "PATCH");
+  check("editing a former-member repayment within the obligation succeeds", within.status, 200);
+  const removedFormer = await request(`/api/settlements/${recorded.id}?expectedUpdatedAt=${encodeURIComponent(within.data.updatedAt)}`, owner, undefined, "DELETE");
+  check("deleting a former-member repayment succeeds", removedFormer.status, 200);
 
   const friendBalancesAfter = await api("/api/friends", owner);
   const friendB = friendBalancesAfter.friends.find((row: { id: number }) => row.id === b.id);
