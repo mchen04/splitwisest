@@ -809,9 +809,8 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
                       <li key={`${row.from}:${row.to}`} className="flex min-h-[var(--row-h)] items-center gap-3 px-4 py-1.5">
                         <Avatar name={memberName(row.from)} size="sm" />
                         <span className="min-w-0 flex-1 text-body">{suggestionText(row)}</span>
-                        <span className={`flex min-w-0 max-w-[40%] shrink-0 flex-col items-end text-right ${row.from === me?.id ? "text-owe" : row.to === me?.id ? "text-owed" : ""}`}>
-                          <span className="tnum text-row font-semibold">{formatUnitQuantity(row.amountCents)}</span>
-                          <span className="max-w-full truncate text-meta">{unit.name}</span>
+                        <span className={`tnum shrink-0 text-row font-semibold ${row.from === me?.id ? "text-owe" : row.to === me?.id ? "text-owed" : ""}`}>
+                          {formatUnitQuantity(row.amountCents)}<span className="sr-only"> {unit.name}</span>
                         </span>
                         {mine && (
                           <Button
