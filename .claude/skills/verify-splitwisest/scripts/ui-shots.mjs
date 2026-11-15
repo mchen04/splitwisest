@@ -39,7 +39,14 @@ const today = new Date().toISOString().slice(0, 10);
 const everyone = [ann, ben, cat].map((m) => ({ userId: m.id }));
 await api(`/api/groups/${groupId}/expenses`, { cookie: ann.cookie, body: { title: "Groceries", amountCents: 9000, currency: "USD", date: today, payerId: ann.id, splitMethod: "equal", participants: everyone } });
 await api(`/api/groups/${groupId}/expenses`, { cookie: ben.cookie, body: { title: "Firewood", amountCents: 2400, currency: "USD", date: today, payerId: ben.id, splitMethod: "equal", participants: everyone } });
-writeFileSync(join(out, label, "fixture.json"), JSON.stringify({ origin, groupId, users: [ann.id, ben.id, cat.id] }));
+let unitId = null;
+const unitRes = await fetch(`${origin}/api/groups/${groupId}/units`, { method: "POST", headers: { cookie: ann.cookie, "content-type": "application/json" }, body: JSON.stringify({ name: "drinks" }) });
+if (unitRes.ok) {
+  unitId = Number((await unitRes.json()).id);
+  await api(`/api/groups/${groupId}/expenses`, { cookie: ben.cookie, body: { title: "Bar round", amountCents: 600, currency: "USD", unitId, date: today, payerId: ben.id, splitMethod: "equal", participants: everyone } });
+  await api(`/api/groups/${groupId}/expenses`, { cookie: ann.cookie, body: { title: "Coffee run", amountCents: 300, currency: "USD", unitId, date: today, payerId: ann.id, splitMethod: "equal", participants: everyone } });
+}
+writeFileSync(join(out, label, "fixture.json"), JSON.stringify({ origin, groupId, unitId, users: [ann.id, ben.id, cat.id] }));
 
 const browser = await webkit.launch();
 const variants = [
@@ -77,6 +84,15 @@ for (const v of variants) {
   await page.getByRole("tab", { name: "Balances" }).click();
   await page.waitForTimeout(300);
   await shot("balances");
+  if (unitId) {
+    await page.getByRole("heading", { name: "drinks" }).first().scrollIntoViewIfNeeded().catch(() => {});
+    await shot("unit-balances");
+    await page.goto(`${origin}/groups`);
+    await page.getByText("Lake cabin").first().waitFor();
+    await shot("groups-list");
+    await page.goto(`${origin}/groups/${groupId}`);
+    await page.getByText("Groceries").first().waitFor();
+  }
   await page.getByRole("button", { name: "Group menu" }).click();
   await page.getByRole("menuitem", { name: "Group settings" }).click();
   await page.getByRole("dialog", { name: "Group settings" }).waitFor();
