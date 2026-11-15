@@ -548,7 +548,7 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
             <p className="px-3 py-3 text-body text-ink-faint">No members match.</p>
           ) : (
             <>
-              <MemberNets balances={visibleBalances} currency={detail.group.currency} meId={me?.id} compact />
+              <MemberNets balances={visibleBalances} units={detail.unitBalances} currency={detail.group.currency} meId={me?.id} compact />
               {detail.unitBalances.length > 0 && (
                 <div className="border-t border-line">
                   <SectionLabel className="px-3 py-1.5">Units</SectionLabel>
@@ -839,7 +839,7 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
         {/* Below lg there is no members rail, so each member's net lives here. */}
         <Card className="lg:hidden">
           <CardHeader title="Member balances" meta={detail.members.length} />
-          <MemberNets balances={detail.balances} currency={detail.group.currency} meId={me?.id} />
+          <MemberNets balances={detail.balances} units={detail.unitBalances} currency={detail.group.currency} meId={me?.id} />
         </Card>
 
         <Card>
@@ -1139,15 +1139,26 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
 }
 
 /** Each member's net in the group: sign, word for screen readers, and color. */
-function MemberNets({ balances, currency, meId, compact = false }: {
+function MemberNets({ balances, units, currency, meId, compact = false }: {
   balances: { userId: number; displayName: string; netCents: number }[];
+  units: {
+    reconcile: boolean;
+    transfers: { from: number; to: number; amountCents: number }[];
+    obligations: { from: number; to: number; amountCents: number }[];
+  }[];
   currency: string;
   meId?: number;
   compact?: boolean;
 }) {
   return (
     <ul className="divide-y divide-line">
-      {balances.map((b) => (
+      {balances.map((b) => {
+        const unitOpen = units.some((unit) => {
+          const rows = unit.reconcile ? unit.transfers : unit.obligations;
+          return rows.some((row) => row.from === b.userId || row.to === b.userId);
+        });
+        const settled = b.netCents === 0 && !unitOpen;
+        return (
         <li key={b.userId}>
           <Link href={`/people/${b.userId}`} className={`flex min-h-[var(--control-h)] items-center gap-2 hover:bg-subtle ${compact ? "px-3 py-1" : "px-4 py-1.5"}`}>
             <Avatar name={b.displayName} size="sm" />
@@ -1155,8 +1166,10 @@ function MemberNets({ balances, currency, meId, compact = false }: {
               {b.displayName}{b.userId === meId && !compact ? " (you)" : ""}
             </span>
             <span className="tnum shrink-0 text-body font-semibold">
-              {b.netCents === 0 ? (
+              {settled ? (
                 <span className="font-normal text-ink-faint">settled</span>
+              ) : b.netCents === 0 ? (
+                <span className="font-normal text-ink-faint">unit debt</span>
               ) : (
                 <>
                   <span className="sr-only">{b.netCents > 0 ? "is owed " : "owes "}</span>
@@ -1166,7 +1179,8 @@ function MemberNets({ balances, currency, meId, compact = false }: {
             </span>
           </Link>
         </li>
-      ))}
+        );
+      })}
     </ul>
   );
 }
@@ -1176,6 +1190,8 @@ function UnitNets({ units, meId }: {
     unitId: number; name: string; reconcile: boolean;
     nets: { userId: number; netCents: number }[];
     gross: { userId: number; owesCents: number; owedCents: number }[];
+    transfers: { from: number; to: number; amountCents: number }[];
+    obligations: { from: number; to: number; amountCents: number }[];
   }[];
   meId?: number;
 }) {
@@ -1192,12 +1208,18 @@ function UnitNets({ units, meId }: {
           : [owesCents > 0 ? { text: `owes ${formatUnitQuantity(owesCents)}`, tone: "text-owe" } : null,
             owedCents > 0 ? { text: `owed ${formatUnitQuantity(owedCents)}`, tone: "text-owed" } : null];
         const shown = parts.filter((part): part is { text: string; tone: string } => part !== null);
+        const directedOpen = unit.reconcile
+          ? unit.transfers.some((row) => row.from === meId || row.to === meId)
+          : owesCents > 0 || owedCents > 0;
+        const settled = shown.length === 0 && !directedOpen;
         return (
           <li key={unit.unitId} className="flex min-h-[var(--control-h-sm)] flex-wrap items-center gap-x-2 px-3 py-1 text-body">
             <span className="min-w-[5rem] flex-1 truncate font-medium" title={unit.name}>{unit.name}</span>
             <span className="tnum ml-auto shrink-0 text-right font-semibold">
-              {shown.length === 0
+              {settled
                 ? <span className="text-ink-faint">settled</span>
+                : shown.length === 0
+                  ? <span className="text-ink-faint">unit debt</span>
                 : shown.map((part, index) => (
                   <span key={part.text} className={part.tone}>{index > 0 ? " · " : ""}{part.text}</span>
                 ))}
