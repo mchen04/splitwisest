@@ -72,6 +72,8 @@ node scripts/pwa-swap-harness.mjs suite --scenario units-cache
 
 The harness builds `4b2480f` as A in a temporary git worktree and this tree as B, serves both on one local HTTPS origin, signs in on A, opens a money group, swaps to B, then checks the stale entry, cold launch, worker update, resume, and reload.
 Each scenario prints one JSON line and the command exits nonzero on failure.
+`units-cache-seed` prints the synthetic user and group ids. `units-cache-a` checks the saved `/api/groups/:id` entry, that it has no `unitBalances`, the controlling worker, and the draft key.
+`units-cache-2a` through `units-cache-2d` print `requested`, `unitBalances`, `errorScreen`, `rendered`, `signedIn`, `draftKept`, and `controlled` for tapping from the groups list, reload, cold launch, and worker update plus resume plus reload.
 
 The inverse proof builds B from the released `1c6a729` tree and must fail:
 

@@ -555,48 +555,108 @@ async function suite() {
     const { page } = await relaunch({ fresh: true });
     await page.goto(ORIGIN + "/", { waitUntil: "load" });
     await login(page, creds);
-    const groups = await page.evaluate(() => fetch("/api/groups").then((r) => r.json()));
-    const group = groups.groups[0];
+    const me = await page.evaluate(() => fetch("/api/me").then((r) => r.json()));
+    const created = await page.evaluate(async ({ name, ownerId }) => {
+      const group = await fetch("/api/groups", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name, currency: "USD" }),
+      }).then((r) => r.json());
+      await fetch(`/api/groups/${group.id}/expenses`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          title: "Cache upgrade money expense", amountCents: 100, currency: "USD",
+          date: new Date().toISOString().slice(0, 10), payerId: ownerId, notes: "",
+          splitMethod: "equal", participants: [{ userId: ownerId }],
+        }),
+      });
+      return group;
+    }, { name: `Cache upgrade ${Date.now()}`, ownerId: me.user.id });
+    const group = created;
     const groupUrl = `${ORIGIN}/groups/${group.id}`;
     await page.goto(groupUrl, { waitUntil: "load" });
+    await page.waitForFunction(() => Boolean(navigator.serviceWorker?.controller), null, { timeout: 20000 }).catch(() => {});
     await sleep(1500);
-    const oldCache = await page.evaluate(() => localStorage.getItem("splitwisest.read-cache.v1"));
-    await swapTo("B");
-    const requests = [];
-    page.on("request", (request) => {
-      if (request.url().includes(`/api/groups/${group.id}`)) requests.push(request.url());
-    });
+    const draftKey = `splitwisest.draft.${me.user.id}.expense`;
+    await page.locator("main").getByRole("button", { name: "Add expense", exact: true }).first().click();
+    await page.locator("#expense-title").fill("Cache draft survives");
+    await page.locator("#expense-amount").fill("1.23");
+    await page.waitForFunction((key) => Boolean(localStorage.getItem(key)), draftKey, { timeout: 10000 });
     await page.reload({ waitUntil: "load" });
-    await sleep(2500);
-    const body = await page.locator("body").innerText();
-    const signedIn = !page.url().includes("/login");
-    const fresh = requests.length > 0 && !body.includes("This page couldn’t load") && body.includes(group.name);
-    record("units-cache", Boolean(oldCache) && fresh && signedIn, {
-      groupId: group.id, oldCache: Boolean(oldCache), requests: requests.length, signedIn,
+    await sleep(1200);
+    const before = await page.evaluate(({ groupId, draftKey }) => {
+      const raw = localStorage.getItem("splitwisest.read-cache.v1");
+      const parsed = raw ? JSON.parse(raw) : null;
+      const entry = parsed?.entries?.find(([path]) => String(path).startsWith(`/api/groups/${groupId}`));
+      return {
+        hasEntry: Boolean(entry),
+        detailHasUnitBalances: Boolean(entry && Object.prototype.hasOwnProperty.call(entry[1], "unitBalances")),
+        controlled: Boolean(navigator.serviceWorker?.controller),
+        draftKept: Boolean(localStorage.getItem(draftKey)),
+      };
+    }, { groupId: group.id, draftKey });
+    log({ scenario: "units-cache-seed", userId: me.user.id, groupId: group.id, groupName: group.name });
+    record("units-cache-a", before.hasEntry && !before.detailHasUnitBalances && before.controlled && before.draftKept, {
+      groupId: group.id, ...before,
     });
+    await swapTo("B");
+    const check = async (target, response) => {
+      const data = response ? await response.json().catch(() => null) : null;
+      await sleep(1200);
+      let body = "";
+      let draftKept = false;
+      let controlled = false;
+      let signedIn = false;
+      try {
+        body = await target.locator("body").innerText();
+        draftKept = await target.evaluate((key) => Boolean(localStorage.getItem(key)), draftKey);
+        controlled = await target.evaluate(() => Boolean(navigator.serviceWorker?.controller));
+        signedIn = !target.url().includes("/login");
+      } catch {}
+      const fields = {
+        groupId: group.id,
+        requested: Boolean(response),
+        unitBalances: Array.isArray(data?.unitBalances),
+        errorScreen: body.includes("This page couldn’t load"),
+        rendered: body.includes(group.name),
+        signedIn,
+        draftKept,
+        controlled,
+      };
+      return { ...fields, pass: fields.requested && fields.unitBalances && !fields.errorScreen
+        && fields.rendered && fields.signedIn && fields.draftKept && fields.controlled };
+    };
+    const waitGroupResponse = (target) =>
+      target.waitForResponse((r) => r.request().method() === "GET" && r.url().includes(`/api/groups/${group.id}`), { timeout: 20000 })
+        .catch(() => null);
+
+    await page.goto(`${ORIGIN}/groups`, { waitUntil: "load" });
+    const tapResponse = waitGroupResponse(page);
+    await page.getByRole("link", { name: new RegExp(group.name) }).first().click();
+    const tap = await check(page, await tapResponse);
+    record("units-cache-2a", tap.pass, { ...tap, path: "tap-from-list" });
+
+    const reloadResponse = waitGroupResponse(page);
+    await page.reload({ waitUntil: "load" });
+    const reload = await check(page, await reloadResponse);
+    record("units-cache-2b", reload.pass, { ...reload, path: "reload" });
+
     await app.ctx.close();
     app = await launchApp();
-    const coldRequests = [];
-    app.page.on("request", (request) => {
-      if (request.url().includes(`/api/groups/${group.id}`)) coldRequests.push(request.url());
-    });
+    const coldResponse = waitGroupResponse(app.page);
     await app.page.goto(groupUrl, { waitUntil: "load" });
-    await sleep(2500);
-    const coldBody = await app.page.locator("body").innerText();
-    record("units-cache-cold", coldRequests.length > 0 && !coldBody.includes("This page couldn’t load") && coldBody.includes(group.name), {
-      groupId: group.id, requests: coldRequests.length, signedIn: !app.page.url().includes("/login"),
-    });
+    await app.page.waitForFunction(() => Boolean(navigator.serviceWorker?.controller), null, { timeout: 20000 }).catch(() => {});
+    const cold = await check(app.page, await coldResponse);
+    record("units-cache-2c", cold.pass, { ...cold, path: "cold-launch" });
+
+    const updateResponse = waitGroupResponse(app.page);
     await app.page.evaluate(() => navigator.serviceWorker?.getRegistration().then((r) => r?.update()));
     await app.page.evaluate(() => {
       document.dispatchEvent(new Event("visibilitychange"));
       window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
     });
     await app.page.reload({ waitUntil: "load" });
-    await sleep(2500);
-    const updateBody = await app.page.locator("body").innerText();
-    record("units-cache-update", !updateBody.includes("This page couldn’t load") && updateBody.includes(group.name), {
-      groupId: group.id, signedIn: !app.page.url().includes("/login"),
-    });
+    const update = await check(app.page, await updateResponse);
+    record("units-cache-2d", update.pass, { ...update, path: "worker-update-resume-reload" });
   }
 
   // S1: first install — launch at start_url, log in, worker installs, no reload.
