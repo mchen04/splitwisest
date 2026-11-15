@@ -73,13 +73,7 @@ export async function validateExpenseActors(
   return memberIds;
 }
 
-export async function validateExpense(groupId: number, userId: number, input: ExpenseInput) {
-  if (input.unitId != null) await requireGroupUnit(groupId, input.unitId);
-  const memberIds = await validateExpenseActors(groupId, userId, input);
-  return validateExpenseShares(memberIds, input);
-}
-
-function validateExpenseShares(memberIds: Set<number>, input: ExpenseInput) {
+export function validateExpenseShares(memberIds: Set<number>, input: ExpenseInput) {
   const unit = input.unitId != null;
   if (!unit) validateCurrencyAmount(input.amountCents, input.currency);
   let shares: Map<number, number>;
