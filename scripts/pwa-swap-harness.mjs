@@ -672,7 +672,7 @@ async function suite() {
         && fields.rendered && fields.urlOk && fields.signedIn && fields.draftKept && fields.controlled
         && fields.restoredLackedUnitBalances };
     };
-    const shot = (target, name) => target.screenshot({ path: join(HDIR, `units-cache-${name}-${SHAS.B.slice(0, 7)}.png`) }).catch(() => {});
+    const shot = (target, name) => target.screenshot({ path: join(HDIR, `units-cache-${name}-${BUILD_IDS.B.slice(0, 7)}.png`) }).catch(() => {});
     const waitGroupResponse = (target) =>
       target.waitForResponse((r) => r.request().method() === "GET"
         && new URL(r.url()).pathname === `/api/groups/${group.id}`, { timeout: 20000 })
