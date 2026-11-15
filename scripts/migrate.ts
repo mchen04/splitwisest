@@ -638,7 +638,7 @@ async function main() {
   LANGUAGE sql
   STABLE
   AS $$
-    SELECT COALESCE(MAX(d.amount_cents), 0)
+    SELECT COALESCE(SUM(d.amount_cents), 0)
     FROM group_unit_directed_for_viewer(target_group_id, target_debtor_id, exclude_settlement_id) d
     WHERE d.unit_id = target_unit_id
       AND d.debtor_id = target_debtor_id
@@ -685,6 +685,27 @@ async function main() {
   LANGUAGE sql
   STABLE
   AS $$
+    WITH totals AS MATERIALIZED (
+      SELECT * FROM group_unit_totals(target_group_id)
+    ),
+    directed AS MATERIALIZED (
+      SELECT * FROM group_unit_directed(target_group_id)
+    ),
+    people AS (
+      SELECT u.id, u.display_name
+      FROM users u
+      WHERE u.id IN (
+        SELECT t.user_id FROM totals t
+        UNION
+        SELECT d.debtor_id FROM directed d
+        UNION
+        SELECT d.creditor_id FROM directed d
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM group_members gm
+        WHERE gm.group_id = target_group_id AND gm.user_id = u.id
+      )
+    )
     SELECT CASE WHEN EXISTS (SELECT 1 FROM group_units gu WHERE gu.group_id = target_group_id) THEN
       jsonb_build_object(
         'units', (SELECT jsonb_agg(jsonb_build_object('id', gu.id, 'name', gu.name) ORDER BY gu.name, gu.id)
@@ -694,12 +715,15 @@ async function main() {
             'paidCents', t.paid_cents, 'owedCents', t.owed_cents,
             'settledOutCents', t.settled_out_cents, 'settledInCents', t.settled_in_cents)
             ORDER BY t.unit_id, t.user_id), '[]'::jsonb)
-          FROM group_unit_totals(target_group_id) t),
+          FROM totals t),
         'directed', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
             'unitId', d.unit_id, 'debtorId', d.debtor_id,
             'creditorId', d.creditor_id, 'amountCents', d.amount_cents)
             ORDER BY d.unit_id, d.debtor_id, d.creditor_id), '[]'::jsonb)
-          FROM group_unit_directed(target_group_id) d)
+          FROM directed d),
+        'people', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+            'userId', p.id, 'displayName', p.display_name) ORDER BY p.id), '[]'::jsonb)
+          FROM people p)
       )
     END
   $$`;
@@ -725,7 +749,8 @@ async function main() {
   AS $$
     SELECT v.unit_id, v.unit_name, v.reconcile, v.net_cents, v.owes_cents, v.owed_cents
     FROM group_unit_viewer_rows(target_group_id, target_user_id) v
-    WHERE v.net_cents <> 0 OR v.owes_cents <> 0 OR v.owed_cents <> 0
+    WHERE (v.reconcile AND v.net_cents <> 0)
+       OR (NOT v.reconcile AND (v.owes_cents <> 0 OR v.owed_cents <> 0))
     ORDER BY v.unit_name, v.unit_id
   $$`;
 

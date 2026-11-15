@@ -14,6 +14,7 @@ export function SettleModal({
   onSaved,
   groupId,
   members,
+  people: peopleProp,
   meId,
   defaultCurrency,
   prefill,
@@ -27,6 +28,7 @@ export function SettleModal({
   onSaved: () => void;
   groupId: number;
   members: Member[];
+  people?: { id: number; displayName: string }[];
   meId: number;
   defaultCurrency: string;
   prefill?: { payerId: number; recipientId: number; amountCents: number } | null;
@@ -45,7 +47,8 @@ export function SettleModal({
   const [date, setDate] = useState(todayStr());
   const [note, setNote] = useState("");
   const { error, setError, busy, run } = useFormState();
-  const nameOf = (id: number) => members.find((m) => m.id === id)?.displayName ?? "Someone";
+  const people = peopleProp ?? members;
+  const nameOf = (id: number) => people.find((m) => m.id === id)?.displayName ?? "Someone";
   const activeUnit = unit ?? (existing?.unitId && existing.unitName
     ? { id: existing.unitId, name: existing.unitName }
     : null);
@@ -69,7 +72,7 @@ export function SettleModal({
       setDate(todayStr());
       setNote("");
       setCurrency(defaultCurrency);
-      const startOk = start && members.some((m) => m.id === start.payerId) && members.some((m) => m.id === start.recipientId);
+      const startOk = start && people.some((m) => m.id === start.payerId) && people.some((m) => m.id === start.recipientId);
       if (prefill) {
         setPayerId(prefill.payerId);
         setRecipientId(prefill.recipientId);
@@ -80,7 +83,7 @@ export function SettleModal({
         setAmount("");
       } else {
         setPayerId(meId);
-        setRecipientId(members.find((m) => m.id !== meId)?.id ?? 0);
+        setRecipientId(people.find((m) => m.id !== meId)?.id ?? 0);
         setAmount("");
       }
     }
@@ -137,7 +140,7 @@ export function SettleModal({
         <div className="grid grid-cols-2 gap-3">
           <Field label="Who paid">
             <Select value={payerId} disabled={!!existing || !!prefill} onChange={(e) => setPayerId(Number(e.target.value))}>
-              {members.map((m) => (
+              {people.map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.displayName}
                 </option>
@@ -146,7 +149,7 @@ export function SettleModal({
           </Field>
           <Field label="Who received">
             <Select value={recipientId} disabled={!!existing || !!prefill} onChange={(e) => setRecipientId(Number(e.target.value))}>
-              {members.map((m) => (
+              {people.map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.displayName}
                 </option>

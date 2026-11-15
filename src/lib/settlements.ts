@@ -96,15 +96,39 @@ export async function recordGroupSettlement(
       AND EXISTS (SELECT 1 FROM unit_gate)
       AND EXISTS (
         SELECT 1 FROM group_members
-        WHERE group_id = ${groupId} AND user_id = ${body.payerId}
-      )
-      AND EXISTS (
-        SELECT 1 FROM group_members
-        WHERE group_id = ${groupId} AND user_id = ${body.recipientId}
-      )
-      AND EXISTS (
-        SELECT 1 FROM group_members
         WHERE group_id = ${groupId} AND user_id = ${createdBy}
+      )
+      AND (
+        (
+          ${body.unitId ?? null}::bigint IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM groups WHERE id = ${groupId} AND auto_reconcile_units)
+          AND (
+            (
+              ${createdBy} = ${body.payerId}
+              AND NOT EXISTS (
+                SELECT 1 FROM group_members
+                WHERE group_id = ${groupId} AND user_id = ${body.recipientId}
+              )
+            )
+            OR (
+              ${createdBy} = ${body.recipientId}
+              AND NOT EXISTS (
+                SELECT 1 FROM group_members
+                WHERE group_id = ${groupId} AND user_id = ${body.payerId}
+              )
+            )
+          )
+        )
+        OR (
+          EXISTS (
+            SELECT 1 FROM group_members
+            WHERE group_id = ${groupId} AND user_id = ${body.payerId}
+          )
+          AND EXISTS (
+            SELECT 1 FROM group_members
+            WHERE group_id = ${groupId} AND user_id = ${body.recipientId}
+          )
+        )
       )
     ),
     s AS (
@@ -282,24 +306,51 @@ export async function updateSettlementWithActivity(
       SELECT 1
       WHERE EXISTS (SELECT 1 FROM unit_gate)
         AND (
-          ${settlement.groupId}::bigint IS NULL
-          AND EXISTS (
-            SELECT 1 FROM friendships
-            WHERE user_a = ${userA} AND user_b = ${userB}
+          (
+            ${settlement.groupId}::bigint IS NULL
+            AND EXISTS (
+              SELECT 1 FROM friendships
+              WHERE user_a = ${userA} AND user_b = ${userB}
+            )
           )
-        )
-        OR (
-          EXISTS (
-            SELECT 1 FROM group_members
-            WHERE group_id = ${settlement.groupId} AND user_id = ${settlement.payerId}
-          )
-          AND EXISTS (
-            SELECT 1 FROM group_members
-            WHERE group_id = ${settlement.groupId} AND user_id = ${settlement.recipientId}
-          )
-          AND EXISTS (
-            SELECT 1 FROM group_members
-            WHERE group_id = ${settlement.groupId} AND user_id = ${user.id}
+          OR (
+            EXISTS (
+              SELECT 1 FROM group_members
+              WHERE group_id = ${settlement.groupId} AND user_id = ${user.id}
+            )
+            AND (
+              (
+                EXISTS (
+                  SELECT 1 FROM group_members
+                  WHERE group_id = ${settlement.groupId} AND user_id = ${settlement.payerId}
+                )
+                AND EXISTS (
+                  SELECT 1 FROM group_members
+                  WHERE group_id = ${settlement.groupId} AND user_id = ${settlement.recipientId}
+                )
+              )
+              OR (
+                ${settlement.unitId}::bigint IS NOT NULL
+                AND ${unitId}::bigint = ${settlement.unitId}
+                AND NOT EXISTS (SELECT 1 FROM groups WHERE id = ${settlement.groupId} AND auto_reconcile_units)
+                AND (
+                  (
+                    ${user.id} = ${settlement.payerId}
+                    AND NOT EXISTS (
+                      SELECT 1 FROM group_members
+                      WHERE group_id = ${settlement.groupId} AND user_id = ${settlement.recipientId}
+                    )
+                  )
+                  OR (
+                    ${user.id} = ${settlement.recipientId}
+                    AND NOT EXISTS (
+                      SELECT 1 FROM group_members
+                      WHERE group_id = ${settlement.groupId} AND user_id = ${settlement.payerId}
+                    )
+                  )
+                )
+              )
+            )
           )
         )
     ),
@@ -370,24 +421,50 @@ export async function deleteSettlementWithActivity(
     WITH existing_members_ok AS (
       SELECT 1
       WHERE (
-          ${settlement.groupId}::bigint IS NULL
-          AND EXISTS (
-            SELECT 1 FROM friendships
-            WHERE user_a = ${userA} AND user_b = ${userB}
+          (
+            ${settlement.groupId}::bigint IS NULL
+            AND EXISTS (
+              SELECT 1 FROM friendships
+              WHERE user_a = ${userA} AND user_b = ${userB}
+            )
           )
-        )
-        OR (
-          EXISTS (
-            SELECT 1 FROM group_members
-            WHERE group_id = ${settlement.groupId} AND user_id = ${settlement.payerId}
-          )
-          AND EXISTS (
-            SELECT 1 FROM group_members
-            WHERE group_id = ${settlement.groupId} AND user_id = ${settlement.recipientId}
-          )
-          AND EXISTS (
-            SELECT 1 FROM group_members
-            WHERE group_id = ${settlement.groupId} AND user_id = ${user.id}
+          OR (
+            EXISTS (
+              SELECT 1 FROM group_members
+              WHERE group_id = ${settlement.groupId} AND user_id = ${user.id}
+            )
+            AND (
+              (
+                EXISTS (
+                  SELECT 1 FROM group_members
+                  WHERE group_id = ${settlement.groupId} AND user_id = ${settlement.payerId}
+                )
+                AND EXISTS (
+                  SELECT 1 FROM group_members
+                  WHERE group_id = ${settlement.groupId} AND user_id = ${settlement.recipientId}
+                )
+              )
+              OR (
+                ${settlement.unitId}::bigint IS NOT NULL
+                AND NOT EXISTS (SELECT 1 FROM groups WHERE id = ${settlement.groupId} AND auto_reconcile_units)
+                AND (
+                  (
+                    ${user.id} = ${settlement.payerId}
+                    AND NOT EXISTS (
+                      SELECT 1 FROM group_members
+                      WHERE group_id = ${settlement.groupId} AND user_id = ${settlement.recipientId}
+                    )
+                  )
+                  OR (
+                    ${user.id} = ${settlement.recipientId}
+                    AND NOT EXISTS (
+                      SELECT 1 FROM group_members
+                      WHERE group_id = ${settlement.groupId} AND user_id = ${settlement.payerId}
+                    )
+                  )
+                )
+              )
+            )
           )
         )
     ),

@@ -355,7 +355,10 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
     );
   }
 
-  const memberName = (uid: number) => detail?.members.find((m) => m.id === uid)?.displayName ?? "Someone";
+  const memberName = (uid: number) =>
+    detail?.members.find((m) => m.id === uid)?.displayName
+    ?? detail?.unitPeople?.find((p) => p.userId === uid)?.displayName
+    ?? "Someone";
   const visibleBalances = detail?.balances.filter((b) => {
     const q = memberQuery.trim().toLowerCase();
     return !q || b.displayName.toLowerCase().includes(q);
@@ -385,8 +388,9 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
   }
   const canSettle = (detail?.members.length ?? 0) >= 2;
   const unitRows = detail?.unitBalances.flatMap((unit) => unit.reconcile ? unit.transfers : unit.obligations) ?? [];
-  const unitsOpen = unitRows.length > 0;
-  const myUnitsOpen = unitRows.some((row) => row.from === me?.id || row.to === me?.id);
+  const openNets = detail?.unitBalances.flatMap((unit) => unit.reconcile ? unit.nets.filter((row) => row.netCents !== 0) : []) ?? [];
+  const unitsOpen = unitRows.length > 0 || openNets.length > 0;
+  const myUnitsOpen = unitRows.some((row) => row.from === me?.id || row.to === me?.id) || openNets.some((row) => row.userId === me?.id);
   const myGroupBalance = me && detail
     ? detail.balances.find((balance) => balance.userId === me.id)?.netCents ?? 0
     : 0;
@@ -437,7 +441,7 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
   return (
     <AppShell title={detail?.group.name ?? "Group"}>
       {query}
-      <section className={`group-context group-hue-${groupId % 6} mb-2.5 md:shrink-0 lg:grid lg:grid-cols-[minmax(0,1fr)_auto_minmax(9rem,auto)] lg:items-center lg:gap-x-4`} aria-label="Current group">
+      <section className={`group-context group-hue-${groupId % 6} mb-2.5 md:shrink-0 lg:grid lg:grid-cols-[minmax(min(14rem,30%),1fr)_auto_minmax(9rem,auto)] lg:items-center lg:gap-x-4`} aria-label="Current group">
         <div className="flex items-center gap-1.5">
           {detail ? (
             <div className="min-w-0 flex-1">
@@ -474,7 +478,7 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
             `lg:contents` hands both straight to the section's grid at lg. */}
         <div className="mt-1.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 lg:mt-0 lg:contents">
           {detail ? (
-            <p className={`tnum whitespace-nowrap text-amount font-semibold tracking-tight ${myGroupBalance > 0 ? "text-owed" : myGroupBalance < 0 ? "text-owe" : "text-[var(--group-ink)]"}`}>
+            <p className={`tnum whitespace-nowrap text-amount font-semibold tracking-tight lg:whitespace-normal ${myGroupBalance > 0 ? "text-owed" : myGroupBalance < 0 ? "text-owe" : "text-[var(--group-ink)]"}`}>
               {myGroupBalance === 0 ? (myUnitsOpen ? "Money settled" : "Settled up") : (
                 <>{myGroupBalance > 0 ? "Owed " : "You owe "}<Money cents={Math.abs(myGroupBalance)} currency={detail.group.currency} /></>
               )}
@@ -548,7 +552,7 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
             <p className="px-3 py-3 text-body text-ink-faint">No members match.</p>
           ) : (
             <>
-              <MemberNets balances={visibleBalances} currency={detail.group.currency} meId={me?.id} compact />
+              <MemberNets balances={visibleBalances} units={detail.unitBalances} currency={detail.group.currency} meId={me?.id} compact />
               {detail.unitBalances.length > 0 && (
                 <div className="border-t border-line">
                   <SectionLabel className="px-3 py-1.5">Units</SectionLabel>
@@ -801,19 +805,22 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
 
         {detail.unitBalances.map((unit) => {
           const rows = unit.reconcile ? unit.transfers : unit.obligations;
+          const formerOpen = unit.reconcile && unit.nets.reduce((sum, row) => sum + row.netCents, 0) !== 0;
+          const formerNote = `Some ${unit.name} is still open with someone who left. Turn off \u201cSimplify unit balances\u201d in group settings to record it.`;
           return (
             <Card key={unit.unitId}>
               <CardHeader title={unit.name} meta={unit.reconcile ? "simplified" : "not simplified"} />
+              {formerOpen && rows.length > 0 && <p className="px-4 pt-3 text-body text-ink-faint">{formerNote}</p>}
               {rows.length === 0 ? (
-                <p className="px-4 py-3 text-body text-ink-faint">{`Nobody owes any ${unit.name}.`}</p>
+                <p className="px-4 py-3 text-body text-ink-faint">{formerOpen ? formerNote : `Nobody owes any ${unit.name}.`}</p>
               ) : (
                 <ul className="divide-y divide-line">
                   {rows.map((row) => {
                     const mine = me?.id === row.from || me?.id === row.to;
                     return (
-                      <li key={`${row.from}:${row.to}`} className="flex min-h-[var(--row-h)] items-center gap-3 px-4 py-1.5">
+                      <li key={`${row.from}:${row.to}`} className="flex min-h-[var(--row-h)] flex-wrap items-center gap-x-3 gap-y-1 px-4 py-1.5">
                         <Avatar name={memberName(row.from)} size="sm" />
-                        <span className="min-w-0 flex-1 text-body">{suggestionText(row)}</span>
+                        <span className="min-w-[8rem] flex-1 text-body">{suggestionText(row)}</span>
                         <span className={`tnum shrink-0 text-row font-semibold ${row.from === me?.id ? "text-owe" : row.to === me?.id ? "text-owed" : ""}`}>
                           {formatUnitQuantity(row.amountCents)}<span className="sr-only"> {unit.name}</span>
                         </span>
@@ -821,6 +828,7 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
                           <Button
                             size="sm"
                             variant="secondary"
+                            className="ml-auto"
                             onClick={() => openUnitSettle({ id: unit.unitId, name: unit.name }, row.from, row.to, row.amountCents)}
                             aria-label={`Record ${unit.name} payment: ${memberName(row.from)} pays ${memberName(row.to)}`}
                           >
@@ -839,7 +847,7 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
         {/* Below lg there is no members rail, so each member's net lives here. */}
         <Card className="lg:hidden">
           <CardHeader title="Member balances" meta={detail.members.length} />
-          <MemberNets balances={detail.balances} currency={detail.group.currency} meId={me?.id} />
+          <MemberNets balances={detail.balances} units={detail.unitBalances} currency={detail.group.currency} meId={me?.id} />
         </Card>
 
         <Card>
@@ -1076,6 +1084,9 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
             onSaved={refreshAll}
             groupId={groupId}
             members={detail.members}
+            people={settleUnit && !detail.group.autoReconcileUnits
+              ? (detail.unitPeople ?? []).map((p) => ({ id: p.userId, displayName: p.displayName }))
+              : undefined}
             meId={me.id}
             defaultCurrency={detail.group.currency}
             prefill={settlePrefill}
@@ -1092,6 +1103,9 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
             }}
             groupId={groupId}
             members={detail.members}
+            people={editingSettlement?.unitId && !detail.group.autoReconcileUnits
+              ? (detail.unitPeople ?? []).map((p) => ({ id: p.userId, displayName: p.displayName }))
+              : undefined}
             meId={me.id}
             defaultCurrency={detail.group.currency}
             existing={editingSettlement}
@@ -1139,15 +1153,28 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
 }
 
 /** Each member's net in the group: sign, word for screen readers, and color. */
-function MemberNets({ balances, currency, meId, compact = false }: {
+function MemberNets({ balances, units, currency, meId, compact = false }: {
   balances: { userId: number; displayName: string; netCents: number }[];
+  units: {
+    reconcile: boolean;
+    nets?: { userId: number; netCents: number }[];
+    transfers: { from: number; to: number; amountCents: number }[];
+    obligations: { from: number; to: number; amountCents: number }[];
+  }[];
   currency: string;
   meId?: number;
   compact?: boolean;
 }) {
   return (
     <ul className="divide-y divide-line">
-      {balances.map((b) => (
+      {balances.map((b) => {
+        const unitOpen = units.some((unit) => {
+          const rows = unit.reconcile ? unit.transfers : unit.obligations;
+          return rows.some((row) => row.from === b.userId || row.to === b.userId)
+            || (unit.reconcile && (unit.nets ?? []).some((row) => row.userId === b.userId && row.netCents !== 0));
+        });
+        const settled = b.netCents === 0 && !unitOpen;
+        return (
         <li key={b.userId}>
           <Link href={`/people/${b.userId}`} className={`flex min-h-[var(--control-h)] items-center gap-2 hover:bg-subtle ${compact ? "px-3 py-1" : "px-4 py-1.5"}`}>
             <Avatar name={b.displayName} size="sm" />
@@ -1155,8 +1182,10 @@ function MemberNets({ balances, currency, meId, compact = false }: {
               {b.displayName}{b.userId === meId && !compact ? " (you)" : ""}
             </span>
             <span className="tnum shrink-0 text-body font-semibold">
-              {b.netCents === 0 ? (
+              {settled ? (
                 <span className="font-normal text-ink-faint">settled</span>
+              ) : b.netCents === 0 ? (
+                <span className="font-normal text-ink-faint">unit debt</span>
               ) : (
                 <>
                   <span className="sr-only">{b.netCents > 0 ? "is owed " : "owes "}</span>
@@ -1166,7 +1195,8 @@ function MemberNets({ balances, currency, meId, compact = false }: {
             </span>
           </Link>
         </li>
-      ))}
+        );
+      })}
     </ul>
   );
 }
@@ -1176,6 +1206,8 @@ function UnitNets({ units, meId }: {
     unitId: number; name: string; reconcile: boolean;
     nets: { userId: number; netCents: number }[];
     gross: { userId: number; owesCents: number; owedCents: number }[];
+    transfers: { from: number; to: number; amountCents: number }[];
+    obligations: { from: number; to: number; amountCents: number }[];
   }[];
   meId?: number;
 }) {
@@ -1192,12 +1224,17 @@ function UnitNets({ units, meId }: {
           : [owesCents > 0 ? { text: `owes ${formatUnitQuantity(owesCents)}`, tone: "text-owe" } : null,
             owedCents > 0 ? { text: `owed ${formatUnitQuantity(owedCents)}`, tone: "text-owed" } : null];
         const shown = parts.filter((part): part is { text: string; tone: string } => part !== null);
+        const openRows = unit.reconcile ? unit.transfers : unit.obligations;
+        const settled = openRows.length === 0 && shown.length === 0;
+        const even = openRows.length > 0 && shown.length === 0;
         return (
           <li key={unit.unitId} className="flex min-h-[var(--control-h-sm)] flex-wrap items-center gap-x-2 px-3 py-1 text-body">
             <span className="min-w-[5rem] flex-1 truncate font-medium" title={unit.name}>{unit.name}</span>
             <span className="tnum ml-auto shrink-0 text-right font-semibold">
-              {shown.length === 0
+              {settled
                 ? <span className="text-ink-faint">settled</span>
+                : even
+                  ? <span className="text-ink-faint">you&rsquo;re even</span>
                 : shown.map((part, index) => (
                   <span key={part.text} className={part.tone}>{index > 0 ? " · " : ""}{part.text}</span>
                 ))}
@@ -1287,10 +1324,10 @@ function GroupSwitcher({
         aria-label={`Switch group (current: ${currentName})`}
         className="flex w-full items-center gap-2 rounded-lg text-left text-[var(--group-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--group-color)]"
       >
-        {/* From sm up, name and metadata share one baseline. On a phone the
-            metadata would leave the name no width, so it drops below it. */}
-        <span className="flex min-w-0 flex-1 flex-col sm:flex-row sm:items-baseline sm:gap-1.5">
-          <span className="min-w-0 truncate text-title font-semibold tracking-tight">{currentName}</span>
+        {/* From sm up, name and metadata share one baseline while they fit. When
+            they don't, the metadata wraps below so the name keeps the row. */}
+        <span className="flex min-w-0 flex-1 flex-col sm:flex-row sm:flex-wrap sm:items-baseline sm:gap-x-1.5">
+          <span className="min-w-0 max-w-full truncate text-title font-semibold tracking-tight">{currentName}</span>
           <span className="shrink-0 text-meta font-medium text-[var(--group-muted)]">{memberCount} {memberCount === 1 ? "member" : "members"} · {currency}</span>
         </span>
         <span className="group-context-control shrink-0">

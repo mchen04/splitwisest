@@ -233,10 +233,14 @@ export async function setGroupAutoReconcile(groupId: number, userId: number, ena
       FROM upd
       RETURNING 1
     )
-    SELECT auto_reconcile_units FROM upd`,
+    SELECT (SELECT auto_reconcile_units FROM upd) AS enabled,
+      EXISTS (
+        SELECT 1 FROM group_members
+        WHERE group_id = ${groupId} AND user_id = ${userId}
+      ) AS found`,
   ]);
-  if (rows.length === 0) notFound();
-  return Boolean(rows[0].auto_reconcile_units);
+  if (!rows[0]?.found) notFound();
+  return Boolean(rows[0].enabled);
 }
 
 export async function deleteGroup(

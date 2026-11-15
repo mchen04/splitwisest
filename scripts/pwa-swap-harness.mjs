@@ -25,9 +25,10 @@ import { webkit, devices } from "playwright-core";
 import { spawn, spawnSync } from "node:child_process";
 import http from "node:http";
 import httpsMod from "node:https";
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync, lstatSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync, lstatSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import { tmpdir } from "node:os";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 process.env.DATABASE_URL ??= "postgres://postgres:postgres@127.0.0.1:5433/splitwisest";
@@ -39,7 +40,6 @@ for (const key of ["DATABASE_URL", "NEON_LOCAL_PROXY"]) {
 }
 const HDIR = join(ROOT, ".pwa-harness");
 const NEXT_DIR = join(ROOT, ".next");
-const SHAS = { A: "a".repeat(40), B: "b".repeat(40) };
 const args = process.argv.slice(2);
 const cmd = args[0];
 const flag = (name, dflt) => {
@@ -47,6 +47,9 @@ const flag = (name, dflt) => {
   return i >= 0 ? args[i + 1] : dflt;
 };
 const PORT = Number(flag("port", "3311"));
+const OLD_REF = flag("old-ref", "4b2480f");
+const NEW_REF = flag("new-ref", null);
+const SHAS = { A: OLD_REF, B: NEW_REF ?? spawnSync("git", ["rev-parse", "HEAD"], { cwd: ROOT, encoding: "utf8" }).stdout.trim() };
 // The app must run over HTTPS: the production session cookie is Secure, and
 // WebKit (unlike Chromium) drops Secure cookies on plain http://localhost. A
 // local TLS-terminating proxy on PORT fronts `next start` on INNER_PORT.
@@ -69,35 +72,62 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function buildSlot(slot) {
   console.error(`[harness] building slot ${slot} (GITHUB_SHA=${SHAS[slot].slice(0, 8)}…)`);
-  // A previous suite leaves .next as a symlink into a slot; building through
-  // it would silently overwrite that slot and alias both builds to one dir.
-  if (existsSync(NEXT_DIR) && lstatSync(NEXT_DIR).isSymbolicLink()) rmSync(NEXT_DIR);
-  const res = spawnSync("pnpm", ["build"], {
-    cwd: ROOT,
-    env: { ...process.env, GITHUB_SHA: SHAS[slot] },
-    stdio: ["ignore", "inherit", "inherit"],
-  });
-  if (res.status !== 0) throw new Error(`build ${slot} failed`);
-  const dest = join(HDIR, `build-${slot}`);
-  rmSync(dest, { recursive: true, force: true });
-  mkdirSync(HDIR, { recursive: true });
-  renameSync(NEXT_DIR, dest);
-  const files = [];
-  const walk = (dir) => {
-    for (const e of readdirSync(dir)) {
-      const p = join(dir, e);
-      if (statSync(p).isDirectory()) walk(p);
-      else files.push("/_next/static/" + relative(join(dest, "static"), p));
+  const ref = slot === "A" ? OLD_REF : NEW_REF;
+  const rootModules = readdirSync(join(ROOT, "node_modules")).length;
+  const worktree = ref ? mkdtempSync(join(tmpdir(), `splitwisest-pwa-${slot}-`)) : null;
+  const cwd = worktree ?? ROOT;
+  try {
+    if (worktree) {
+      const added = spawnSync("git", ["worktree", "add", "--detach", worktree, ref], { cwd: ROOT, stdio: "inherit" });
+      if (added.status !== 0) throw new Error(`worktree ${ref} failed`);
+      spawnSync("pnpm", ["install", "--frozen-lockfile", "--prefer-offline"], {
+        cwd: worktree,
+        env: { ...process.env, CI: "1" },
+        stdio: ["ignore", "inherit", "inherit"],
+      });
+      if (!existsSync(join(worktree, "node_modules/.bin/next"))) {
+        throw new Error(`dependencies ${slot} failed`);
+      }
     }
-  };
-  walk(join(dest, "static"));
-  // next start serves public/ live from the repo, so the per-build worker
-  // script must be snapshotted with its build and swapped alongside .next.
-  const swPath = join(ROOT, "public/sw.js");
-  if (existsSync(swPath)) writeFileSync(join(dest, "harness-sw.js"), readFileSync(swPath));
-  const info = { slot, sha: SHAS[slot], buildId: readFileSync(join(dest, "BUILD_ID"), "utf8").trim(), staticFiles: files };
-  writeFileSync(join(dest, "harness-info.json"), JSON.stringify(info));
-  return info;
+    // A previous suite leaves .next as a symlink into a slot; building through
+    // it would silently overwrite that slot and alias both builds to one dir.
+    if (existsSync(NEXT_DIR) && lstatSync(NEXT_DIR).isSymbolicLink()) rmSync(NEXT_DIR);
+    const res = spawnSync("pnpm", ["build"], {
+      cwd,
+      env: { ...process.env, GITHUB_SHA: SHAS[slot] },
+      stdio: ["ignore", "inherit", "inherit"],
+    });
+    if (res.status !== 0) throw new Error(`build ${slot} failed`);
+    const dest = join(HDIR, `build-${slot}`);
+    rmSync(dest, { recursive: true, force: true });
+    mkdirSync(HDIR, { recursive: true });
+    renameSync(join(cwd, ".next"), dest);
+    const files = [];
+    const walk = (dir) => {
+      for (const e of readdirSync(dir)) {
+        const p = join(dir, e);
+        if (statSync(p).isDirectory()) walk(p);
+        else files.push("/_next/static/" + relative(join(dest, "static"), p));
+      }
+    };
+    walk(join(dest, "static"));
+    // next start serves public/ live from the repo, so the per-build worker
+    // script must be snapshotted with its build and swapped alongside .next.
+    const swPath = join(cwd, "public/sw.js");
+    if (existsSync(swPath)) writeFileSync(join(dest, "harness-sw.js"), readFileSync(swPath));
+    const info = { slot, sha: SHAS[slot], buildId: readFileSync(join(dest, "BUILD_ID"), "utf8").trim(), staticFiles: files };
+    writeFileSync(join(dest, "harness-info.json"), JSON.stringify(info));
+    return info;
+  } finally {
+    if (worktree) {
+      spawnSync("git", ["worktree", "remove", "--force", worktree], { cwd: ROOT, stdio: "ignore" });
+      rmSync(worktree, { recursive: true, force: true });
+      spawnSync("git", ["worktree", "prune"], { cwd: ROOT, stdio: "ignore" });
+    }
+    if (readdirSync(join(ROOT, "node_modules")).length !== rootModules) {
+      throw new Error("root node_modules changed during build");
+    }
+  }
 }
 
 function loadInfo(slot) {
@@ -534,6 +564,168 @@ async function suite() {
     app = await launchApp(opts);
     return app;
   };
+
+  if (wants("units-cache")) {
+    const { page } = await relaunch({ fresh: true });
+    await page.goto(ORIGIN + "/", { waitUntil: "load" });
+    await login(page, creds);
+    const me = await page.evaluate(() => fetch("/api/me").then((r) => r.json()));
+    const created = await page.evaluate(async ({ name, ownerId }) => {
+      const group = await fetch("/api/groups", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name, currency: "USD" }),
+      }).then((r) => r.json());
+      await fetch(`/api/groups/${group.id}/expenses`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          title: "Cache upgrade money expense", amountCents: 100, currency: "USD",
+          date: new Date().toISOString().slice(0, 10), payerId: ownerId, notes: "",
+          splitMethod: "equal", participants: [{ userId: ownerId }],
+        }),
+      });
+      return { ...group, name };
+    }, { name: `Cache upgrade ${Date.now()}`, ownerId: me.user.id });
+    const group = created;
+    const groupUrl = `${ORIGIN}/groups/${group.id}`;
+    await page.goto(groupUrl, { waitUntil: "load" });
+    await page.waitForFunction(() => Boolean(navigator.serviceWorker?.controller), null, { timeout: 20000 }).catch(() => {});
+    if (!(await page.evaluate(() => Boolean(navigator.serviceWorker?.controller)))) {
+      await page.reload({ waitUntil: "load" });
+      await page.waitForFunction(() => Boolean(navigator.serviceWorker?.controller), null, { timeout: 20000 }).catch(() => {});
+    }
+    const draftKey = `splitwisest.draft.${me.user.id}.expense`;
+    try {
+      await page.getByRole("button", { name: "Add expense", exact: true }).filter({ visible: true }).first().click({ timeout: 30000 });
+      await page.getByRole("dialog", { name: "Add expense" }).waitFor({ state: "visible", timeout: 30000 });
+      await page.locator("#expense-title").waitFor({ state: "visible", timeout: 10000 });
+    } catch (error) {
+      throw new Error(`units-cache draft: add-expense sheet did not open: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    await page.locator("#expense-title").fill("Cache draft survives");
+    await page.locator("#expense-amount").fill("1.23");
+    await page.waitForFunction((key) => Boolean(localStorage.getItem(key)), draftKey, { timeout: 10000 });
+    const draftValue = await page.evaluate((key) => localStorage.getItem(key), draftKey);
+    await page.getByRole("dialog").getByRole("button", { name: "Close" }).click();
+    await page.evaluate(({ key, value }) => localStorage.setItem(key, value), { key: draftKey, value: draftValue });
+    await page.goto(`${ORIGIN}/groups`, { waitUntil: "load" });
+    await sleep(1200);
+    const before = await page.evaluate(({ groupId, draftKey }) => {
+      const raw = localStorage.getItem("splitwisest.read-cache.v1");
+      const parsed = raw ? JSON.parse(raw) : null;
+      const entry = parsed?.entries?.find(([path]) => String(path).startsWith(`/api/groups/${groupId}`));
+      return {
+        hasEntry: Boolean(entry),
+        detailHasUnitBalances: Boolean(entry && Object.prototype.hasOwnProperty.call(entry[1], "unitBalances")),
+        controlled: Boolean(navigator.serviceWorker?.controller),
+        draftKept: Boolean(localStorage.getItem(draftKey)),
+      };
+    }, { groupId: group.id, draftKey });
+    log({ scenario: "units-cache-seed", userId: me.user.id, groupId: group.id, groupName: group.name });
+    record("units-cache-a", before.hasEntry && !before.detailHasUnitBalances && before.controlled && before.draftKept, {
+      groupId: group.id, ...before,
+    });
+    const oldCache = await page.evaluate(() => localStorage.getItem("splitwisest.read-cache.v1"));
+    const restoreCache = async (target, value) => target.evaluate(({ cache, draftKey, draftValue }) => {
+      localStorage.setItem("splitwisest.read-cache.v1", cache);
+      localStorage.setItem(draftKey, draftValue);
+    }, { cache: value, draftKey, draftValue });
+    const restoredLacksUnitBalances = async (target) => target.evaluate((groupId) => {
+      const raw = localStorage.getItem("splitwisest.read-cache.v1");
+      const parsed = raw ? JSON.parse(raw) : null;
+      const entry = parsed?.entries?.find(([path]) => String(path).startsWith(`/api/groups/${groupId}`));
+      return Boolean(entry && !Object.prototype.hasOwnProperty.call(entry[1], "unitBalances"));
+    }, group.id);
+    const closeDraftSheet = async (target) => {
+      const close = target.getByRole("dialog").getByRole("button", { name: "Close" });
+      if (await close.count()) await close.first().click();
+    };
+    await swapTo("B");
+    const check = async (target, response, restoredLackedUnitBalances) => {
+      const data = response ? await response.json().catch(() => null) : null;
+      await sleep(1200);
+      let body = "";
+      let draftKept = false;
+      let controlled = false;
+      let signedIn = false;
+      let urlOk = false;
+      try {
+        await target.waitForURL((url) => url.pathname === `/groups/${group.id}`, { timeout: 10000 }).catch(() => {});
+        body = await target.locator("body").innerText();
+        draftKept = await target.evaluate((key) => Boolean(localStorage.getItem(key)), draftKey);
+        controlled = await target.evaluate(() => Boolean(navigator.serviceWorker?.controller));
+        signedIn = !target.url().includes("/login");
+        urlOk = new URL(target.url()).pathname === `/groups/${group.id}`;
+      } catch {}
+      const fields = {
+        groupId: group.id,
+        requested: Boolean(response),
+        unitBalances: Array.isArray(data?.unitBalances),
+        errorScreen: body.includes("This page couldn’t load"),
+        rendered: urlOk && await target.getByRole("tab", { name: "Balances", exact: true }).count() > 0,
+        urlOk,
+        signedIn,
+        draftKept,
+        controlled,
+        restoredLackedUnitBalances,
+      };
+      return { ...fields, pass: fields.requested && fields.unitBalances && !fields.errorScreen
+        && fields.rendered && fields.urlOk && fields.signedIn && fields.draftKept && fields.controlled
+        && fields.restoredLackedUnitBalances };
+    };
+    const shot = (target, name) => target.screenshot({ path: join(HDIR, `units-cache-${name}-${BUILD_IDS.B.slice(0, 7)}.png`) }).catch(() => {});
+    const waitGroupResponse = (target) =>
+      target.waitForResponse((r) => r.request().method() === "GET"
+        && new URL(r.url()).pathname === `/api/groups/${group.id}`, { timeout: 20000 })
+        .catch(() => null);
+
+    await page.evaluate(({ key, value }) => localStorage.setItem(key, value), { key: draftKey, value: draftValue });
+    const tapRestored = await restoredLacksUnitBalances(page);
+    await page.goto(`${ORIGIN}/groups`, { waitUntil: "load" });
+    await closeDraftSheet(page);
+    await page.evaluate(({ key, value }) => localStorage.setItem(key, value), { key: draftKey, value: draftValue });
+    const tapResponse = waitGroupResponse(page);
+    await page.locator(`a[href="/groups/${group.id}"]`).first().evaluate((element) => element.click());
+    await page.waitForURL((url) => url.pathname === `/groups/${group.id}`, { timeout: 10000 }).catch(() => {});
+    const tap = await check(page, await tapResponse, tapRestored);
+    await shot(page, "2a");
+    record("units-cache-2a", tap.pass, { ...tap, path: "tap-from-list" });
+
+    await restoreCache(page, oldCache);
+    const reloadRestored = await restoredLacksUnitBalances(page);
+    const reloadResponse = waitGroupResponse(page);
+    await page.reload({ waitUntil: "load" });
+    const reload = await check(page, await reloadResponse, reloadRestored);
+    await shot(page, "2b");
+    await closeDraftSheet(page);
+    record("units-cache-2b", reload.pass, { ...reload, path: "reload" });
+
+    await app.ctx.close();
+    app = await launchApp();
+    await app.page.goto(ORIGIN + "/", { waitUntil: "load" });
+    await restoreCache(app.page, oldCache);
+    const coldRestored = await restoredLacksUnitBalances(app.page);
+    const coldResponse = waitGroupResponse(app.page);
+    await app.page.goto(groupUrl, { waitUntil: "load" });
+    await app.page.waitForFunction(() => Boolean(navigator.serviceWorker?.controller), null, { timeout: 20000 }).catch(() => {});
+    const cold = await check(app.page, await coldResponse, coldRestored);
+    await shot(app.page, "2c");
+    await closeDraftSheet(app.page);
+    record("units-cache-2c", cold.pass, { ...cold, path: "cold-launch" });
+
+    await restoreCache(app.page, oldCache);
+    const updateRestored = await restoredLacksUnitBalances(app.page);
+    const updateResponse = waitGroupResponse(app.page);
+    await app.page.evaluate(() => navigator.serviceWorker?.getRegistration().then((r) => r?.update()));
+    await app.page.evaluate(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+      window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
+    });
+    await app.page.reload({ waitUntil: "load" });
+    const update = await check(app.page, await updateResponse, updateRestored);
+    await shot(app.page, "2d");
+    await closeDraftSheet(app.page);
+    record("units-cache-2d", update.pass, { ...update, path: "worker-update-resume-reload" });
+  }
 
   // S1: first install — launch at start_url, log in, worker installs, no reload.
   if (wants("install-fresh")) {

@@ -34,7 +34,10 @@ export const GET = privateHandler(async (req: NextRequest, { params }: Ctx) => {
       aggregate.directed.filter((row) => row.unitId === unit.id),
       group.autoReconcileUnits
     );
-    const displayName = new Map(members.map((member) => [member.id, member.displayName]));
+    const displayName = new Map([
+      ...members.map((member) => [member.id, member.displayName] as const),
+      ...aggregate.people.map((person) => [person.userId, person.displayName] as const),
+    ]);
     return {
       unitId: unit.id,
       name: unit.name,
@@ -45,6 +48,9 @@ export const GET = privateHandler(async (req: NextRequest, { params }: Ctx) => {
       obligations: result.obligations,
     };
   });
+  const unitPeople = [...new Map(unitBalances.flatMap((unit) => unit.nets)
+    .map((row) => [row.userId, row.displayName] as const)).entries()]
+    .map(([userId, displayName]) => ({ userId, displayName }));
 
   return privateJson(req, {
     group: {
@@ -61,6 +67,7 @@ export const GET = privateHandler(async (req: NextRequest, { params }: Ctx) => {
     suggestions,
     units: aggregate.units,
     unitBalances,
+    unitPeople,
   });
 });
 

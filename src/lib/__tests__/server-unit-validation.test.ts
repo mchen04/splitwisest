@@ -3,7 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const { sql } = vi.hoisted(() => ({ sql: vi.fn() }));
 vi.mock("../db", () => ({ sql }));
 
-import { ExpenseBody, validateExpense } from "../expenses";
+import { ExpenseBody, validateExpenseShares } from "../expenses";
+import { requireGroupUnit } from "../group-units";
 import { settlementFields } from "../settlements";
 
 const base = {
@@ -25,20 +26,20 @@ beforeEach(() => {
 describe("unit expense validation", () => {
   it("splits hundredths exactly for a unit", async () => {
     sql.mockResolvedValueOnce([{ id: "9", name: "drinks" }]);
-    sql.mockResolvedValueOnce([1, 2, 3].map((id) => ({ user_id: String(id), category_allowed: true })));
-    expect(await validateExpense(5, 1, base)).toEqual(new Map([[1, 34], [2, 33], [3, 33]]));
+    await requireGroupUnit(5, 9);
+    expect(validateExpenseShares(new Set([1, 2, 3]), base)).toEqual(new Map([[1, 34], [2, 33], [3, 33]]));
   });
 
   it("uses the unit scale even when the group currency is zero-decimal", async () => {
     sql.mockResolvedValueOnce([{ id: "9", name: "drinks" }]);
-    sql.mockResolvedValueOnce([1, 2, 3].map((id) => ({ user_id: String(id), category_allowed: true })));
-    expect(await validateExpense(5, 1, { ...base, currency: "JPY" }))
+    await requireGroupUnit(5, 9);
+    expect(validateExpenseShares(new Set([1, 2, 3]), { ...base, currency: "JPY" }))
       .toEqual(new Map([[1, 34], [2, 33], [3, 33]]));
   });
 
   it("rejects a unit that does not belong to the group", async () => {
     sql.mockResolvedValueOnce([]);
-    await expect(validateExpense(5, 1, base)).rejects.toThrow("Unknown unit for this group");
+    await expect(requireGroupUnit(5, 9)).rejects.toThrow("Unknown unit for this group");
     expect(sql).toHaveBeenCalledTimes(1);
   });
 

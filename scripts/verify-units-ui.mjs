@@ -83,6 +83,12 @@ const context = await browser.newContext({
   serviceWorkers: "block",
 });
 await context.addInitScript(() => Object.defineProperty(navigator, "standalone", { get: () => true }));
+await context.addInitScript(() => {
+  if (sessionStorage.getItem("units-ui-large-text") !== "1") return;
+  const apply = () => { document.documentElement.style.fontSize = "150%"; };
+  if (document.documentElement) apply();
+  else document.addEventListener("DOMContentLoaded", apply, { once: true });
+});
 const token = owner.cookie.split("=").slice(1).join("=");
 await context.addCookies([{ name: "sw_session", value: token, domain: new URL(origin).hostname, path: "/" }]);
 const page = await context.newPage();
@@ -174,7 +180,7 @@ async function runFlow(width, height, label, { largeText = false } = {}) {
   await dialog.getByLabel("Amount", { exact: true }).fill("3");
   await dialog.getByLabel("Description", { exact: true }).fill(`Unit UI ${label} ${suffix}`);
   await dialog.getByLabel("Date", { exact: true }).fill(localToday());
-  if (largeText) await page.evaluate(() => { document.documentElement.style.fontSize = "150%"; });
+  if (largeText) await page.evaluate(() => { sessionStorage.setItem("units-ui-large-text", "1"); document.documentElement.style.fontSize = "150%"; });
   await footerReachable(dialog);
   await dialog.getByLabel("Unit", { exact: true }).scrollIntoViewIfNeeded();
   await page.waitForTimeout(250);
@@ -252,6 +258,46 @@ async function runFlow(width, height, label, { largeText = false } = {}) {
   results.push({ name: `${label}-flow`, groupId, unitName, passed: true });
 }
 
+async function runFormerFlow() {
+  const leaver = await signup("leaver");
+  const group = await createGroup("former");
+  await api("/api/groups/join", leaver.cookie, { code: (await api(`/api/groups/${group.id}`, owner.cookie)).group.inviteCode });
+  const unitName = `rounds ${suffix}`;
+  const unit = await api(`/api/groups/${group.id}/units`, owner.cookie, { name: unitName });
+  const spend = (cookie, payerId, people) => api(`/api/groups/${group.id}/expenses`, cookie, {
+    title: `Former ${payerId}`, amountCents: 1000, currency: "USD", unitId: unit.id, date: localToday(),
+    payerId, notes: "", splitMethod: "equal", participants: people.map((userId) => ({ userId })),
+  });
+  await spend(owner.cookie, owner.id, [owner.id, leaver.id]);
+  await spend(leaver.cookie, leaver.id, [leaver.id, friend.id]);
+  await api(`/api/groups/${group.id}/members/${leaver.id}`, owner.cookie, undefined, "DELETE");
+  await api(`/api/groups/${group.id}`, owner.cookie, { autoReconcileUnits: false }, "PATCH");
+  await api(`/api/groups/${group.id}/settlements`, friend.cookie, {
+    payerId: friend.id, recipientId: leaver.id, amountCents: 500, currency: "USD", unitId: unit.id,
+    date: localToday(), note: "",
+  });
+  await api(`/api/groups/${group.id}`, owner.cookie, { autoReconcileUnits: true }, "PATCH");
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await navigate(`${origin}/groups/${group.id}`);
+  await page.evaluate(() => { sessionStorage.setItem("units-ui-large-text", "1"); document.documentElement.style.fontSize = "150%"; });
+  await page.locator('[data-group-tab="balances"]:visible').click().catch(() => {});
+  const heading = page.getByRole("heading", { name: new RegExp(`^${unitName}\\s+simplified$`) });
+  await heading.waitFor();
+  const card = heading.locator("..").locator("..");
+  await card.scrollIntoViewIfNeeded();
+  const cardText = await card.innerText();
+  assert(cardText.includes("still open with someone who left"), "Unit card names the open former-member amount");
+  assert(!cardText.includes(`Nobody owes any ${unitName}`), "Unit card does not say nobody owes");
+  const body = await page.locator("main").innerText();
+  assert(body.includes("unit debt"), "Member list shows the owner's open unit amount");
+  assert(body.includes("Money settled"), "Header says only money is settled");
+  assert(!body.includes("Nobody owes anything in this group"), "Money card does not say nobody owes anything");
+  const titleWidth = await page.locator('[aria-label="Current group"] button[aria-label^="Switch group"] span.truncate').first().evaluate((el) => el.getBoundingClientRect().width);
+  assert(titleWidth >= 80, `Group title stays readable beside the balance (${Math.round(titleWidth)}px)`);
+  await layout("1280-former-open", true);
+  results.push({ name: "former-open", groupId: group.id, unitName, passed: true });
+}
+
 try {
   const only = process.env.UNITS_UI_ONLY;
   const flows = [
@@ -267,6 +313,10 @@ try {
       await runFlow(width, height, label, options);
       ran.push(label);
     }
+  }
+  if (!only || only === "former") {
+    await runFormerFlow();
+    ran.push("former");
   }
   assert(ran.length > 0, "No flow selected");
   assert.deepEqual(errors, [], "No browser runtime errors");

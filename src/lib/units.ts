@@ -101,6 +101,7 @@ export interface UnitAggregateData {
   units: { id: number; name: string }[];
   totals: UnitTotalsRow[];
   directed: UnitDirectedRow[];
+  people: { userId: number; displayName: string }[];
 }
 
 export interface UnitViewerRow {
@@ -303,6 +304,10 @@ export function parseUnitAggregates(value: unknown): UnitAggregateData {
         creditorId: Number(row.creditorId),
         amountCents: Number(row.amountCents),
       };
+    }),
+    people: (Array.isArray(raw.people) ? raw.people : []).map((person) => {
+      const row = person as Record<string, unknown>;
+      return { userId: Number(row.userId), displayName: String(row.displayName) };
     }),
   };
 }

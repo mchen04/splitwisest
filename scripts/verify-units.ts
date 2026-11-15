@@ -149,7 +149,8 @@ async function queryDelta(fn: () => Promise<unknown>) {
   const before = await xact();
   await fn();
   const after = await xact();
-  return after - before - 1;
+  const delta = after - before - 1;
+  return delta;
 }
 
 async function moneySnapshot(group: Group) {
@@ -236,12 +237,22 @@ async function main() {
 
   const duplicate = await createUnit(g1, owner, "  DRINK TICKETS  ");
   check("duplicate names converge in one group", duplicate.id, drinks.id);
+  const addedBefore = Number((await sql`SELECT count(*) FROM activity WHERE group_id = ${g1.id} AND type = 'group_unit.added'`)[0].count);
+  await createUnit(g1, owner, "drink tickets");
+  const addedAfter = Number((await sql`SELECT count(*) FROM activity WHERE group_id = ${g1.id} AND type = 'group_unit.added'`)[0].count);
+  check("re-adding a unit does not log an add", addedAfter, addedBefore);
   const otherGroupUnit = await createUnit(g2, owner, "drinks");
   check("the same label in another group is a different unit", otherGroupUnit.id !== drinks.id, true);
 
   const concurrent = await Promise.all(Array.from({ length: 6 }, () => createUnit(g1, owner, "points")));
   check("concurrent duplicate creates converge", new Set(concurrent.map((u: { id: number }) => u.id)).size, 1);
   check("concurrent duplicate creates leave one row", Number((await sql`SELECT count(*) FROM group_units WHERE group_id = ${g1.id} AND lower(btrim(name)) = 'points'`)[0].count), 1);
+  const concurrentRace = await Promise.all(Array.from({ length: 8 }, () => createUnit(g1, owner, "race-unit")));
+  check("concurrent identical creates return the same row", new Set(concurrentRace.map((u: { id: number }) => u.id)).size, 1);
+  check("concurrent identical creates log one add", Number((await sql`
+    SELECT count(*) FROM activity
+    WHERE group_id = ${g1.id} AND type = 'group_unit.added'
+      AND summary LIKE '%added the unit race-unit'`)[0].count), 1);
 
   const splitCases: { method: string; amountCents: number; extra: Body; expected: [number, number][] }[] = [
     { method: "equal", amountCents: 100, extra: {}, expected: byId([[owner.id, 34], [b.id, 33], [c.id, 33]]) },
@@ -406,6 +417,35 @@ async function main() {
   check("reversed debt clears with one repayment", unit.obligations, []);
   check("reversed debt leaves both members settled", unit.nets.every((row: { netCents: number }) => row.netCents === 0), true);
 
+  const pairGroup = await createGroup(owner, "USD", "Pair");
+  await join(pairGroup, b, owner);
+  const pairUnit = await createUnit(pairGroup, owner, "pair");
+  await api(`/api/groups/${pairGroup.id}`, owner, { autoReconcileUnits: false }, "PATCH");
+  const pairExpense = await api(`/api/groups/${pairGroup.id}/expenses`, b, expenseBody(pairGroup, pairUnit.id, {
+    title: "Pair A", amountCents: 100, payerId: b.id,
+    participants: [owner, b].map((u) => ({ userId: u.id })),
+  }));
+  await api(`/api/groups/${pairGroup.id}/settlements`, owner, {
+    payerId: owner.id, recipientId: b.id, amountCents: 50, currency: pairGroup.currency,
+    unitId: pairUnit.id, date: today, note: "overpay",
+  });
+  const pairExpenseDetail = await api(`/api/expenses/${pairExpense.id}`, owner);
+  await api(`/api/expenses/${pairExpense.id}?expectedUpdatedAt=${encodeURIComponent(pairExpenseDetail.expense.updatedAt)}`, owner, undefined, "DELETE");
+  await api(`/api/groups/${pairGroup.id}/expenses`, owner, expenseBody(pairGroup, pairUnit.id, {
+    title: "Pair B", amountCents: 100, payerId: owner.id,
+    participants: [owner, b].map((u) => ({ userId: u.id })),
+  }));
+  detail = await api(`/api/groups/${pairGroup.id}`, owner);
+  unit = detail.unitBalances.find((row: { name: string }) => row.name === "pair");
+  check("normal debt plus overpayment shows one combined obligation", unit.obligations, [{ from: b.id, to: owner.id, amountCents: 100 }]);
+  await api(`/api/groups/${pairGroup.id}/settlements`, b, {
+    payerId: b.id, recipientId: owner.id, amountCents: 100, currency: pairGroup.currency,
+    unitId: pairUnit.id, date: today, note: "full repayment",
+  });
+  detail = await api(`/api/groups/${pairGroup.id}`, owner);
+  unit = detail.unitBalances.find((row: { name: string }) => row.name === "pair");
+  check("full combined repayment clears the pair", unit.obligations, []);
+
   const raceGroup = await createGroup(owner, "USD", "Race");
   await join(raceGroup, b, owner);
   const raceUnit = await createUnit(raceGroup, owner, "race drinks");
@@ -448,9 +488,134 @@ async function main() {
     title: "Points B", amountCents: 200, payerId: b.id,
     participants: [owner, b].map((u) => ({ userId: u.id })),
   }));
-  const blockedOnRemoval = await request(`/api/groups/${removalOnGroup.id}/members/${b.id}`, owner, undefined, "DELETE");
-  check("ON member removal is blocked by pairwise unit debts", blockedOnRemoval.status, 400);
-  check("ON member removal names the pairwise unit", blockedOnRemoval.text.includes("points"), true);
+  const allowedOnRemoval = await request(`/api/groups/${removalOnGroup.id}/members/${b.id}`, owner, undefined, "DELETE");
+  check("ON member removal allows net-zero pairwise debts", allowedOnRemoval.status, 200);
+
+  const formerGroup = await createGroup(owner, "USD", "Former");
+  await join(formerGroup, b, owner);
+  await join(formerGroup, c, owner);
+  const formerUnit = await createUnit(formerGroup, owner, "former drinks");
+  await api(`/api/groups/${formerGroup.id}/expenses`, owner, expenseBody(formerGroup, formerUnit.id, {
+    title: "Former A", amountCents: 1000, payerId: owner.id,
+    participants: [owner, b].map((u) => ({ userId: u.id })),
+  }));
+  await api(`/api/groups/${formerGroup.id}/expenses`, b, expenseBody(formerGroup, formerUnit.id, {
+    title: "Former B", amountCents: 1000, payerId: b.id,
+    participants: [b, c].map((u) => ({ userId: u.id })),
+  }));
+  const formerRemoval = await request(`/api/groups/${formerGroup.id}/members/${b.id}`, owner, undefined, "DELETE");
+  check("net-zero former member can leave", formerRemoval.status, 200);
+  const formerOff = await request(`/api/groups/${formerGroup.id}`, owner, { autoReconcileUnits: false }, "PATCH");
+  check("turning off succeeds with former-member unit debt", formerOff.status, 200);
+  detail = await api(`/api/groups/${formerGroup.id}`, owner);
+  unit = detail.unitBalances.find((row: { name: string }) => row.name === "former drinks");
+  check("former-member rows show after turning off", byTriple(unit.obligations.map((row: { from: number; to: number; amountCents: number }) => [row.from, row.to, row.amountCents])), byTriple([
+    [b.id, owner.id, 500], [c.id, b.id, 500],
+  ]));
+  const formerRepay = await request(`/api/groups/${formerGroup.id}/settlements`, c, {
+    payerId: c.id, recipientId: b.id, amountCents: 500, currency: formerGroup.currency,
+    unitId: formerUnit.id, date: today, note: "former repay",
+  });
+  check("current member can repay a former member", formerRepay.status, 200);
+  detail = await api(`/api/groups/${formerGroup.id}`, owner);
+  unit = detail.unitBalances.find((row: { name: string }) => row.name === "former drinks");
+  check("former-member repayment clears that row", byTriple(unit.obligations.map((row: { from: number; to: number; amountCents: number }) => [row.from, row.to, row.amountCents])), byTriple([[b.id, owner.id, 500]]));
+  const formerOn = await request(`/api/groups/${formerGroup.id}`, owner, { autoReconcileUnits: true }, "PATCH");
+  check("turning cancelling back on succeeds after a former-member repayment", formerOn.status, 200);
+  detail = await api(`/api/groups/${formerGroup.id}`, owner);
+  unit = detail.unitBalances.find((row: { name: string }) => row.name === "former drinks");
+  check("open amount owed by a former member stays in the owner's net", unit.nets.find((row: { userId: number }) => row.userId === owner.id)?.netCents, 500);
+  const formerOffAgain = await request(`/api/groups/${formerGroup.id}`, owner, { autoReconcileUnits: false }, "PATCH");
+  check("turning cancelling off again succeeds", formerOffAgain.status, 200);
+  const ownerFormerRepay = await request(`/api/groups/${formerGroup.id}/settlements`, owner, {
+    payerId: b.id, recipientId: owner.id, amountCents: 500, currency: formerGroup.currency,
+    unitId: formerUnit.id, date: today, note: "former repay 2",
+  });
+  check("recipient can record the former member's repayment", ownerFormerRepay.status, 200);
+  detail = await api(`/api/groups/${formerGroup.id}`, owner);
+  unit = detail.unitBalances.find((row: { name: string }) => row.name === "former drinks");
+  check("former-member rows clear", unit.obligations, []);
+  const nonSide = await request(`/api/groups/${formerGroup.id}/settlements`, c, {
+    payerId: b.id, recipientId: owner.id, amountCents: 100, currency: formerGroup.currency,
+    unitId: formerUnit.id, date: today, note: "non-side",
+  });
+  check("non-side member cannot record a former-member repayment", nonSide.status, 403);
+  const stranger = await signup("stranger");
+  const strangerRepay = await request(`/api/groups/${formerGroup.id}/settlements`, stranger, {
+    payerId: b.id, recipientId: owner.id, amountCents: 100, currency: formerGroup.currency,
+    unitId: formerUnit.id, date: today, note: "stranger",
+  });
+  check("stranger cannot record a former-member repayment", strangerRepay.status, 403);
+  const neverMember = await request(`/api/groups/${formerGroup.id}/settlements`, owner, {
+    payerId: stranger.id, recipientId: owner.id, amountCents: 100, currency: formerGroup.currency,
+    unitId: formerUnit.id, date: today, note: "never member",
+  });
+  check("a never-member cannot be a unit repayment side", neverMember.status, 400);
+  const moneyFormer = await request(`/api/groups/${formerGroup.id}/settlements`, owner, {
+    payerId: b.id, recipientId: owner.id, amountCents: 100, currency: formerGroup.currency,
+    date: today, note: "money former",
+  });
+  check("money with a former member is refused", moneyFormer.status, 400);
+
+  const editGroup = await createGroup(owner, "USD", "Edit former");
+  await join(editGroup, b, owner);
+  await join(editGroup, c, owner);
+  const editUnit = await createUnit(editGroup, owner, "edit drinks");
+  await api(`/api/groups/${editGroup.id}/expenses`, owner, expenseBody(editGroup, editUnit.id, {
+    title: "Edit former", amountCents: 1000, payerId: owner.id,
+    participants: [owner, b].map((u) => ({ userId: u.id })),
+  }));
+  await api(`/api/groups/${editGroup.id}/expenses`, b, expenseBody(editGroup, editUnit.id, {
+    title: "Edit former back", amountCents: 1000, payerId: b.id,
+    participants: [owner, b].map((u) => ({ userId: u.id })),
+  }));
+  await request(`/api/groups/${editGroup.id}/members/${b.id}`, owner, undefined, "DELETE");
+  await request(`/api/groups/${editGroup.id}`, owner, { autoReconcileUnits: false }, "PATCH");
+  const recorded = await api(`/api/groups/${editGroup.id}/settlements`, owner, {
+    payerId: b.id, recipientId: owner.id, amountCents: 200, currency: editGroup.currency,
+    unitId: editUnit.id, date: today, note: "editable",
+  });
+  const above = await request(`/api/settlements/${recorded.id}`, owner, {
+    amountCents: 600, currency: editGroup.currency, unitId: editUnit.id, date: today,
+    note: "", expectedUpdatedAt: recorded.updatedAt,
+  }, "PATCH");
+  check("editing a former-member repayment above the obligation is refused", above.status, 400);
+  const within = await request(`/api/settlements/${recorded.id}`, owner, {
+    amountCents: 400, currency: editGroup.currency, unitId: editUnit.id, date: today,
+    note: "within", expectedUpdatedAt: recorded.updatedAt,
+  }, "PATCH");
+  check("editing a former-member repayment within the obligation succeeds", within.status, 200);
+  const removedFormer = await request(`/api/settlements/${recorded.id}?expectedUpdatedAt=${encodeURIComponent(within.data.updatedAt)}`, owner, undefined, "DELETE");
+  check("deleting a former-member repayment succeeds", removedFormer.status, 200);
+
+  const moneyEditGroup = await createGroup(owner, "USD", "Money edit");
+  await join(moneyEditGroup, b, owner);
+  const moneyEditUnit = await createUnit(moneyEditGroup, owner, "money edit drinks");
+  await api(`/api/groups/${moneyEditGroup.id}/expenses`, owner, expenseBody(moneyEditGroup, moneyEditUnit.id, {
+    title: "Money edit unit", amountCents: 1000, payerId: owner.id,
+    participants: [owner, b].map((u) => ({ userId: u.id })),
+  }));
+  await api(`/api/groups/${moneyEditGroup.id}/expenses`, b, expenseBody(moneyEditGroup, moneyEditUnit.id, {
+    title: "Money edit unit back", amountCents: 1000, payerId: b.id,
+    participants: [owner, b].map((u) => ({ userId: u.id })),
+  }));
+  await api(`/api/groups/${moneyEditGroup.id}/expenses`, owner, {
+    title: "Money edit money", amountCents: 1000, currency: "USD", date: today, payerId: owner.id,
+    notes: "", splitMethod: "equal", participants: [owner, b].map((u) => ({ userId: u.id })),
+  });
+  const moneySettlement = await api(`/api/groups/${moneyEditGroup.id}/settlements`, b, {
+    payerId: b.id, recipientId: owner.id, amountCents: 500, currency: "USD", date: today, note: "money",
+  });
+  await request(`/api/groups/${moneyEditGroup.id}/members/${b.id}`, owner, undefined, "DELETE");
+  await request(`/api/groups/${moneyEditGroup.id}`, owner, { autoReconcileUnits: false }, "PATCH");
+  const beforeMoneyEdit = await api(`/api/groups/${moneyEditGroup.id}`, owner);
+  const moneyToUnit = await request(`/api/settlements/${moneySettlement.id}`, owner, {
+    amountCents: 200, currency: "USD", unitId: moneyEditUnit.id, date: today,
+    note: "", expectedUpdatedAt: moneySettlement.updatedAt,
+  }, "PATCH");
+  check("money-to-unit edit with a former member is refused", moneyToUnit.status, 400);
+  const afterMoneyEdit = await api(`/api/groups/${moneyEditGroup.id}`, owner);
+  check("refused money-to-unit edit leaves balances unchanged", afterMoneyEdit.balances, beforeMoneyEdit.balances);
 
   const friendBalancesAfter = await api("/api/friends", owner);
   const friendB = friendBalancesAfter.friends.find((row: { id: number }) => row.id === b.id);

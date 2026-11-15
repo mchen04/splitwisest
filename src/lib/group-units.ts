@@ -13,7 +13,7 @@ export async function createGroupUnit(groupId: number, userId: number, rawName: 
       INSERT INTO group_units (group_id, name, created_by)
       VALUES (${groupId}, ${name}, ${userId})
       ON CONFLICT (group_id, lower(btrim(name))) DO UPDATE SET name = group_units.name
-      RETURNING id, name
+      RETURNING id, name, (xmax = 0) AS inserted
     ),
     a AS (
       INSERT INTO activity (group_id, actor_id, type, summary, data)
@@ -21,6 +21,7 @@ export async function createGroupUnit(groupId: number, userId: number, rawName: 
         (SELECT display_name FROM users WHERE id = ${userId}) || ' added the unit ' || ins.name,
         jsonb_build_object('actionText', 'added the unit ' || ins.name)
       FROM ins
+      WHERE ins.inserted
       RETURNING 1
     )
     SELECT id, name FROM ins`,

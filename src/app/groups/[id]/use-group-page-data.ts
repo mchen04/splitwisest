@@ -11,6 +11,7 @@ export interface GroupDetail {
   balances: { userId: number; displayName: string; netCents: number }[];
   suggestions: { from: number; to: number; amountCents: number }[];
   units: { id: number; name: string }[];
+  unitPeople: { userId: number; displayName: string }[];
   unitBalances: {
     unitId: number;
     name: string;

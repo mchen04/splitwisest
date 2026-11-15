@@ -4,7 +4,7 @@ const { sql } = vi.hoisted(() => ({ sql: vi.fn() }));
 
 vi.mock("../db", () => ({ sql }));
 
-import { validateExpense, validateExpenseActors } from "../expenses";
+import { validateExpenseActors, validateExpenseShares } from "../expenses";
 
 const input = {
   title: "Lunch",
@@ -68,19 +68,19 @@ describe("expense actor validation", () => {
   });
 
   it("preserves cent allocation", async () => {
-    expect(await validateExpense(5, 1, input)).toEqual(new Map([[1, 334], [2, 334], [3, 333]]));
+    expect(validateExpenseShares(new Set([1, 2, 3]), input)).toEqual(new Map([[1, 334], [2, 334], [3, 333]]));
   });
 
   it("rejects fractional yen", async () => {
-    await expect(validateExpense(5, 1, { ...input, currency: "JPY" })).rejects.toThrow();
+    expect(() => validateExpenseShares(new Set([1, 2, 3]), { ...input, currency: "JPY" })).toThrow();
   });
 
   it("rejects undeclared item participants", async () => {
-    await expect(validateExpense(5, 1, {
+    expect(() => validateExpenseShares(new Set([1, 2, 3]), {
       ...input,
       splitMethod: "itemized",
       participants: [{ userId: 1 }],
       items: [{ name: "Lunch", amountCents: 1001, participantIds: [2] }],
-    })).rejects.toThrow("Item participants must be expense participants");
+    })).toThrow("Item participants must be expense participants");
   });
 });
