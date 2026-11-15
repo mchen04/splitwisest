@@ -587,15 +587,15 @@ async function suite() {
     }, { name: `Cache upgrade ${Date.now()}`, ownerId: me.user.id });
     const group = created;
     const groupUrl = `${ORIGIN}/groups/${group.id}`;
-    await page.goto(`${groupUrl}?add=1`, { waitUntil: "load" });
+    await page.goto(groupUrl, { waitUntil: "load" });
     await page.waitForFunction(() => Boolean(navigator.serviceWorker?.controller), null, { timeout: 20000 }).catch(() => {});
     if (!(await page.evaluate(() => Boolean(navigator.serviceWorker?.controller)))) {
       await page.reload({ waitUntil: "load" });
       await page.waitForFunction(() => Boolean(navigator.serviceWorker?.controller), null, { timeout: 20000 }).catch(() => {});
     }
-    await sleep(1500);
     const draftKey = `splitwisest.draft.${me.user.id}.expense`;
     try {
+      await page.getByRole("button", { name: "Add expense", exact: true }).filter({ visible: true }).first().click({ timeout: 30000 });
       await page.getByRole("dialog", { name: "Add expense" }).waitFor({ state: "visible", timeout: 30000 });
       await page.locator("#expense-title").waitFor({ state: "visible", timeout: 10000 });
     } catch (error) {
