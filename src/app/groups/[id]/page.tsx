@@ -1324,10 +1324,10 @@ function GroupSwitcher({
         aria-label={`Switch group (current: ${currentName})`}
         className="flex w-full items-center gap-2 rounded-lg text-left text-[var(--group-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--group-color)]"
       >
-        {/* From sm up, name and metadata share one baseline. On a phone the
-            metadata would leave the name no width, so it drops below it. */}
-        <span className="flex min-w-0 flex-1 flex-col sm:flex-row sm:items-baseline sm:gap-1.5">
-          <span className="min-w-0 truncate text-title font-semibold tracking-tight">{currentName}</span>
+        {/* From sm up, name and metadata share one baseline while they fit. When
+            they don't, the metadata wraps below so the name keeps the row. */}
+        <span className="flex min-w-0 flex-1 flex-col sm:flex-row sm:flex-wrap sm:items-baseline sm:gap-x-1.5">
+          <span className="min-w-0 max-w-full truncate text-title font-semibold tracking-tight">{currentName}</span>
           <span className="shrink-0 text-meta font-medium text-[var(--group-muted)]">{memberCount} {memberCount === 1 ? "member" : "members"} · {currency}</span>
         </span>
         <span className="group-context-control shrink-0">
